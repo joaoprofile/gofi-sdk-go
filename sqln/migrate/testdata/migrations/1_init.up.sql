@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS migrate_test (id INTEGER NOT NULL);
