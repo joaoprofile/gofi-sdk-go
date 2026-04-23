@@ -1,37 +1,37 @@
 # gofi
 
-SDK modular para Go que fornece os blocos fundamentais para construção de microsserviços: banco de dados, cache, mensageria, HTTP, observabilidade, autenticação e utilitários de base.
+Modular SDK for Go that provides the fundamental building blocks for building microservices: database, cache, messaging, HTTP, observability, authentication, and core utilities.
 
-O projeto é organizado como um **monorepo multi-módulo**: cada sub-pasta é um módulo Go independente com seu próprio `go.mod`. O consumidor importa apenas o que precisa, sem arrastar dependências de outros domínios.
+The project is organized as a **multi-module monorepo**: each subfolder is an independent Go module with its own `go.mod`. Consumers import only what they need, without pulling in dependencies from other domains.
 
 ---
 
-## Arquitetura
+## Architecture
 
-### Visão geral
+### Overview
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │               github.com/joaoprofile/gofi               │
-│                   (orquestrador principal)               │
+│                   (main orchestrator)                   │
 │                                                         │
 │   gofi.New("service").                                  │
 │       AddDatabase().AddCache().AddMessaging().Build()   │
 └──────────────────────────┬──────────────────────────────┘
-                           │ importa
+                           │ imports
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
    ┌─────────┐       ┌──────────┐       ┌──────────┐
    │  base   │       │   obs    │       │   sqln   │
    └─────────┘       └──────────┘       └──────────┘
         ▲                  ▲                  ▲
-        │ importa          │                  │
+        │ imports          │                  │
    ┌─────────┐       ┌──────────┐       ┌──────────┐
    │   msq   │       │   netx   │       │   iam    │
    └─────────┘       └──────────┘       └──────────┘
 ```
 
-### Hierarquia de dependências entre módulos
+### Dependency hierarchy between modules
 
 ```
 gofi   → base, obs, sqln, msq, netx, iam
@@ -40,25 +40,26 @@ sqln   → base, obs
 msq    → base, obs
 netx   → base, obs
 iam    → base, obs
-base   → (sem dependências internas)
+base   → (no internal dependencies)
 ```
 
-`base` e `obs` são a fundação da pilha. Todos os outros módulos os importam, mas nunca há dependência circular.
+`base` and `obs` are the foundation of the stack. All other modules import them, but there is never a circular dependency.
 
 ---
 
-## Módulos
+## Modules
 
-### `gofi` — Orquestrador principal
+### `gofi` — Main orchestrator
+
 **Path:** `github.com/joaoprofile/gofi`
 
-Ponto de entrada do SDK. Expõe as interfaces `Builder` e `Service` e a função pública `New(serviceName)`. O `Builder` oferece dois padrões de uso:
+Entry point of the SDK. Exposes the `Builder` and `Service` interfaces and the public function `New(serviceName)`. The `Builder` offers two usage patterns:
 
-- **Convenience (env-driven):** métodos `Add*()` leem a configuração do ambiente e criam as conexões automaticamente.
-- **Injeção explícita:** métodos `With*()` aceitam instâncias já construídas, permitindo ao consumidor controlar totalmente as dependências.
+* **Convenience (env-driven):** `Add*()` methods read configuration from the environment and create connections automatically.
+* **Explicit injection:** `With*()` methods accept already built instances, allowing the consumer to fully control dependencies.
 
 ```go
-// Padrão convenience — lê tudo do ambiente
+// Convenience pattern — reads everything from environment
 svc := gofi.New("my-service").
     AddDatabase().
     AddCache().
@@ -66,7 +67,7 @@ svc := gofi.New("my-service").
     NewHttpServer(":8080").
     Build()
 
-// Padrão injeção — consumidor traz as instâncias
+// Injection pattern — consumer provides instances
 db  := sqln.MustConnect(sqln.ConfigFromEnv())
 rdb := sqln.InstanceRedis()
 
@@ -79,21 +80,22 @@ svc := gofi.New("my-service").
 
 ---
 
-### `base` — Fundação
+### `base` — Foundation
+
 **Path:** `github.com/joaoprofile/gofi/base`
 
-Utilitários e serviços de infraestrutura usados por todos os outros módulos. Não possui dependências internas ao gofi.
+Infrastructure utilities and services used by all other modules. Has no internal dependencies within gofi.
 
-| Sub-pacote | Responsabilidade |
-|---|---|
-| `environment` | Singleton de configuração via variáveis de ambiente (`.env`, OS env) |
-| `session` | Gerenciamento de sessão com suporte a Redis |
-| `cloud` | Adaptadores para provedores cloud (AWS, GCP, OCI) |
-| `observer` | Registry de lifecycle hooks e WaitGroup global |
-| `validator` | Validação de structs com suporte a tags customizadas |
-| `common` | Utilitários: timezone, strings, reflect, conversores |
-| `cronjob` | Worker pool e scheduler de tarefas periódicas |
-| `debug` | Servidor HTTP de diagnóstico (apenas ambientes não-prod) |
+| Sub-package   | Responsibility                                                     |
+| ------------- | ------------------------------------------------------------------ |
+| `environment` | Configuration singleton via environment variables (`.env`, OS env) |
+| `session`     | Session management with Redis support                              |
+| `cloud`       | Adapters for cloud providers (AWS, GCP, OCI)                       |
+| `observer`    | Lifecycle hooks registry and global WaitGroup                      |
+| `validator`   | Struct validation with custom tag support                          |
+| `common`      | Utilities: timezone, strings, reflect, converters                  |
+| `cronjob`     | Worker pool and periodic task scheduler                            |
+| `debug`       | Diagnostic HTTP server (non-prod environments only)                |
 
 ```go
 import "github.com/joaoprofile/gofi/base/environment"
@@ -104,17 +106,18 @@ fmt.Println(env.AppName, env.AppEnvironment)
 
 ---
 
-### `obs` — Observabilidade
+### `obs` — Observability
+
 **Path:** `github.com/joaoprofile/gofi/obs`
 
-Integração com OpenTelemetry: traces, métricas e logs estruturados via `slog`. Expõe helpers para criar instrumentos de métricas (histogramas, contadores, gauges) e o logger global.
+Integration with OpenTelemetry: traces, metrics, and structured logs via `slog`. Provides helpers to create metric instruments (histograms, counters, gauges) and a global logger.
 
-| Exportação | Descrição |
-|---|---|
-| `obs.Init(ctx, TeleConfig)` | Inicializa o provider OTel (OTLP/gRPC) |
-| `obs.Meter()` | Retorna o `metric.Meter` global |
-| `obs.NewFloat64Histogram(...)` | Cria histograma de float64 |
-| `obs/logging.Info/Error/Warn/Debug/Fatal` | Logging estruturado global |
+| Export                                    | Description                               |
+| ----------------------------------------- | ----------------------------------------- |
+| `obs.Init(ctx, TeleConfig)`               | Initializes the OTel provider (OTLP/gRPC) |
+| `obs.Meter()`                             | Returns the global `metric.Meter`         |
+| `obs.NewFloat64Histogram(...)`            | Creates a float64 histogram               |
+| `obs/logging.Info/Error/Warn/Debug/Fatal` | Global structured logging                 |
 
 ```go
 import (
@@ -132,21 +135,22 @@ logging.Info("service started", slog.String("port", ":8080"))
 
 ---
 
-### `sqln` — Banco de dados e cache
+### `sqln` — Database and cache
+
 **Path:** `github.com/joaoprofile/gofi/sqln`
 
-Camada de acesso a dados SQL com suporte a PostgreSQL, MySQL, SQL Server e Oracle. Inclui paginação, filtros dinâmicos, cache de queries (Redis ou in-memory) e migrations.
+Data access layer for SQL with support for PostgreSQL, MySQL, SQL Server, and Oracle. Includes pagination, dynamic filters, query caching (Redis or in-memory), and migrations.
 
-| Sub-pacote | Responsabilidade |
-|---|---|
-| `connection` | Pool de conexões SQL com configuração e drivers |
-| `migrate` | Execução de migrations via sistema de arquivos |
-| `mapping` | Mapeamento struct ↔ row usando a tag `` `db:"col"` `` |
-| `pagination` | `PageRequest`, `Sort`, `Page[T]` |
-| `cache` | Cache de resultado de query (Redis ou in-memory) |
-| `criteria` | Query builder encadeável por predicados |
-| `filter` | Filtros dinâmicos a partir de structs |
-| `transaction` | Gerenciamento de transação com context propagation |
+| Sub-package   | Responsibility                                     |
+| ------------- | -------------------------------------------------- |
+| `connection`  | SQL connection pool with configuration and drivers |
+| `migrate`     | Running migrations via filesystem                  |
+| `mapping`     | Struct ↔ row mapping using `` `db:"col"` `` tag    |
+| `pagination`  | `PageRequest`, `Sort`, `Page[T]`                   |
+| `cache`       | Query result caching (Redis or in-memory)          |
+| `criteria`    | Chainable query builder by predicates              |
+| `filter`      | Dynamic filters from structs                       |
+| `transaction` | Transaction management with context propagation    |
 
 ```go
 import "github.com/joaoprofile/gofi/sqln"
@@ -162,18 +166,19 @@ user, err := sqln.Find[User](ctx, "SELECT id, name FROM users WHERE id = $1", id
 
 ---
 
-### `msq` — Mensageria
+### `msq` — Messaging
+
 **Path:** `github.com/joaoprofile/gofi/msq`
 
-Abstração de broker de mensagens com suporte a múltiplos provedores. A interface `Broker` é uniforme — trocar de Kafka para RabbitMQ exige apenas mudar o provider.
+Message broker abstraction with support for multiple providers. The `Broker` interface is uniform — switching from Kafka to RabbitMQ only requires changing the provider.
 
-| Provider | Import |
-|---|---|
-| Apache Kafka | `github.com/joaoprofile/gofi/msq/provider/kafka` |
-| RabbitMQ | `github.com/joaoprofile/gofi/msq/provider/rabbitmq` |
-| AWS SQS | `github.com/joaoprofile/gofi/msq/provider/sqs` |
-| Oracle Cloud Queue | `github.com/joaoprofile/gofi/msq/provider/oci` |
-| Redis Pub/Sub | `github.com/joaoprofile/gofi/msq/provider/redis` |
+| Provider           | Import                                              |
+| ------------------ | --------------------------------------------------- |
+| Apache Kafka       | `github.com/joaoprofile/gofi/msq/provider/kafka`    |
+| RabbitMQ           | `github.com/joaoprofile/gofi/msq/provider/rabbitmq` |
+| AWS SQS            | `github.com/joaoprofile/gofi/msq/provider/sqs`      |
+| Oracle Cloud Queue | `github.com/joaoprofile/gofi/msq/provider/oci`      |
+| Redis Pub/Sub      | `github.com/joaoprofile/gofi/msq/provider/redis`    |
 
 ```go
 import (
@@ -191,18 +196,19 @@ producer.Publish(ctx, msq.NewMessageWithTopic("orders", order))
 ---
 
 ### `netx` — HTTP
+
 **Path:** `github.com/joaoprofile/gofi/netx`
 
-Servidor e cliente HTTP baseados em `go-chi`. Inclui middlewares prontos para uso.
+HTTP server and client based on `go-chi`. Includes ready-to-use middlewares.
 
-| Exportação | Descrição |
-|---|---|
-| `netx.NewServer(cfg)` | Cria servidor HTTP com chi |
-| `netx.NewClient(cfg)` | Cria cliente HTTP com retry e rate limit |
-| `netx.CORSMiddleware(cfg)` | Middleware CORS configurável |
-| `netx.NewRedisRateLimiter(...)` | Rate limiter via Redis |
-| `netx.LoggingMiddleware` | Log estruturado de requests |
-| `netx.SecurityHeaders` | Headers de segurança (CSP, HSTS, etc.) |
+| Export                          | Description                                   |
+| ------------------------------- | --------------------------------------------- |
+| `netx.NewServer(cfg)`           | Creates HTTP server with chi                  |
+| `netx.NewClient(cfg)`           | Creates HTTP client with retry and rate limit |
+| `netx.CORSMiddleware(cfg)`      | Configurable CORS middleware                  |
+| `netx.NewRedisRateLimiter(...)` | Rate limiter via Redis                        |
+| `netx.LoggingMiddleware`        | Structured request logging                    |
+| `netx.SecurityHeaders`          | Security headers (CSP, HSTS, etc.)            |
 
 ```go
 import "github.com/joaoprofile/gofi/netx"
@@ -215,22 +221,23 @@ server.ListenAndServe()
 
 ---
 
-### `iam` — Identidade e autenticação
+### `iam` — Identity and authentication
+
 **Path:** `github.com/joaoprofile/gofi/iam`
 
-Serviço de identidade, autenticação e autorização. Suporta JWT, sessão, RBAC e múltiplos Identity Providers.
+Identity, authentication, and authorization service. Supports JWT, session, RBAC, and multiple Identity Providers.
 
-| Sub-pacote | Responsabilidade |
-|---|---|
-| `core` | `IAMService`: autenticação, sessão e RBAC |
-| `port` | Interfaces: `AuthPort`, `IDPAuthPort`, `SessionPort`, `TokenPort` |
-| `provider/jwt` | Geração e validação de tokens JWT |
-| `provider/redis` | Sessão persistida em Redis |
-| `provider/bcrypt` | Hash de senhas |
-| `provider/google` | OAuth com Google |
-| `provider/microsoft` | OAuth com Microsoft |
-| `provider/oidc` | Provider OIDC genérico |
-| `middleware` | Middleware de autenticação para HTTP e gRPC |
+| Sub-package          | Responsibility                                                    |
+| -------------------- | ----------------------------------------------------------------- |
+| `core`               | `IAMService`: authentication, session, and RBAC                   |
+| `port`               | Interfaces: `AuthPort`, `IDPAuthPort`, `SessionPort`, `TokenPort` |
+| `provider/jwt`       | JWT token generation and validation                               |
+| `provider/redis`     | Session persistence in Redis                                      |
+| `provider/bcrypt`    | Password hashing                                                  |
+| `provider/google`    | Google OAuth                                                      |
+| `provider/microsoft` | Microsoft OAuth                                                   |
+| `provider/oidc`      | Generic OIDC provider                                             |
+| `middleware`         | Authentication middleware for HTTP and gRPC                       |
 
 ```go
 import "github.com/joaoprofile/gofi/iam"
@@ -244,89 +251,89 @@ token, err := svc.Login(ctx, credentials)
 
 ---
 
-## Instalação
+## Installation
 
-### Uso completo via orquestrador
+### Full usage via orchestrator
 
 ```bash
 go get github.com/joaoprofile/gofi
 ```
 
-### Uso por módulo (apenas o que precisar)
+### Per-module usage (only what you need)
 
 ```bash
-go get github.com/joaoprofile/gofi/netx    # só HTTP
-go get github.com/joaoprofile/gofi/sqln    # só banco de dados
-go get github.com/joaoprofile/gofi/msq     # só mensageria
-go get github.com/joaoprofile/gofi/obs     # só observabilidade
-go get github.com/joaoprofile/gofi/iam     # só autenticação
-go get github.com/joaoprofile/gofi/base    # só utilitários base
+go get github.com/joaoprofile/gofi/netx    # HTTP only
+go get github.com/joaoprofile/gofi/sqln    # database only
+go get github.com/joaoprofile/gofi/msq     # messaging only
+go get github.com/joaoprofile/gofi/obs     # observability only
+go get github.com/joaoprofile/gofi/iam     # authentication only
+go get github.com/joaoprofile/gofi/base    # base utilities only
 ```
 
 ---
 
-## Configuração via variáveis de ambiente
+## Configuration via environment variables
 
-O módulo `base/environment` é o ponto central de configuração. Todos os módulos leem configuração de variáveis de ambiente no startup.
+The `base/environment` module is the central configuration point. All modules read configuration from environment variables at startup.
 
-| Prefixo | Módulo | Exemplos |
-|---|---|---|
-| `APP_*` | gofi | `APP_NAME`, `APP_ENV` |
-| `DATABASE_*` | sqln | `DATABASE_URI`, `DATABASE_DRIVER` |
-| `CACHE_*` | sqln/base | `CACHE_URI`, `CACHE_TYPE` |
-| `MESSAGING_*` | msq | `MESSAGING_PROVIDER`, `MESSAGING_BROKER_*` |
-| `OTEL_*` | obs | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| `IAM_*` | iam | `IAM_JWT_SECRET`, `IAM_SESSION_TTL` |
+| Prefix        | Module    | Examples                                   |
+| ------------- | --------- | ------------------------------------------ |
+| `APP_*`       | gofi      | `APP_NAME`, `APP_ENV`                      |
+| `DATABASE_*`  | sqln      | `DATABASE_URI`, `DATABASE_DRIVER`          |
+| `CACHE_*`     | sqln/base | `CACHE_URI`, `CACHE_TYPE`                  |
+| `MESSAGING_*` | msq       | `MESSAGING_PROVIDER`, `MESSAGING_BROKER_*` |
+| `OTEL_*`      | obs       | `OTEL_EXPORTER_OTLP_ENDPOINT`              |
+| `IAM_*`       | iam       | `IAM_JWT_SECRET`, `IAM_SESSION_TTL`        |
 
 ---
 
-## Desenvolvimento
+## Development
 
-### Pré-requisitos
+### Prerequisites
 
-- Go 1.25+
-- Docker (para testes de integração)
+* Go 1.25+
+* Docker (for integration tests)
 
-### Workspace local (go.work)
+### Local workspace (go.work)
 
-O repositório usa `go work` para resolver dependências entre módulos localmente sem precisar publicar versões intermediárias:
+The repository uses `go work` to resolve dependencies between modules locally without needing to publish intermediate versions:
 
 ```bash
-# na raiz do repositório
+# at the repository root
 go work sync
 ```
 
-O arquivo `go.work` na raiz lista todos os módulos do workspace. Editores que suportam LSP (`gopls`) detectam automaticamente o workspace.
+The `go.work` file at the root lists all modules in the workspace. Editors that support LSP (`gopls`) automatically detect the workspace.
 
-### Testes
+### Tests
 
 ```bash
-# todos os módulos
+# all modules
 go test ./...
 
-# módulo específico
+# specific module
 go test github.com/joaoprofile/gofi/netx/...
 
-# com cobertura
+# with coverage
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
 
-### Cobertura mínima exigida
+### Minimum required coverage
 
-Cada módulo deve manter cobertura de testes ≥ **90%**.
+Each module must maintain test coverage ≥ **90%**.
 
 ---
 
-## Estrutura do repositório
+## Repository structure
 
 ```
 gofi/
-├── go.work              ← workspace (resolve módulos localmente)
-├── go.mod               ← módulo principal (github.com/joaoprofile/gofi)
-├── gofi.go              ← interfaces Builder e Service
-├── builder.go           ← implementação do Builder (gofiInstance)
-├── service.go           ← implementação do Service (gofiInstance)
+├── go.work              ← workspace (resolves modules locally)
+├── go.mod               ← main module (github.com/joaoprofile/gofi)
+├── gofi.go              ← Builder and Service interfaces
+├── builder.go           ← Builder implementation (gofiInstance)
+├── service.go           ← Service implementation (gofiInstance)
 │
 ├── base/                ← github.com/joaoprofile/gofi/base
 │   ├── go.mod
@@ -385,10 +392,10 @@ gofi/
 
 ---
 
-## Convenções
+## Conventions
 
-- **Struct tags SQL:** use `` `db:"nome_da_coluna"` `` para mapeamento automático via `sqln/mapping`.
-- **Configuração:** prefira leitura via `environment.Instance()` nos métodos `ConfigFromEnv()` de cada módulo.
-- **Logging:** use `obs/logging` para logging estruturado. Evite `fmt.Println` em código de produção.
-- **Testes:** cobertura mínima de 90%. Testes de integração devem ser marcados com `t.Skip(...)` e executados apenas com infraestrutura disponível.
-- **Injeção vs convenience:** prefira os métodos `With*()` do Builder quando a aplicação precisa de controle sobre o ciclo de vida das conexões.
+* **SQL struct tags:** use `` `db:"column_name"` `` for automatic mapping via `sqln/mapping`.
+* **Configuration:** prefer reading via `environment.Instance()` inside each module’s `ConfigFromEnv()` methods.
+* **Logging:** use `obs/logging` for structured logging. Avoid `fmt.Println` in production code.
+* **Tests:** minimum 90% coverage. Integration tests should be marked with `t.Skip(...)` and run only when infrastructure is available.
+* **Injection vs convenience:** prefer `With*()` methods from the Builder when the application needs control over connection lifecycle.
