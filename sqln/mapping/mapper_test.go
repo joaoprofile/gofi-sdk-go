@@ -5,7 +5,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -332,4 +335,244 @@ func TestGetContentList_StructType_ScanError_ReturnsError(t *testing.T) {
 
 	_, err := GetContentList[noTagModel](rows)
 	assert.Error(t, err)
+}
+
+// Nested value objects
+
+type pricingVO struct {
+	Price float64 `db:"price"`
+}
+
+type productWithVO struct {
+	ID    int64     `db:"id"`
+	Name  string    `db:"name"`
+	Price pricingVO `db:"price"`
+}
+
+func TestGetMappedCols_NestedVO_ExpandsToLeaves(t *testing.T) {
+	m := &productWithVO{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 3) // id, name, price → Price.Price
+}
+
+type addressVO struct {
+	Street  string `db:"street"`
+	City    string `db:"city"`
+	ZipCode string `db:"zip_code"`
+}
+
+type customerWithAddress struct {
+	ID      int64     `db:"id"`
+	Name    string    `db:"name"`
+	Address addressVO `db:"address"`
+}
+
+func TestGetMappedCols_NestedVO_MultipleSubFields(t *testing.T) {
+	m := &customerWithAddress{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 5) // id, name, street, city, zip_code
+}
+
+type deepLeaf struct {
+	Value string `db:"value"`
+}
+
+type midLevel struct {
+	Deep deepLeaf `db:"deep"`
+}
+
+type rootLevel struct {
+	ID  int64    `db:"id"`
+	Mid midLevel `db:"mid"`
+}
+
+func TestGetMappedCols_NestedVO_MultiLevel(t *testing.T) {
+	m := &rootLevel{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 2) // id + mid.deep.value
+}
+
+type level4 struct {
+	Value string `db:"value"`
+}
+
+type level3 struct {
+	L4 level4 `db:"l4"`
+}
+
+type level2 struct {
+	L3 level3 `db:"l3"`
+}
+
+type level1 struct {
+	L2 level2 `db:"l2"`
+}
+
+type fourLevelRoot struct {
+	ID int64  `db:"id"`
+	L1 level1 `db:"l1"`
+}
+
+func TestGetMappedCols_FourLevelsDeep_StructureAndScan(t *testing.T) {
+	m := &fourLevelRoot{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 2) // id + l1.l2.l3.l4.value
+
+	rows := openWithRows(t, &fakeRows{
+		cols: []string{"id", "value"},
+		rows: [][]driver.Value{{int64(42), "deep-hello"}},
+	})
+	defer rows.Close()
+
+	list, err := GetContentList[fourLevelRoot](rows)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, int64(42), list[0].ID)
+	assert.Equal(t, "deep-hello", list[0].L1.L2.L3.L4.Value)
+}
+
+type modelWithTime struct {
+	ID        int64     `db:"id"`
+	CreatedAt time.Time `db:"created_at"`
+}
+
+func TestGetMappedCols_TimeIsPrimitive_NotRecursed(t *testing.T) {
+	m := &modelWithTime{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 2) // id + created_at (time.Time is primitive)
+}
+
+type customScanner struct {
+	Raw string
+}
+
+func (c *customScanner) Scan(src any) error {
+	if s, ok := src.(string); ok {
+		c.Raw = s
+	}
+	return nil
+}
+
+type modelWithScanner struct {
+	ID   int64         `db:"id"`
+	Data customScanner `db:"data"`
+}
+
+func TestGetMappedCols_SqlScannerIsPrimitive_NotRecursed(t *testing.T) {
+	m := &modelWithScanner{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 2) // id + data — customScanner is treated as primitive
+}
+
+type nestedWithoutOuterTag struct {
+	ID    int64     `db:"id"`
+	Inner pricingVO // no db tag → entire VO ignored
+}
+
+func TestGetMappedCols_NestedWithoutOuterTag_Ignored(t *testing.T) {
+	m := &nestedWithoutOuterTag{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 1) // only id
+}
+
+type emptyInnerStruct struct {
+	Price float64 // no db tag
+}
+
+type modelWithEmptyInner struct {
+	ID    int64            `db:"id"`
+	Inner emptyInnerStruct `db:"inner"`
+}
+
+func TestGetMappedCols_NestedInnerAllUntagged_Empty(t *testing.T) {
+	m := &modelWithEmptyInner{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 1) // only id — inner has no tagged leaves
+}
+
+type modelWithSliceAndVO struct {
+	ID    int64     `db:"id"`
+	Tags  []string  `db:"tags"`
+	Price pricingVO `db:"price"`
+}
+
+func TestGetMappedCols_MixedSliceAndVO(t *testing.T) {
+	m := &modelWithSliceAndVO{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 3) // id + tags (pq.Array) + price.price
+}
+
+// Plan cache
+
+func TestTypePlan_CachedAcrossCalls(t *testing.T) {
+	tp := reflect.TypeOf(productWithVO{})
+	p1 := getTypePlan(tp)
+	p2 := getTypePlan(tp)
+	assert.Same(t, p1, p2, "second call should reuse cached plan pointer")
+}
+
+func TestTypePlan_ConcurrentSafe(t *testing.T) {
+	type concurrentModel struct {
+		A int `db:"a"`
+		B int `db:"b"`
+	}
+	tp := reflect.TypeOf(concurrentModel{})
+
+	const workers = 32
+	seen := make([]*typePlan, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			seen[idx] = getTypePlan(tp)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 1; i < workers; i++ {
+		assert.Same(t, seen[0], seen[i], "all goroutines should see the same plan")
+	}
+}
+
+func TestTypePlan_SimpleType(t *testing.T) {
+	p := getTypePlan(reflect.TypeOf(42))
+	assert.True(t, p.simple)
+	assert.Empty(t, p.fields)
+}
+
+// End-to-end: verify values land in the correct nested fields after scan
+
+func TestGetContentList_NestedVO_ValuesLandCorrectly(t *testing.T) {
+	rows := openWithRows(t, &fakeRows{
+		cols: []string{"id", "name", "price"},
+		rows: [][]driver.Value{{int64(7), "Widget", float64(9.99)}},
+	})
+	defer rows.Close()
+
+	list, err := GetContentList[productWithVO](rows)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, int64(7), list[0].ID)
+	assert.Equal(t, "Widget", list[0].Name)
+	assert.Equal(t, 9.99, list[0].Price.Price)
+}
+
+func TestGetContentList_NestedVO_MultipleRows(t *testing.T) {
+	rows := openWithRows(t, &fakeRows{
+		cols: []string{"id", "name", "price"},
+		rows: [][]driver.Value{
+			{int64(1), "A", float64(1.5)},
+			{int64(2), "B", float64(2.5)},
+			{int64(3), "C", float64(3.5)},
+		},
+	})
+	defer rows.Close()
+
+	list, err := GetContentList[productWithVO](rows)
+	require.NoError(t, err)
+	require.Len(t, list, 3)
+	assert.Equal(t, 1.5, list[0].Price.Price)
+	assert.Equal(t, 2.5, list[1].Price.Price)
+	assert.Equal(t, 3.5, list[2].Price.Price)
 }
