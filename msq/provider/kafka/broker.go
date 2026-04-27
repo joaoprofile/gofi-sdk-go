@@ -161,9 +161,10 @@ type kafkaProducer struct{ producer sarama.SyncProducer }
 
 func (p *kafkaProducer) SendMessage(_ context.Context, msg *types.Message) error {
 	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
-		Topic: msg.Topic,
-		Key:   sarama.StringEncoder(msg.Key),
-		Value: sarama.ByteEncoder(msg.Value),
+		Topic:   msg.Topic,
+		Key:     sarama.StringEncoder(msg.Key),
+		Value:   sarama.ByteEncoder(msg.Value),
+		Headers: toRecordHeaders(msg.Headers),
 	})
 	return err
 }
@@ -172,12 +173,43 @@ func (p *kafkaProducer) SendMessagesBatch(_ context.Context, msgs []*types.Messa
 	batch := make([]*sarama.ProducerMessage, 0, len(msgs))
 	for _, m := range msgs {
 		batch = append(batch, &sarama.ProducerMessage{
-			Topic: m.Topic,
-			Key:   sarama.StringEncoder(m.Key),
-			Value: sarama.ByteEncoder(m.Value),
+			Topic:   m.Topic,
+			Key:     sarama.StringEncoder(m.Key),
+			Value:   sarama.ByteEncoder(m.Value),
+			Headers: toRecordHeaders(m.Headers),
 		})
 	}
 	return p.producer.SendMessages(batch)
+}
+
+// toRecordHeaders converts the transport-agnostic string map into the sarama
+// record-header slice. Returns nil when there are no headers so the producer
+// does not allocate an empty slice on every send.
+func toRecordHeaders(headers map[string]string) []sarama.RecordHeader {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make([]sarama.RecordHeader, 0, len(headers))
+	for k, v := range headers {
+		out = append(out, sarama.RecordHeader{Key: []byte(k), Value: []byte(v)})
+	}
+	return out
+}
+
+// fromRecordHeaders flattens sarama record headers back into a string map so
+// handlers can read metadata via types.Message.Headers regardless of broker.
+func fromRecordHeaders(headers []*sarama.RecordHeader) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for _, h := range headers {
+		if h == nil {
+			continue
+		}
+		out[string(h.Key)] = string(h.Value)
+	}
+	return out
 }
 
 func (p *kafkaProducer) Close() error { return p.producer.Close() }
@@ -235,6 +267,7 @@ func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			Key:       string(sm.Key),
 			Value:     sm.Value,
 			Timestamp: sm.Timestamp,
+			Headers:   fromRecordHeaders(sm.Headers),
 		}
 
 		var lastErr error

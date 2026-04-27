@@ -17,14 +17,20 @@ import (
 // Mock: sarama.SyncProducer
 
 type mockSyncProducer struct {
-	sendErr  error
-	batchErr error
+	sendErr     error
+	batchErr    error
+	lastMessage *sarama.ProducerMessage
+	lastBatch   []*sarama.ProducerMessage
 }
 
-func (m *mockSyncProducer) SendMessage(_ *sarama.ProducerMessage) (int32, int64, error) {
+func (m *mockSyncProducer) SendMessage(msg *sarama.ProducerMessage) (int32, int64, error) {
+	m.lastMessage = msg
 	return 0, 0, m.sendErr
 }
-func (m *mockSyncProducer) SendMessages(_ []*sarama.ProducerMessage) error { return m.batchErr }
+func (m *mockSyncProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
+	m.lastBatch = msgs
+	return m.batchErr
+}
 func (m *mockSyncProducer) Close() error                                   { return nil }
 func (m *mockSyncProducer) TxnStatus() sarama.ProducerTxnStatusFlag        { return 0 }
 func (m *mockSyncProducer) IsTransactional() bool                          { return false }
@@ -115,6 +121,123 @@ func TestKafkaProducerSendMessagesBatchError(t *testing.T) {
 func TestKafkaProducerClose(t *testing.T) {
 	p := &kafkaProducer{producer: &mockSyncProducer{}}
 	assert.NoError(t, p.Close())
+}
+
+func TestKafkaProducerSendMessagePropagatesHeaders(t *testing.T) {
+	mock := &mockSyncProducer{}
+	p := &kafkaProducer{producer: mock}
+	msg := types.NewMessageWithTopic("topic", "data").
+		WithHeader("trace-id", "abc123").
+		WithHeader("batch_id", "uuid-xyz")
+
+	require.NoError(t, p.SendMessage(context.Background(), msg))
+	require.NotNil(t, mock.lastMessage)
+	require.Len(t, mock.lastMessage.Headers, 2)
+
+	got := map[string]string{}
+	for _, h := range mock.lastMessage.Headers {
+		got[string(h.Key)] = string(h.Value)
+	}
+	assert.Equal(t, "abc123", got["trace-id"])
+	assert.Equal(t, "uuid-xyz", got["batch_id"])
+}
+
+func TestKafkaProducerSendMessageNilHeadersSendsNilSlice(t *testing.T) {
+	mock := &mockSyncProducer{}
+	p := &kafkaProducer{producer: mock}
+	msg := &types.Message{Topic: "topic", Value: []byte(`"v"`)}
+
+	require.NoError(t, p.SendMessage(context.Background(), msg))
+	require.NotNil(t, mock.lastMessage)
+	assert.Nil(t, mock.lastMessage.Headers)
+}
+
+func TestKafkaProducerSendMessagesBatchPropagatesHeaders(t *testing.T) {
+	mock := &mockSyncProducer{}
+	p := &kafkaProducer{producer: mock}
+	first := types.NewMessageWithTopic("topic", "a").WithHeader("batch_id", "B1")
+	second := types.NewMessageWithTopic("topic", "b").WithHeader("batch_id", "B2")
+
+	require.NoError(t, p.SendMessagesBatch(context.Background(), []*types.Message{first, second}))
+	require.Len(t, mock.lastBatch, 2)
+	require.Len(t, mock.lastBatch[0].Headers, 1)
+	assert.Equal(t, "B1", string(mock.lastBatch[0].Headers[0].Value))
+	assert.Equal(t, "B2", string(mock.lastBatch[1].Headers[0].Value))
+}
+
+func TestGroupHandlerConsumeClaimPropagatesHeaders(t *testing.T) {
+	claim := &mockClaim{messages: make(chan *sarama.ConsumerMessage, 1)}
+	claim.messages <- &sarama.ConsumerMessage{
+		Topic:     "topic",
+		Key:       []byte("k"),
+		Value:     []byte(`"v"`),
+		Timestamp: time.Now(),
+		Headers: []*sarama.RecordHeader{
+			{Key: []byte("trace-id"), Value: []byte("abc")},
+			{Key: []byte("batch_id"), Value: []byte("xyz")},
+		},
+	}
+	close(claim.messages)
+
+	var captured *types.Message
+	handler := port.MessageHandlerFunc(func(_ context.Context, m *types.Message) (types.Result, error) {
+		captured = m
+		return types.Ack, nil
+	})
+	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic", AutoCommit: true}}
+
+	require.NoError(t, h.ConsumeClaim(&mockSession{}, claim))
+	require.NotNil(t, captured)
+	assert.Equal(t, "abc", captured.Headers["trace-id"])
+	assert.Equal(t, "xyz", captured.Headers["batch_id"])
+}
+
+func TestGroupHandlerConsumeClaimWithoutHeaders(t *testing.T) {
+	claim := &mockClaim{messages: make(chan *sarama.ConsumerMessage, 1)}
+	claim.messages <- &sarama.ConsumerMessage{
+		Topic:     "topic",
+		Value:     []byte(`"v"`),
+		Timestamp: time.Now(),
+	}
+	close(claim.messages)
+
+	var captured *types.Message
+	handler := port.MessageHandlerFunc(func(_ context.Context, m *types.Message) (types.Result, error) {
+		captured = m
+		return types.Ack, nil
+	})
+	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic", AutoCommit: true}}
+
+	require.NoError(t, h.ConsumeClaim(&mockSession{}, claim))
+	require.NotNil(t, captured)
+	assert.Nil(t, captured.Headers)
+}
+
+func TestToRecordHeadersRoundTrip(t *testing.T) {
+	in := map[string]string{"a": "1", "b": "2"}
+	out := fromRecordHeaders(sliceToPtrs(toRecordHeaders(in)))
+	assert.Equal(t, in, out)
+}
+
+func TestToRecordHeadersEmpty(t *testing.T) {
+	assert.Nil(t, toRecordHeaders(nil))
+	assert.Nil(t, toRecordHeaders(map[string]string{}))
+}
+
+func TestFromRecordHeadersEmpty(t *testing.T) {
+	assert.Nil(t, fromRecordHeaders(nil))
+	assert.Nil(t, fromRecordHeaders([]*sarama.RecordHeader{}))
+}
+
+// sliceToPtrs adapts the sarama.RecordHeader slice returned by toRecordHeaders
+// (used by the producer) into the []*sarama.RecordHeader shape the consumer
+// receives from Sarama — mirrors what Kafka does on the wire.
+func sliceToPtrs(in []sarama.RecordHeader) []*sarama.RecordHeader {
+	out := make([]*sarama.RecordHeader, 0, len(in))
+	for i := range in {
+		out = append(out, &in[i])
+	}
+	return out
 }
 
 // groupHandler tests
