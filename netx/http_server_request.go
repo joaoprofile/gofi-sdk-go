@@ -93,12 +93,25 @@ func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct int
 //
 // setFieldValue sets a struct field from its string query-parameter value,
 // applying the appropriate conversion for the field's kind. Supported kinds:
-// string, int/int8..int64, uint/uint8..uint64. bool and pointer kinds are
-// not yet implemented.
+// string, bool, int/int8..int64, uint/uint8..uint64, and pointers to any of
+// these (the pointer is allocated on demand).
 func setFieldValue(value reflect.Value, strValue string) error {
+	if value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			value.Set(reflect.New(value.Type().Elem()))
+		}
+		return setFieldValue(value.Elem(), strValue)
+	}
+
 	switch value.Kind() {
 	case reflect.String:
 		value.SetString(strValue)
+	case reflect.Bool:
+		v, err := strconv.ParseBool(strValue)
+		if err != nil {
+			return err
+		}
+		value.SetBool(v)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		v, err := strconv.ParseUint(strValue, 10, 64)
 		if err != nil {
@@ -124,8 +137,8 @@ func setFieldValue(value reflect.Value, strValue string) error {
 //  2. Repeated params, optionally comma-separated within a single value
 //     (e.g. ?ids=1&ids=2, ?ids=1,2,3, ?ids=1,2&ids=3).
 //
-// Element kinds supported match setFieldValue (string, int*, uint*).
-// Slices of bool, pointers, or structs are left for a future PR.
+// Element kinds supported match setFieldValue (string, bool, int*, uint*,
+// and pointers to those). Slices of structs are left for a future PR.
 func setSliceFromStrings(value reflect.Value, vals []string) error {
 	if len(vals) == 1 && strings.HasPrefix(strings.TrimSpace(vals[0]), "[") {
 		target := reflect.New(value.Type())

@@ -291,6 +291,89 @@ func TestBindQueryParams_SliceFallbackFieldName(t *testing.T) {
 	assert.Equal(t, []string{"foo", "bar"}, out.Names)
 }
 
+//  BindQueryParamsToStruct: bool and pointer support
+
+type filterWithBoolAndPtr struct {
+	Active  bool    `form:"active"`
+	Verbose *bool   `form:"verbose"`
+	Page    *int    `form:"page"`
+	Search  *string `form:"search"`
+	Flags   []bool  `form:"flags"`
+	Sizes   []*int  `form:"sizes"`
+}
+
+func TestBindQueryParams_Bool(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?active=true", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.True(t, out.Active)
+}
+
+func TestBindQueryParams_PtrBool(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?verbose=false", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	require.NotNil(t, out.Verbose)
+	assert.False(t, *out.Verbose)
+}
+
+func TestBindQueryParams_PtrInt(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?page=7", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	require.NotNil(t, out.Page)
+	assert.Equal(t, 7, *out.Page)
+}
+
+func TestBindQueryParams_PtrString(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?search=hello", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	require.NotNil(t, out.Search)
+	assert.Equal(t, "hello", *out.Search)
+}
+
+func TestBindQueryParams_PtrAbsent_LeavesNil(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?active=true", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Nil(t, out.Verbose)
+	assert.Nil(t, out.Page)
+	assert.Nil(t, out.Search)
+}
+
+func TestBindQueryParams_SliceBool_RepeatedParams(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?flags=true&flags=false&flags=1", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, out.Flags)
+}
+
+func TestBindQueryParams_SlicePtrInt(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?sizes=1,2,3", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	require.Len(t, out.Sizes, 3)
+	for i, want := range []int{1, 2, 3} {
+		require.NotNil(t, out.Sizes[i])
+		assert.Equal(t, want, *out.Sizes[i])
+	}
+}
+
+func TestBindQueryParams_InvalidBool_ReturnsError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?active=not-a-bool", nil)
+	var out filterWithBoolAndPtr
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	assert.Error(t, err)
+}
+
 //  setFieldValue ─
 
 func makeValue(v interface{}) reflect.Value {
@@ -317,9 +400,56 @@ func TestSetFieldValue_Uint(t *testing.T) {
 	assert.Equal(t, uint64(99), v.Uint())
 }
 
-func TestSetFieldValue_UnsupportedKind_ReturnsError(t *testing.T) {
+func TestSetFieldValue_Bool(t *testing.T) {
 	v := makeValue(false)
-	assert.Error(t, setFieldValue(v, "true"))
+	require.NoError(t, setFieldValue(v, "true"))
+	assert.True(t, v.Bool())
+}
+
+func TestSetFieldValue_PtrString_AllocatesAndSets(t *testing.T) {
+	var s *string
+	v := reflect.ValueOf(&s).Elem()
+	require.NoError(t, setFieldValue(v, "hello"))
+	require.NotNil(t, s)
+	assert.Equal(t, "hello", *s)
+}
+
+func TestSetFieldValue_PtrInt_AllocatesAndSets(t *testing.T) {
+	var n *int
+	v := reflect.ValueOf(&n).Elem()
+	require.NoError(t, setFieldValue(v, "-42"))
+	require.NotNil(t, n)
+	assert.Equal(t, -42, *n)
+}
+
+func TestSetFieldValue_PtrUint_AllocatesAndSets(t *testing.T) {
+	var n *uint
+	v := reflect.ValueOf(&n).Elem()
+	require.NoError(t, setFieldValue(v, "99"))
+	require.NotNil(t, n)
+	assert.Equal(t, uint(99), *n)
+}
+
+func TestSetFieldValue_PtrBool_AllocatesAndSets(t *testing.T) {
+	var b *bool
+	v := reflect.ValueOf(&b).Elem()
+	require.NoError(t, setFieldValue(v, "true"))
+	require.NotNil(t, b)
+	assert.True(t, *b)
+}
+
+func TestSetFieldValue_PtrBool_ReusesExistingPointer(t *testing.T) {
+	existing := false
+	b := &existing
+	v := reflect.ValueOf(&b).Elem()
+	require.NoError(t, setFieldValue(v, "true"))
+	assert.Same(t, &existing, b)
+	assert.True(t, *b)
+}
+
+func TestSetFieldValue_UnsupportedKind_ReturnsError(t *testing.T) {
+	v := makeValue(float64(0))
+	assert.Error(t, setFieldValue(v, "1.5"))
 }
 
 func TestSetFieldValue_InvalidInt_ReturnsError(t *testing.T) {
@@ -330,4 +460,15 @@ func TestSetFieldValue_InvalidInt_ReturnsError(t *testing.T) {
 func TestSetFieldValue_InvalidUint_ReturnsError(t *testing.T) {
 	v := makeValue(uint(0))
 	assert.Error(t, setFieldValue(v, "-1"))
+}
+
+func TestSetFieldValue_InvalidBool_ReturnsError(t *testing.T) {
+	v := makeValue(false)
+	assert.Error(t, setFieldValue(v, "not-a-bool"))
+}
+
+func TestSetFieldValue_InvalidPtrInt_ReturnsError(t *testing.T) {
+	var n *int
+	v := reflect.ValueOf(&n).Elem()
+	assert.Error(t, setFieldValue(v, "not-a-number"))
 }
