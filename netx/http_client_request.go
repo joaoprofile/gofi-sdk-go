@@ -131,14 +131,11 @@ func (r *Request[T]) setRequestHeaders(req *http.Request) {
 }
 
 func (r *Request[T]) handleRateLimiting() error {
-	now := time.Now()
-	timeBetweenRequests := time.Second / time.Duration(r.Client.RateLimit)
-	if elapsed := now.Sub(r.Client.LastRequestTime); elapsed < timeBetweenRequests {
-		time.Sleep(timeBetweenRequests - elapsed)
+	ctx := r.Ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
-
-	r.Client.LastRequestTime = time.Now()
-	return nil
+	return r.Client.rateLimiter().Wait(ctx)
 }
 
 func (r *Request[T]) readResponseBody(resp *http.Response) (*T, error) {

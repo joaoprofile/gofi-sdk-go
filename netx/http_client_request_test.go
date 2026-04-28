@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -284,16 +285,82 @@ func TestIsClientError(t *testing.T) {
 // handleRateLimiting
 
 func TestHandleRateLimiting_SleepsWhenTooFast(t *testing.T) {
-	client := &HttpClient{
-		RateLimit:       2,
-		LastRequestTime: time.Now(),
-	}
-	req := &Request[string]{Client: client}
+	client := &HttpClient{RateLimit: 2}
+	req := &Request[string]{Ctx: context.Background(), Client: client}
+
+	// First call consumes the initial token immediately; the second call must
+	// wait ~500ms for a refill (2 req/s).
+	assert.NoError(t, req.handleRateLimiting())
 
 	start := time.Now()
 	err := req.handleRateLimiting()
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, time.Since(start), 400*time.Millisecond)
+}
+
+func TestHandleRateLimiting_RespectsContextCancellation(t *testing.T) {
+	client := &HttpClient{RateLimit: 1}
+	// Drain the initial token so the next Wait must block until refill.
+	warmup := &Request[string]{Ctx: context.Background(), Client: client}
+	assert.NoError(t, warmup.handleRateLimiting())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	req := &Request[string]{Ctx: ctx, Client: client}
+
+	start := time.Now()
+	err := req.handleRateLimiting()
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Less(t, elapsed, 500*time.Millisecond, "should return when ctx is cancelled, not wait for token refill")
+}
+
+// handleRateLimiting — concurrency / data race coverage
+//
+// Reproduces the bug from the spike: prior to this fix, `LastRequestTime` was
+// read and written from many goroutines without synchronization. Running this
+// test under `go test -race` would flag a DATA RACE. With the rate.Limiter
+// migration the access is thread-safe.
+func TestHandleRateLimiting_ConcurrentCallers_NoDataRace(t *testing.T) {
+	client := &HttpClient{RateLimit: 1000} // high limit so the test stays fast
+	const goroutines = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			req := &Request[string]{Ctx: context.Background(), Client: client}
+			_ = req.handleRateLimiting()
+		}()
+	}
+	wg.Wait()
+}
+
+// Verifies the limiter actually enforces the configured rate when many
+// goroutines pile in at once. With RateLimit=10 and 10 callers, the slowest
+// caller must wait ~900ms (1 immediate + 9 refills @ 100ms each).
+func TestHandleRateLimiting_ConcurrentCallers_RespectsLimit(t *testing.T) {
+	client := &HttpClient{RateLimit: 10}
+	const goroutines = 10
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			req := &Request[string]{Ctx: context.Background(), Client: client}
+			_ = req.handleRateLimiting()
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Allow some scheduler jitter on the lower bound.
+	assert.GreaterOrEqual(t, elapsed, 800*time.Millisecond, "limiter should serialize 10 callers across ~900ms at 10 req/s")
+	assert.Less(t, elapsed, 2*time.Second, "should not take dramatically longer than the theoretical window")
 }
 
 // handleRetryAfterHeader

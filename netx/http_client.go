@@ -3,7 +3,10 @@ package netx
 import (
 	"errors"
 	"net/http"
+	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -29,15 +32,33 @@ type HttpClientConfig struct {
 }
 
 type HttpClient struct {
-	Name            string
-	BaseURL         string
-	Retries         uint8
-	RetrySleep      time.Duration
-	Client          *http.Client
-	RateLimit       int
-	LastRequestTime time.Time
-	cb              any
+	Name        string
+	BaseURL     string
+	Retries     uint8
+	RetrySleep  time.Duration
+	Client      *http.Client
+	RateLimit   int
+	limiter     *rate.Limiter
+	limiterOnce sync.Once
+	cb          any
 	// *circuitbreaker.CircuitBreaker
+}
+
+// rateLimiter returns the client's rate limiter, lazily building one from
+// RateLimit when the client was constructed without NewClient. The init runs
+// at most once per client, so concurrent first-callers see the same limiter.
+func (c *HttpClient) rateLimiter() *rate.Limiter {
+	c.limiterOnce.Do(func() {
+		if c.limiter != nil {
+			return
+		}
+		limit := c.RateLimit
+		if limit <= 0 {
+			limit = defaultRateLimit
+		}
+		c.limiter = rate.NewLimiter(rate.Limit(limit), 1)
+	})
+	return c.limiter
 }
 
 func NewClient(config *HttpClientConfig) (*HttpClient, error) {
@@ -72,5 +93,6 @@ func NewClient(config *HttpClientConfig) (*HttpClient, error) {
 		RetrySleep: config.RetrySleep,
 		Client:     client,
 		RateLimit:  config.RateLimit,
+		limiter:    rate.NewLimiter(rate.Limit(config.RateLimit), 1),
 	}, nil
 }
