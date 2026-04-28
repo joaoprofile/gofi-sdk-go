@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// helpers
 
 type trackingCloser struct {
 	io.Reader
@@ -34,7 +34,7 @@ func newJSONBody(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
 }
 
-// ── ReadBody ──────────────────────────────────────────────────────────────────
+// ReadBody
 
 func TestReadBody_ReturnsContent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`hello world`))
@@ -70,7 +70,7 @@ func TestReadBody_ClosesBodyOnReadError(t *testing.T) {
 	assert.True(t, tc.closed)
 }
 
-// ── ParseRequestBody ──────────────────────────────────────────────────────────
+// ParseRequestBody
 
 type samplePayload struct {
 	Name string `json:"name"`
@@ -117,7 +117,7 @@ func TestParseRequestBody_ReadError_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ── GetQueryParam ─────────────────────────────────────────────────────────────
+//  GetQueryParam ─
 
 func TestGetQueryParam_ReturnsLowercasedValue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?status=ACTIVE", nil)
@@ -129,7 +129,7 @@ func TestGetQueryParam_ReturnsEmptyWhenAbsent(t *testing.T) {
 	assert.Empty(t, GetQueryParam("missing", req))
 }
 
-// ── GetPathParam ──────────────────────────────────────────────────────────────
+//  GetPathParam
 
 func TestGetPathParam_ReturnsLowercasedValue(t *testing.T) {
 	var captured string
@@ -142,7 +142,7 @@ func TestGetPathParam_ReturnsLowercasedValue(t *testing.T) {
 	assert.Equal(t, "sku-abc", captured)
 }
 
-// ── BindQueryParamsToStruct ───────────────────────────────────────────────────
+//  BindQueryParamsToStruct ─
 
 type filterParams struct {
 	Name   string `form:"name"`
@@ -203,7 +203,95 @@ func TestBindQueryParams_InvalidIntValue_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ── setFieldValue ─────────────────────────────────────────────────────────────
+//  BindQueryParamsToStruct: slice support
+
+type filterWithSlice struct {
+	IDs   []int32  `form:"ids"`
+	Tags  []string `form:"tags"`
+	Names []string
+	Page  uint16 `form:"page"`
+}
+
+func TestBindQueryParams_SliceInt32_RepeatedParams(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?ids=1&ids=2&ids=3", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2, 3}, out.IDs)
+}
+
+func TestBindQueryParams_SliceInt32_JSONLiteral(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?ids=[1,2,3]", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2, 3}, out.IDs)
+}
+
+func TestBindQueryParams_SliceString_RepeatedParams(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?tags=a&tags=b", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, out.Tags)
+}
+
+func TestBindQueryParams_SliceAbsent_LeavesNil(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?page=2", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Nil(t, out.IDs)
+	assert.Nil(t, out.Tags)
+	assert.Equal(t, uint16(2), out.Page)
+}
+
+func TestBindQueryParams_SliceInvalidElement_ReturnsErrorWithIndex(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?ids=1&ids=abc", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ids[1]")
+	assert.Contains(t, err.Error(), "int32")
+	assert.Contains(t, err.Error(), "abc")
+}
+
+func TestBindQueryParams_SliceMalformedJSON_ReturnsError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?ids=[1,abc]", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ids")
+}
+
+func TestBindQueryParams_SliceMixedWithScalar(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?ids=1&ids=2&page=5", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2}, out.IDs)
+	assert.Equal(t, uint16(5), out.Page)
+}
+
+func TestBindQueryParams_SliceCommaSeparatedAndRepeated(t *testing.T) {
+	// Acceptance criterion: ?ids=1,2&ids=2&page=15 must populate both fields.
+	req := httptest.NewRequest(http.MethodGet, "/?ids=1,2&ids=2&page=15", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2, 2}, out.IDs)
+	assert.Equal(t, uint16(15), out.Page)
+}
+
+func TestBindQueryParams_SliceFallbackFieldName(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?names=foo&names=bar", nil)
+	var out filterWithSlice
+	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"foo", "bar"}, out.Names)
+}
+
+//  setFieldValue ─
 
 func makeValue(v interface{}) reflect.Value {
 	ptr := reflect.New(reflect.TypeOf(v))

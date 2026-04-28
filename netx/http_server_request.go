@@ -70,10 +70,19 @@ func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct int
 		if paramName == "" {
 			paramName = strings.ToLower(field.Name)
 		}
-		if vals, ok := queryParams[paramName]; ok && len(vals) > 0 {
-			if err := setFieldValue(objValue.Field(i), vals[0]); err != nil {
-				return err
+		vals, ok := queryParams[paramName]
+		if !ok || len(vals) == 0 {
+			continue
+		}
+		fieldValue := objValue.Field(i)
+		if fieldValue.Kind() == reflect.Slice {
+			if err := setSliceFromStrings(fieldValue, vals); err != nil {
+				return fmt.Errorf("%s%s", paramName, err.Error())
 			}
+			continue
+		}
+		if err := setFieldValue(fieldValue, vals[0]); err != nil {
+			return err
 		}
 	}
 
@@ -83,7 +92,9 @@ func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct int
 // Field binding
 //
 // setFieldValue sets a struct field from its string query-parameter value,
-// applying the appropriate conversion for the field's kind.
+// applying the appropriate conversion for the field's kind. Supported kinds:
+// string, int/int8..int64, uint/uint8..uint64. bool and pointer kinds are
+// not yet implemented.
 func setFieldValue(value reflect.Value, strValue string) error {
 	switch value.Kind() {
 	case reflect.String:
@@ -103,5 +114,49 @@ func setFieldValue(value reflect.Value, strValue string) error {
 	default:
 		return errors.New("unsupported kind")
 	}
+	return nil
+}
+
+// setSliceFromStrings populates a slice field from query-param values.
+// Two wire formats are accepted:
+//  1. JSON array literal in a single value (e.g. ?ids=[1,2,3]) — detected
+//     when len(vals) == 1 and the trimmed value starts with "[".
+//  2. Repeated params, optionally comma-separated within a single value
+//     (e.g. ?ids=1&ids=2, ?ids=1,2,3, ?ids=1,2&ids=3).
+//
+// Element kinds supported match setFieldValue (string, int*, uint*).
+// Slices of bool, pointers, or structs are left for a future PR.
+func setSliceFromStrings(value reflect.Value, vals []string) error {
+	if len(vals) == 1 && strings.HasPrefix(strings.TrimSpace(vals[0]), "[") {
+		target := reflect.New(value.Type())
+		if err := json.Unmarshal([]byte(vals[0]), target.Interface()); err != nil {
+			return fmt.Errorf(": invalid JSON array '%s': %v", vals[0], err)
+		}
+		value.Set(target.Elem())
+		return nil
+	}
+
+	var expanded []string
+	for _, v := range vals {
+		for _, piece := range strings.Split(v, ",") {
+			piece = strings.TrimSpace(piece)
+			if piece == "" {
+				continue
+			}
+			expanded = append(expanded, piece)
+		}
+	}
+	if len(expanded) == 0 {
+		return nil
+	}
+
+	elemType := value.Type().Elem()
+	slice := reflect.MakeSlice(value.Type(), len(expanded), len(expanded))
+	for i, s := range expanded {
+		if err := setFieldValue(slice.Index(i), s); err != nil {
+			return fmt.Errorf("[%d]: invalid %s: '%s'", i, elemType, s)
+		}
+	}
+	value.Set(slice)
 	return nil
 }
