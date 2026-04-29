@@ -190,8 +190,9 @@ func (c *sqsConsumer) poll(ctx context.Context, url *string, handler port.Messag
 
 func (c *sqsConsumer) handle(ctx context.Context, url *string, sqsMsg *awssqs.Message, handler port.MessageHandler) {
 	var msg types.Message
-	if err := json.Unmarshal([]byte(aws.StringValue(sqsMsg.Body)), &msg); err != nil {
-		msg = types.Message{Value: []byte(aws.StringValue(sqsMsg.Body))}
+	body := []byte(aws.StringValue(sqsMsg.Body))
+	if err := json.Unmarshal(body, &msg); err != nil || len(msg.Value) == 0 {
+		msg = types.Message{Value: body}
 	}
 
 	result, err := handler.Handle(ctx, &msg)

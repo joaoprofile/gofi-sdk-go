@@ -257,6 +257,51 @@ func TestSQSConsumerHandleInvalidJSON(t *testing.T) {
 	assert.True(t, called)
 }
 
+// Body is valid JSON but not a types.Message envelope (e.g., a raw SNS-to-SQS
+// notification from an external producer). json.Unmarshal succeeds with all
+// zero values, so the handler must receive the raw body as Value.
+func TestSQSConsumerHandleRawNotificationBody(t *testing.T) {
+	c := newTestConsumer(&mockSQS{})
+	raw := `{"NotificationType":"AnyOfferChanged","Payload":{"SellerId":"A1B2C3"}}`
+	var got *types.Message
+	c.handle(context.Background(), aws.String("https://fake/q"), &awssqs.Message{Body: &raw, ReceiptHandle: aws.String("rh")},
+		port.MessageHandlerFunc(func(_ context.Context, msg *types.Message) (types.Result, error) {
+			got = msg
+			return types.Ack, nil
+		}))
+	require.NotNil(t, got)
+	assert.Equal(t, raw, string(got.Value), "raw body must be exposed as Value when envelope is absent")
+
+	// Downstream must be able to unmarshal Value into the notification model.
+	var decoded struct {
+		NotificationType string
+		Payload          struct{ SellerId string }
+	}
+	require.NoError(t, json.Unmarshal(got.Value, &decoded))
+	assert.Equal(t, "AnyOfferChanged", decoded.NotificationType)
+	assert.Equal(t, "A1B2C3", decoded.Payload.SellerId)
+}
+
+// Envelope-wrapped messages (produced via types.NewMessage) must keep
+// behaving as before: handler receives the inner Value, not the whole envelope.
+func TestSQSConsumerHandleEnvelopePreservesValue(t *testing.T) {
+	c := newTestConsumer(&mockSQS{})
+	payload := map[string]string{"hello": "world"}
+	envelope := types.NewMessageWithTopic("q", payload)
+
+	var got *types.Message
+	c.handle(context.Background(), aws.String("https://fake/q"), &awssqs.Message{Body: sqsBody(envelope), ReceiptHandle: aws.String("rh")},
+		port.MessageHandlerFunc(func(_ context.Context, msg *types.Message) (types.Result, error) {
+			got = msg
+			return types.Ack, nil
+		}))
+	require.NotNil(t, got)
+
+	var decoded map[string]string
+	require.NoError(t, json.Unmarshal(got.Value, &decoded))
+	assert.Equal(t, payload, decoded)
+}
+
 func TestSQSConsumerHandleAckDeleteError(t *testing.T) {
 	// delete fails → error only logged; handle must not propagate it.
 	c := newTestConsumer(&mockSQS{deleteErr: errors.New("delete failed")})
