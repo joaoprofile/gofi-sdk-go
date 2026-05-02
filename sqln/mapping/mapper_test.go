@@ -232,6 +232,18 @@ type sliceModel struct {
 	Tags []string `db:"tags"`
 }
 
+// scannableSlice is a named slice type that implements sql.Scanner —
+// e.g. a JSONB column whose Go shape is []string but whose driver value
+// is the raw JSON bytes. The mapper must NOT wrap it in pq.Array, so the
+// custom Scan owns parsing.
+type scannableSlice []string
+
+func (s *scannableSlice) Scan(_ any) error { return nil }
+
+type scannableSliceModel struct {
+	Items scannableSlice `db:"items"`
+}
+
 func TestGetMappedCols_WithGofiTags_ReturnsAddresses(t *testing.T) {
 	m := &mappedModel{ID: 1, Name: "test"}
 	cols := GetMappedCols(m)
@@ -254,6 +266,24 @@ func TestGetMappedCols_SliceField_UsesPqArray(t *testing.T) {
 	m := &sliceModel{}
 	cols := GetMappedCols(m)
 	require.Len(t, cols, 1)
+	// Plain []string with no Scanner: mapper wraps the address in pq.Array.
+	// pq.Array returns *pq.GenericArray (or similar) — never the bare *[]string.
+	_, isRawSlice := cols[0].(*[]string)
+	assert.False(t, isRawSlice, "plain []string must be wrapped in pq.Array")
+}
+
+// Regression: a named slice type implementing sql.Scanner must NOT be wrapped
+// in pq.Array — its Scan method owns parsing (e.g. JSONB column shaped as
+// []string in Go via custom Scan/Value). Driver: 2026-05-02 fix in
+// collectPlanFields after FindBySlug failed for any tenant whose
+// Branding.DigitalMedia (type alias of []string with Scan) was scanned.
+func TestGetMappedCols_SliceField_WithScanner_BypassesPqArray(t *testing.T) {
+	m := &scannableSliceModel{}
+	cols := GetMappedCols(m)
+	require.Len(t, cols, 1)
+	got, ok := cols[0].(*scannableSlice)
+	require.True(t, ok, "expected *scannableSlice (custom Scan), got %T", cols[0])
+	assert.Same(t, &m.Items, got, "mapper must point at the field directly")
 }
 
 func TestGetMappedCols_NonStructNonPointer_ReturnsAddr(t *testing.T) {
