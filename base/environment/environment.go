@@ -117,7 +117,27 @@ type Environment struct {
 
 	OtelExporterOTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 	OtelExporterOTLPHeaders  string `env:"OTEL_EXPORTER_OTLP_HEADERS"`
+
+	// Auth / IAM — universais para qualquer serviço com sessão.
+	JWTSecret       string        `env:"JWT_SECRET"`
+	JWTIssuer       string        `env:"JWT_ISSUER"`
+	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL"`
+	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL"`
+
+	// OAuth — provedores externos. Prefixo OAUTH_<PROVIDER>_*.
+	OAuthGoogleClientID     string `env:"OAUTH_GOOGLE_CLIENT_ID"`
+	OAuthGoogleClientSecret string `env:"OAUTH_GOOGLE_CLIENT_SECRET"`
+	OAuthGoogleRedirectURI  string `env:"OAUTH_GOOGLE_REDIRECT_URI"`
+
+	// HTTP / CORS — origens permitidas como CSV ("a,b,c").
+	AllowedOrigins string `env:"ALLOWED_ORIGINS"`
 }
+
+// Defaults aplicados pelo SDK quando o env não traz valor.
+const (
+	defaultAccessTokenTTL  = 15 * time.Minute
+	defaultRefreshTokenTTL = 7 * 24 * time.Hour
+)
 
 var (
 	environmentInstance *Environment
@@ -456,4 +476,133 @@ func (env *Environment) Observability() ObservabilityConfig {
 		OTLPEndpoint: env.OtelExporterOTLPEndpoint,
 		OTLPHeaders:  env.OtelExporterOTLPHeaders,
 	}
+}
+
+// =============================================================================
+// Phase 6: Auth / OAuth / HTTP — universal building blocks for HTTP services.
+// =============================================================================
+
+// AuthConfig groups the fields a JWT-based authentication flow needs.
+// Returned by Environment.Auth(). Values come from JWT_SECRET, JWT_ISSUER,
+// ACCESS_TOKEN_TTL and REFRESH_TOKEN_TTL — defaults applied when missing.
+type AuthConfig struct {
+	JWTSecret       []byte
+	Issuer          string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+}
+
+// Auth returns an AuthConfig populated from the environment, applying SDK
+// defaults for TTLs and falling back to AppName for the issuer when not set.
+// Does NOT validate the secret — use RequireAuth() for fail-fast.
+func (env *Environment) Auth() AuthConfig {
+	issuer := env.JWTIssuer
+	if issuer == "" {
+		issuer = env.AppName
+	}
+	access := env.AccessTokenTTL
+	if access <= 0 {
+		access = defaultAccessTokenTTL
+	}
+	refresh := env.RefreshTokenTTL
+	if refresh <= 0 {
+		refresh = defaultRefreshTokenTTL
+	}
+	return AuthConfig{
+		JWTSecret:       []byte(env.JWTSecret),
+		Issuer:          issuer,
+		AccessTokenTTL:  access,
+		RefreshTokenTTL: refresh,
+	}
+}
+
+// IsAuthConfigured reports whether JWT_SECRET is set. Lets the caller decide
+// the policy (warn vs. fatal) instead of forcing it inside the SDK.
+func (env *Environment) IsAuthConfigured() bool {
+	return env.JWTSecret != ""
+}
+
+// RequireAuth returns an error wrapping ErrInvalidEnvironment when JWT_SECRET
+// is missing. main.go (or LoadConfig) is the right place to fatalize.
+func (env *Environment) RequireAuth() error {
+	if env.JWTSecret == "" {
+		return fmt.Errorf("%w: JWT_SECRET is required", ErrInvalidEnvironment)
+	}
+	return nil
+}
+
+// OAuthConfig groups OAuth provider configuration. Each provider lives in its
+// own field — extend with Microsoft, Apple, OIDC etc. as the SDK supports them.
+type OAuthConfig struct {
+	Google GoogleOAuthConfig
+}
+
+// GoogleOAuthConfig holds Google IDP credentials for OAuth flows.
+type GoogleOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURI  string
+}
+
+// OAuth returns an OAuthConfig populated from the environment.
+func (env *Environment) OAuth() OAuthConfig {
+	return OAuthConfig{
+		Google: GoogleOAuthConfig{
+			ClientID:     env.OAuthGoogleClientID,
+			ClientSecret: env.OAuthGoogleClientSecret,
+			RedirectURI:  env.OAuthGoogleRedirectURI,
+		},
+	}
+}
+
+// IsGoogleConfigured reports whether the Google OAuth flow is fully set up.
+func (g GoogleOAuthConfig) IsConfigured() bool {
+	return g.ClientID != "" && g.ClientSecret != "" && g.RedirectURI != ""
+}
+
+// RequireGoogleOAuth returns an error wrapping ErrInvalidEnvironment when any
+// of the Google OAuth fields are missing.
+func (env *Environment) RequireGoogleOAuth() error {
+	g := env.OAuth().Google
+	if !g.IsConfigured() {
+		return fmt.Errorf(
+			"%w: OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET and OAUTH_GOOGLE_REDIRECT_URI are required",
+			ErrInvalidEnvironment,
+		)
+	}
+	return nil
+}
+
+// HTTPConfig groups HTTP server configuration. AllowedOrigins is the parsed
+// CSV from ALLOWED_ORIGINS (each origin already trimmed; empty entries dropped).
+type HTTPConfig struct {
+	Port           int
+	AllowedOrigins []string
+}
+
+// HTTP returns an HTTPConfig populated from the environment.
+func (env *Environment) HTTP() HTTPConfig {
+	return HTTPConfig{
+		Port:           env.ServicePort,
+		AllowedOrigins: parseAllowedOrigins(env.AllowedOrigins),
+	}
+}
+
+// parseAllowedOrigins splits a CSV string into trimmed, non-empty entries.
+// Returns nil when the input is empty so callers can apply their own default.
+func parseAllowedOrigins(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+	parts := strings.Split(csv, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

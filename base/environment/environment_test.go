@@ -1,6 +1,7 @@
 package environment
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -408,6 +409,227 @@ func TestResetForTesting(t *testing.T) {
 
 	if environmentInstance != nil {
 		t.Error("expected nil instance after ResetForTesting")
+	}
+}
+
+// ---- AuthConfig ----
+
+func TestAuthConfig_AppliesDefaults(t *testing.T) {
+	env := Environment{
+		AppName:   "billing-service",
+		JWTSecret: "shh",
+	}
+
+	cfg := env.Auth()
+	if string(cfg.JWTSecret) != "shh" {
+		t.Errorf("JWTSecret=%q, want %q", cfg.JWTSecret, "shh")
+	}
+	if cfg.Issuer != "billing-service" {
+		t.Errorf("Issuer=%q, want fallback to AppName 'billing-service'", cfg.Issuer)
+	}
+	if cfg.AccessTokenTTL != defaultAccessTokenTTL {
+		t.Errorf("AccessTokenTTL=%v, want default %v", cfg.AccessTokenTTL, defaultAccessTokenTTL)
+	}
+	if cfg.RefreshTokenTTL != defaultRefreshTokenTTL {
+		t.Errorf("RefreshTokenTTL=%v, want default %v", cfg.RefreshTokenTTL, defaultRefreshTokenTTL)
+	}
+}
+
+func TestAuthConfig_OverridesDefaults(t *testing.T) {
+	env := Environment{
+		AppName:         "x",
+		JWTSecret:       "s",
+		JWTIssuer:       "explicit-issuer",
+		AccessTokenTTL:  30 * time.Minute,
+		RefreshTokenTTL: 14 * 24 * time.Hour,
+	}
+
+	cfg := env.Auth()
+	if cfg.Issuer != "explicit-issuer" {
+		t.Errorf("Issuer=%q, want explicit-issuer", cfg.Issuer)
+	}
+	if cfg.AccessTokenTTL != 30*time.Minute {
+		t.Errorf("AccessTokenTTL=%v, want 30m", cfg.AccessTokenTTL)
+	}
+	if cfg.RefreshTokenTTL != 14*24*time.Hour {
+		t.Errorf("RefreshTokenTTL=%v, want 336h", cfg.RefreshTokenTTL)
+	}
+}
+
+func TestAuthConfig_NegativeTTLFallsBackToDefault(t *testing.T) {
+	env := Environment{JWTSecret: "x", AccessTokenTTL: -1 * time.Second}
+	if got := env.Auth().AccessTokenTTL; got != defaultAccessTokenTTL {
+		t.Errorf("AccessTokenTTL=%v, want default %v on negative input", got, defaultAccessTokenTTL)
+	}
+}
+
+func TestIsAuthConfigured(t *testing.T) {
+	if (&Environment{}).IsAuthConfigured() {
+		t.Error("expected IsAuthConfigured()=false on empty env")
+	}
+	if !(&Environment{JWTSecret: "x"}).IsAuthConfigured() {
+		t.Error("expected IsAuthConfigured()=true when JWTSecret set")
+	}
+}
+
+func TestRequireAuth_MissingSecret(t *testing.T) {
+	err := (&Environment{}).RequireAuth()
+	if err == nil {
+		t.Fatal("expected error when JWTSecret empty")
+	}
+	if !errors.Is(err, ErrInvalidEnvironment) {
+		t.Errorf("expected error to wrap ErrInvalidEnvironment, got %v", err)
+	}
+}
+
+func TestRequireAuth_OK(t *testing.T) {
+	if err := (&Environment{JWTSecret: "x"}).RequireAuth(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ---- OAuthConfig ----
+
+func TestOAuthConfig_GoogleEmpty(t *testing.T) {
+	cfg := (&Environment{}).OAuth()
+	if cfg.Google.IsConfigured() {
+		t.Error("expected Google.IsConfigured()=false on empty env")
+	}
+}
+
+func TestOAuthConfig_GooglePopulated(t *testing.T) {
+	env := Environment{
+		OAuthGoogleClientID:     "id",
+		OAuthGoogleClientSecret: "secret",
+		OAuthGoogleRedirectURI:  "http://localhost/cb",
+	}
+	g := env.OAuth().Google
+	if !g.IsConfigured() {
+		t.Error("expected Google.IsConfigured()=true when all 3 fields set")
+	}
+	if g.ClientID != "id" || g.ClientSecret != "secret" || g.RedirectURI != "http://localhost/cb" {
+		t.Errorf("OAuth values mismatched: %+v", g)
+	}
+}
+
+func TestOAuthConfig_GooglePartialIsNotConfigured(t *testing.T) {
+	cases := []Environment{
+		{OAuthGoogleClientSecret: "s", OAuthGoogleRedirectURI: "r"},
+		{OAuthGoogleClientID: "i", OAuthGoogleRedirectURI: "r"},
+		{OAuthGoogleClientID: "i", OAuthGoogleClientSecret: "s"},
+	}
+	for i, env := range cases {
+		if env.OAuth().Google.IsConfigured() {
+			t.Errorf("case %d: expected partial config to be IsConfigured()=false", i)
+		}
+	}
+}
+
+func TestRequireGoogleOAuth_Missing(t *testing.T) {
+	err := (&Environment{OAuthGoogleClientID: "id"}).RequireGoogleOAuth()
+	if !errors.Is(err, ErrInvalidEnvironment) {
+		t.Errorf("expected ErrInvalidEnvironment, got %v", err)
+	}
+}
+
+func TestRequireGoogleOAuth_OK(t *testing.T) {
+	env := &Environment{
+		OAuthGoogleClientID:     "i",
+		OAuthGoogleClientSecret: "s",
+		OAuthGoogleRedirectURI:  "r",
+	}
+	if err := env.RequireGoogleOAuth(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ---- HTTPConfig ----
+
+func TestHTTPConfig_Empty(t *testing.T) {
+	cfg := (&Environment{}).HTTP()
+	if cfg.Port != 0 {
+		t.Errorf("Port=%d, want 0 on empty env", cfg.Port)
+	}
+	if cfg.AllowedOrigins != nil {
+		t.Errorf("AllowedOrigins=%v, want nil", cfg.AllowedOrigins)
+	}
+}
+
+func TestHTTPConfig_PortFromServicePort(t *testing.T) {
+	env := Environment{ServicePort: 9090}
+	if got := env.HTTP().Port; got != 9090 {
+		t.Errorf("Port=%d, want 9090", got)
+	}
+}
+
+func TestParseAllowedOrigins(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"empty", "", nil},
+		{"single", "http://a.com", []string{"http://a.com"}},
+		{"multi", "http://a.com,http://b.com", []string{"http://a.com", "http://b.com"}},
+		{"trims whitespace", "  http://a.com , http://b.com  ", []string{"http://a.com", "http://b.com"}},
+		{"drops empty entries", "http://a.com,,http://b.com", []string{"http://a.com", "http://b.com"}},
+		{"trailing comma", "http://a.com,", []string{"http://a.com"}},
+		{"only commas → nil", ",,,", nil},
+		{"only whitespace → nil", "   ", nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAllowedOrigins(tc.input)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len=%d (%v), want %d (%v)", len(got), got, len(tc.want), tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("[%d]=%q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// HTTP() must allocate a fresh slice each call so callers can't mutate
+// shared state across invocations.
+func TestHTTPConfig_AllowedOriginsIsolation(t *testing.T) {
+	env := Environment{AllowedOrigins: "http://a.com,http://b.com"}
+	a := env.HTTP().AllowedOrigins
+	a[0] = "MUTATED"
+	b := env.HTTP().AllowedOrigins
+	if b[0] == "MUTATED" {
+		t.Error("HTTP() must allocate a fresh slice each call; mutation leaked")
+	}
+}
+
+// End-to-end parser: catches tag-name typos on the new struct fields.
+func TestEnvironmentNewFieldsBootstrap(t *testing.T) {
+	reset(t)
+	t.Setenv("JWT_SECRET", "x")
+	t.Setenv("JWT_ISSUER", "iss")
+	t.Setenv("ACCESS_TOKEN_TTL", "1m")
+	t.Setenv("REFRESH_TOKEN_TTL", "1h")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_ID", "gid")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_SECRET", "gsec")
+	t.Setenv("OAUTH_GOOGLE_REDIRECT_URI", "http://x/cb")
+	t.Setenv("ALLOWED_ORIGINS", "http://a, http://b")
+
+	env := Instance()
+	if env.JWTSecret != "x" || env.JWTIssuer != "iss" {
+		t.Errorf("JWT vars not loaded: %+v", env)
+	}
+	if env.AccessTokenTTL != time.Minute || env.RefreshTokenTTL != time.Hour {
+		t.Errorf("TTLs not loaded: %v / %v", env.AccessTokenTTL, env.RefreshTokenTTL)
+	}
+	if env.OAuthGoogleClientID != "gid" || env.OAuthGoogleClientSecret != "gsec" || env.OAuthGoogleRedirectURI != "http://x/cb" {
+		t.Errorf("OAuth vars not loaded: %+v", env)
+	}
+	origins := env.HTTP().AllowedOrigins
+	if len(origins) != 2 || origins[0] != "http://a" || origins[1] != "http://b" {
+		t.Errorf("AllowedOrigins not parsed correctly: %v", origins)
 	}
 }
 
