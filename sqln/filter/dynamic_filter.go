@@ -130,7 +130,7 @@ type FilterParams struct {
 
 // Filters is the root container for a dynamic query filter request.
 type Filters struct {
-	Tenant  int32
+	Tenant  any
 	Params  *FilterParams `json:"params"`
 	Filters []*Filter     `json:"filters"`
 }
