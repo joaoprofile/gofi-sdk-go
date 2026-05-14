@@ -138,6 +138,7 @@ func (a *localAuth) SelectTenant(ctx context.Context, input port.SelectTenantInp
 		Issuer:       a.cfg.issuer,
 		IssuedAt:     now,
 		ExpiresAt:    now.Add(a.cfg.accessTokenTTL),
+		Extra:        extraToClaims(input.Extra),
 	}
 
 	accessToken, err := a.token.IssueAccessToken(claims)
@@ -166,6 +167,7 @@ func (a *localAuth) SelectTenant(ctx context.Context, input port.SelectTenantInp
 		IPAddress:            input.IPAddress,
 		UserAgent:            input.UserAgent,
 		DeviceID:             input.DeviceID,
+		Extra:                copyStringMap(input.Extra),
 	}
 
 	if err := a.session.Save(ctx, session); err != nil {
@@ -273,6 +275,7 @@ func (a *localAuth) RefreshToken(ctx context.Context, refreshToken string) (*typ
 		Issuer:       a.cfg.issuer,
 		IssuedAt:     now,
 		ExpiresAt:    now.Add(a.cfg.accessTokenTTL),
+		Extra:        extraToClaims(existing.Extra),
 	}
 
 	accessToken, err := a.token.IssueAccessToken(claims)
@@ -301,6 +304,7 @@ func (a *localAuth) RefreshToken(ctx context.Context, refreshToken string) (*typ
 		IPAddress:            existing.IPAddress,
 		UserAgent:            existing.UserAgent,
 		DeviceID:             existing.DeviceID,
+		Extra:                copyStringMap(existing.Extra),
 	}
 
 	if err := a.session.Save(ctx, newSession); err != nil {
@@ -363,4 +367,31 @@ func rolesForTenant(tenants []types.TenantAccess, tenantID string) []string {
 		}
 	}
 	return nil
+}
+
+// extraToClaims lifts a string-keyed map into the any-typed Extra slot of
+// types.Claims. Returns nil when input is empty so JWTs that do not carry
+// custom claims stay free of an empty "ext" object.
+func extraToClaims(in map[string]string) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// copyStringMap returns a defensive copy of the input map. Used to keep the
+// session's Extra independent of the caller's input map after rotation.
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

@@ -17,4 +17,7 @@ type Claims struct {
 	Issuer    string    `json:"iss"`
 	IssuedAt  time.Time `json:"iat"`
 	ExpiresAt time.Time `json:"exp"`
+
+	// Extra carries project-specific custom claims that the SDK schema does not model.
+	Extra map[string]any `json:"ext,omitempty"`
 }

@@ -106,6 +106,35 @@ func TestSave_ExpiredSession(t *testing.T) {
 	}
 }
 
+func TestSave_PreservesExtra(t *testing.T) {
+	p, _ := newTestProvider(t)
+	ctx := context.Background()
+	sess := newTestSession("s-extra", "u1", time.Hour)
+	sess.Extra = map[string]string{
+		"managerId":  "mgr-42",
+		"role":       "ADMIN",
+		"gumgaToken": "org-scoped-xyz",
+	}
+
+	if err := p.Save(ctx, sess); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	got, err := p.Get(ctx, "s-extra")
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.Extra["managerId"] != "mgr-42" {
+		t.Errorf("Extra[managerId]=%q, want mgr-42", got.Extra["managerId"])
+	}
+	if got.Extra["role"] != "ADMIN" {
+		t.Errorf("Extra[role]=%q, want ADMIN", got.Extra["role"])
+	}
+	if got.Extra["gumgaToken"] != "org-scoped-xyz" {
+		t.Errorf("Extra[gumgaToken]=%q, want org-scoped-xyz", got.Extra["gumgaToken"])
+	}
+}
+
 func TestSave_DoesNotPersistRawToken(t *testing.T) {
 	p, mr := newTestProvider(t)
 	ctx := context.Background()

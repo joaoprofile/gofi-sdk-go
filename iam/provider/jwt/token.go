@@ -39,11 +39,12 @@ type Config struct {
 // iamClaims maps types.Claims to the JWT format with RegisteredClaims.
 type iamClaims struct {
 	gojwt.RegisteredClaims
-	TenantID     string   `json:"tid"`
-	Module       string   `json:"mod"`
-	Roles        []string `json:"roles"`
-	SessionID    string   `json:"sid"`
-	AuthProvider string   `json:"apv"`
+	TenantID     string         `json:"tid"`
+	Module       string         `json:"mod"`
+	Roles        []string       `json:"roles"`
+	SessionID    string         `json:"sid"`
+	AuthProvider string         `json:"apv"`
+	Extra        map[string]any `json:"ext,omitempty"`
 }
 
 // Provider implements port.TokenPort using JWT (HS256/RS256/ES256).
@@ -97,6 +98,7 @@ func (p *Provider) IssueAccessToken(claims types.Claims) (string, error) {
 		Roles:        claims.Roles,
 		SessionID:    claims.SessionID,
 		AuthProvider: claims.AuthProvider,
+		Extra:        claims.Extra,
 	}
 
 	token := gojwt.NewWithClaims(p.signingMethod(), jc)
@@ -130,7 +132,7 @@ func (p *Provider) ParseToken(token string) (*types.Claims, error) {
 		return nil, core.ErrTokenInvalid
 	}
 
-	return &types.Claims{
+	out := &types.Claims{
 		UserID:       jc.Subject,
 		TenantID:     jc.TenantID,
 		Module:       jc.Module,
@@ -138,9 +140,15 @@ func (p *Provider) ParseToken(token string) (*types.Claims, error) {
 		SessionID:    jc.SessionID,
 		AuthProvider: jc.AuthProvider,
 		Issuer:       jc.Issuer,
-		IssuedAt:     jc.IssuedAt.Time,
-		ExpiresAt:    jc.ExpiresAt.Time,
-	}, nil
+		Extra:        jc.Extra,
+	}
+	if jc.IssuedAt != nil {
+		out.IssuedAt = jc.IssuedAt.Time
+	}
+	if jc.ExpiresAt != nil {
+		out.ExpiresAt = jc.ExpiresAt.Time
+	}
+	return out, nil
 }
 
 func (p *Provider) signingMethod() gojwt.SigningMethod {

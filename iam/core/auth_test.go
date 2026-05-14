@@ -171,6 +171,35 @@ func TestLocalAuth_SelectTenant_Success(t *testing.T) {
 	assert.Empty(t, stored.RefreshToken)
 }
 
+func TestLocalAuth_SelectTenant_PropagatesExtra(t *testing.T) {
+	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
+	tenant := &stubTenantPort{
+		tenants: []types.TenantAccess{
+			{Tenant: types.Tenant{ID: "t1"}, Roles: []string{"viewer"}},
+		},
+	}
+	token := &stubTokenPort{accessToken: "access-token"}
+	auth, sess := buildLocalAuth(user, tenant, token)
+
+	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
+		UserID:   "u1",
+		TenantID: "t1",
+		Module:   "mod",
+		Extra: map[string]string{
+			"name":      "Joao",
+			"managerId": "mgr-42",
+			"role":      "ADMIN",
+		},
+	})
+	require.NoError(t, err)
+
+	stored, err := sess.Get(context.Background(), session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Joao", stored.Extra["name"])
+	assert.Equal(t, "mgr-42", stored.Extra["managerId"])
+	assert.Equal(t, "ADMIN", stored.Extra["role"])
+}
+
 func TestLocalAuth_SelectTenant_AccessDenied(t *testing.T) {
 	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
 	tenant := &stubTenantPort{accessErr: errors.New("denied")}

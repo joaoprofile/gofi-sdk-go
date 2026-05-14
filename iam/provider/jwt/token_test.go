@@ -316,3 +316,52 @@ func TestProvider_IssueAccessToken_UsesClaimsExpiresAt(t *testing.T) {
 	// Should be approximately 30 minutes from now, not 1 minute.
 	assert.True(t, parsed.ExpiresAt.After(time.Now().Add(25*time.Minute)))
 }
+
+func TestProvider_IssueAndParseAccessToken_PreservesExtra(t *testing.T) {
+	p, err := NewProvider(Config{
+		Algorithm:      HS256,
+		Secret:         []byte("a-32-byte-secret-key-for-testing!"),
+		AccessTokenTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	claims := types.Claims{
+		UserID:    "user-1",
+		TenantID:  "tenant-1",
+		SessionID: "session-1",
+		ExpiresAt: time.Now().Add(time.Minute),
+		Extra: map[string]any{
+			"name":      "Joao",
+			"managerId": "mgr-42",
+			"role":      "ADMIN",
+			"email":     "joao@y.com",
+		},
+	}
+
+	token, err := p.IssueAccessToken(claims)
+	require.NoError(t, err)
+
+	parsed, err := p.ParseToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, "Joao", parsed.Extra["name"])
+	assert.Equal(t, "mgr-42", parsed.Extra["managerId"])
+	assert.Equal(t, "ADMIN", parsed.Extra["role"])
+	assert.Equal(t, "joao@y.com", parsed.Extra["email"])
+}
+
+func TestProvider_ParseToken_NilExtraWhenAbsent(t *testing.T) {
+	p, err := NewProvider(Config{
+		Algorithm:      HS256,
+		Secret:         []byte("a-32-byte-secret-key-for-testing!"),
+		AccessTokenTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	claims := types.Claims{UserID: "u", SessionID: "s", ExpiresAt: time.Now().Add(time.Minute)}
+	token, err := p.IssueAccessToken(claims)
+	require.NoError(t, err)
+
+	parsed, err := p.ParseToken(token)
+	require.NoError(t, err)
+	assert.Nil(t, parsed.Extra, "Extra should stay nil when no custom claims are issued")
+}

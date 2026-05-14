@@ -41,4 +41,9 @@ type Session struct {
 	IPAddress string
 	UserAgent string
 	DeviceID  string
+
+	// Extra carries project-specific session attributes that the SDK schema does not
+	// model (e.g. external provider tokens, domain role labels). Persisted by the
+	// SessionPort as part of the session blob — round-tripped on Save/Get.
+	Extra map[string]string `json:"extra,omitempty"`
 }

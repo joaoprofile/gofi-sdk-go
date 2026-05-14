@@ -34,6 +34,11 @@ type AuthPort interface {
 type AuthInput struct {
 	Email    string
 	Password string
+
+	// Extra carries provider-specific input that does not fit Email/Password,
+	// e.g. an external token already issued by a third party. Forwarded
+	// unchanged to the custom AuthPort implementation.
+	Extra map[string]string
 }
 
 // AuthResult is the result of the Authenticate step.
@@ -41,6 +46,11 @@ type AuthInput struct {
 type AuthResult struct {
 	UserID  string
 	Tenants []types.TenantAccess
+
+	// Extra carries handoff data that the custom AuthPort needs between
+	// Authenticate and SelectTenant (e.g. an external session token). The
+	// caller is responsible for re-injecting it into SelectTenantInput.Extra.
+	Extra map[string]string
 }
 
 // SelectTenantInput holds the parameters for tenant selection after authentication.
@@ -53,4 +63,9 @@ type SelectTenantInput struct {
 	IPAddress string
 	UserAgent string
 	DeviceID  string
+
+	// Extra carries provider-specific data needed to issue the session
+	// (e.g. an external org-scoped token, a domain role label). Propagated
+	// by the custom AuthPort into types.Claims.Extra and types.Session.Extra.
+	Extra map[string]string
 }
