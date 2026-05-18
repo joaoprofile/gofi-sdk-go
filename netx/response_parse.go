@@ -3,6 +3,7 @@ package netx
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/joaoprofile/gofi/base/errs"
@@ -20,6 +21,8 @@ type ErrorResponse struct {
 	StatusCode int    `json:"code"`
 	Message    string `json:"message"`
 	ErrorCode  string `json:"errorCode,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Cause      string `json:"cause,omitempty"`
 	Details    any    `json:"details,omitempty"`
 }
 
@@ -43,17 +46,67 @@ func JSON(w http.ResponseWriter, statusCode int, jsonData []byte) {
 	safeWrite(w, jsonData)
 }
 
-func RespondError(w http.ResponseWriter, appErr errs.AppError) {
+func RespondError(w http.ResponseWriter, r *http.Request, appErr errs.AppError) {
+	var status int
 	switch {
 	case appErr.IsNotFound():
-		writeError(w, http.StatusNotFound, &appErr, appErr.Details)
+		status = http.StatusNotFound
 	case appErr.IsConflict():
-		writeError(w, http.StatusConflict, &appErr, appErr.Details)
+		status = http.StatusConflict
 	case appErr.IsValidation():
-		writeError(w, http.StatusBadRequest, &appErr, appErr.Details)
+		status = http.StatusBadRequest
+	case appErr.IsUnauthorized():
+		status = http.StatusUnauthorized
 	default:
-		writeError(w, http.StatusInternalServerError, &appErr, appErr.Details)
+		status = http.StatusInternalServerError
 	}
+
+	response := ErrorResponse{
+		StatusCode: status,
+		Message:    appErr.Message,
+		ErrorCode:  appErr.Code,
+		Kind:       string(appErr.Kind),
+		Details:    appErr.Details,
+	}
+	if appErr.Err != nil {
+		response.Cause = appErr.Err.Error()
+	}
+
+	logAppError(r, status, appErr, response.Cause)
+
+	payload, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		internalError(w)
+		return
+	}
+
+	setJSONHeader(w)
+	w.WriteHeader(status)
+	safeWrite(w, payload)
+}
+
+func logAppError(r *http.Request, status int, appErr errs.AppError, cause string) {
+	attrs := []any{
+		slog.Int("http.status", status),
+		slog.String("errorCode", appErr.Code),
+		slog.String("kind", string(appErr.Kind)),
+		slog.String("message", appErr.Message),
+	}
+	if cause != "" {
+		attrs = append(attrs, slog.String("cause", cause))
+	}
+	if r != nil {
+		attrs = append(attrs,
+			slog.String("http.method", r.Method),
+			slog.String("http.path", r.URL.Path),
+		)
+	}
+
+	level := slog.LevelWarn
+	if status >= http.StatusInternalServerError {
+		level = slog.LevelError
+	}
+	slog.Default().Log(nil, level, "http error response", attrs...)
 }
 
 func Response(w http.ResponseWriter, statusCode int, data interface{}) {

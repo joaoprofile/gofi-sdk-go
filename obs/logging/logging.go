@@ -116,6 +116,7 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 		if cfg.ServiceName != "" {
 			l = l.With("service", cfg.ServiceName)
 		}
+		slog.SetDefault(l)
 		return &Logger{Logger: l, env: cfg.Environment}, nil
 	}
 
@@ -152,6 +153,7 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 	if cfg.ServiceName != "" {
 		l = l.With("service", cfg.ServiceName)
 	}
+	slog.SetDefault(l)
 
 	return &Logger{
 		Logger: l,

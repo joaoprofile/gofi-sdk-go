@@ -204,13 +204,13 @@ func TestRespondError_KindMapsToHTTPStatus(t *testing.T) {
 		{"operation", errs.RegisterOperation("rsp-operation", "operation failed"), http.StatusInternalServerError},
 		{"unknown", errs.Register("rsp-unknown", "unknown error"), http.StatusInternalServerError},
 		{"external", errs.RegisterExternalError("rsp-external", "external service failed"), http.StatusInternalServerError},
-		{"unauthorized", errs.RegisterUnauthorized("rsp-unauthorized", "access denied"), http.StatusInternalServerError},
+		{"unauthorized", errs.RegisterUnauthorized("rsp-unauthorized", "access denied"), http.StatusUnauthorized},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			RespondError(rec, tc.appErr)
+			RespondError(rec, nil, tc.appErr)
 
 			assert.Equal(t, tc.wantStatus, rec.Code)
 			assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -233,7 +233,7 @@ func TestRespondError_BodyContainsStatusCodeAndMessage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			RespondError(rec, tc.appErr)
+			RespondError(rec, nil, tc.appErr)
 
 			var body ErrorResponse
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -248,7 +248,7 @@ func TestRespondError_WrappedError_PreservesKindAndMessage(t *testing.T) {
 	appErr := base.Wrap(errors.New("db: no rows"), "abc-123")
 
 	rec := httptest.NewRecorder()
-	RespondError(rec, appErr)
+	RespondError(rec, nil, appErr)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 
@@ -256,6 +256,9 @@ func TestRespondError_WrappedError_PreservesKindAndMessage(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, http.StatusNotFound, body.StatusCode)
 	assert.Contains(t, body.Message, "abc-123")
+	assert.Equal(t, "wrap-nf", body.ErrorCode)
+	assert.Equal(t, string(errs.KindNotFound), body.Kind)
+	assert.Equal(t, "db: no rows", body.Cause)
 }
 
 func TestRespondError_WithDetails_DetailsPropagated(t *testing.T) {
@@ -264,7 +267,7 @@ func TestRespondError_WithDetails_DetailsPropagated(t *testing.T) {
 		WithDetails(details)
 
 	rec := httptest.NewRecorder()
-	RespondError(rec, appErr)
+	RespondError(rec, nil, appErr)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
