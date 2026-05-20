@@ -11,6 +11,7 @@ type FieldMapping struct {
 	Label      string `json:"label"`
 	FilterType string `json:"filterType"`
 	SearchType string `json:"searchType"`
+	Content    any    `json:"Content"`
 }
 
 // QueryMapping defines the complete allowlist for dynamic query validation:
