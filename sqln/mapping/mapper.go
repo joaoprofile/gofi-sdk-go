@@ -54,9 +54,7 @@ func buildTypePlan(t reflect.Type) *typePlan {
 // collectPlanFields walks struct fields recursively and appends a fieldPlan for
 // each `db`-tagged leaf. Nested structs are descended into unless they are
 // time.Time, implement sql.Scanner, or are slices (slices are leaves wrapped
-// with pq.Array at scan time, unless they implement sql.Scanner — in that case
-// the custom Scan handles parsing, e.g. JSONB columns whose Go type is a
-// named slice with Scan/Value).
+// with pq.Array at scan time).
 func collectPlanFields(t reflect.Type, prefix []int, out *[]fieldPlan) {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -65,12 +63,10 @@ func collectPlanFields(t reflect.Type, prefix []int, out *[]fieldPlan) {
 		}
 		path := append(append([]int(nil), prefix...), i)
 		switch {
+		case reflect.PtrTo(f.Type).Implements(scannerType):
+			*out = append(*out, fieldPlan{indexPath: path})
 		case f.Type.Kind() == reflect.Slice:
-			if reflect.PtrTo(f.Type).Implements(scannerType) {
-				*out = append(*out, fieldPlan{indexPath: path})
-			} else {
-				*out = append(*out, fieldPlan{indexPath: path, isSlice: true})
-			}
+			*out = append(*out, fieldPlan{indexPath: path, isSlice: true})
 		case isNestedScannableType(f.Type):
 			collectPlanFields(f.Type, path, out)
 		default:
