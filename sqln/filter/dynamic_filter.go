@@ -248,9 +248,18 @@ func buildSlicePredicate(f *Filter) (criteria.Predicate, bool) {
 		return criteria.Predicate{}, false
 	}
 
-	// Single-element slice → treat as scalar
+	// Single-element slice → treat as scalar.
+	// IN/NOT IN have no scalar form; collapse to =/!= so the predicate is preserved
+	// instead of being silently dropped by scalarConditionPredicate.
 	if len(slice) == 1 {
-		return buildScalarPredicate(&Filter{Field: f.Field, Condition: f.Condition, Value: slice[0]})
+		cond := f.Condition
+		switch cond {
+		case In:
+			cond = Eq
+		case NotIn:
+			cond = NotEqual
+		}
+		return buildScalarPredicate(&Filter{Field: f.Field, Condition: cond, Value: slice[0]})
 	}
 
 	// BETWEEN with a []any containing time.Time values

@@ -164,6 +164,23 @@ func TestQueryBuild_NotIn_MultipleValues(t *testing.T) {
 	assert.Len(t, qp.Params, 2)
 }
 
+// Single-element slice collapses to = / != so the predicate is preserved
+// (scalarConditionPredicate has no scalar form for IN/NOT IN and would drop it).
+
+func TestQueryBuild_In_SingleValue_CollapsesToEq(t *testing.T) {
+	fs := NewFilters().Add(NewFilter("status", In, []any{"a"}))
+	qp := NewQueryBuildWithDialect(base, fs, pg)
+	assert.Equal(t, base+" AND ( status = $1 )", qp.Query)
+	assert.Equal(t, []any{StringValue("a")}, qp.Params)
+}
+
+func TestQueryBuild_NotIn_SingleValue_CollapsesToNotEqual(t *testing.T) {
+	fs := NewFilters().Add(NewFilter("tag", NotIn, []any{"x"}))
+	qp := NewQueryBuildWithDialect(base, fs, pg)
+	assert.Equal(t, base+" AND ( tag != $1 )", qp.Query)
+	assert.Equal(t, []any{StringValue("x")}, qp.Params)
+}
+
 // Eq with slice → IN (semantic alias)
 func TestQueryBuild_Eq_Slice_ProducesIN(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("id", Eq, []any{1, 2, 3}))
