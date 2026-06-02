@@ -145,7 +145,15 @@ func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
 		concurrency = 1
 	}
 
-	group, err := sarama.NewConsumerGroup(b.brokers, groupID, b.config)
+	sc := *b.config
+	switch cfg.InitialOffset {
+	case types.OffsetResetEarliest:
+		sc.Consumer.Offsets.Initial = sarama.OffsetOldest
+	case types.OffsetResetLatest:
+		sc.Consumer.Offsets.Initial = sarama.OffsetNewest
+	}
+
+	group, err := sarama.NewConsumerGroup(b.brokers, groupID, &sc)
 	if err != nil {
 		logging.Error("kafka: failed to create consumer group",
 			slog.String("topic", cfg.Topic),

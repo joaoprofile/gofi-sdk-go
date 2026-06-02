@@ -35,6 +35,9 @@ type (
 	// ConsumeConfig configures a consumer, regardless of broker.
 	ConsumeConfig = types.ConsumeConfig
 
+	// OffsetReset controls where a consumer group starts with no committed offset.
+	OffsetReset = types.OffsetReset
+
 	// QueueAttributes identifies a queue by broker-specific coordinates.
 	// Prefer ConsumeConfig in new code.
 	QueueAttributes = types.QueueAttributes
@@ -110,6 +113,13 @@ func NewMessageWithTopic(topic string, value interface{}) *Message {
 func UnpackMessage[T any](message *Message) (*T, error) {
 	return types.UnpackMessage[T](message)
 }
+
+// OffsetReset values re-exported so callers import only this package.
+const (
+	OffsetResetDefault  = types.OffsetResetDefault
+	OffsetResetEarliest = types.OffsetResetEarliest
+	OffsetResetLatest   = types.OffsetResetLatest
+)
 
 // DefaultConsumeConfig returns a ConsumeConfig with sensible defaults for the
 // given topic.

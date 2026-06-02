@@ -7,6 +7,22 @@ const (
 	DefaultPollInterval = 10 * time.Second
 )
 
+// OffsetReset controls where a consumer group starts reading when it has no
+// committed offset (its first run). It is ignored once the group has committed
+// offsets, and ignored by brokers without the concept (RabbitMQ, Redis).
+type OffsetReset string
+
+const (
+	// OffsetResetDefault defers to the provider default (Kafka: latest).
+	OffsetResetDefault OffsetReset = ""
+	// OffsetResetEarliest starts from the beginning of the topic on first run —
+	// use for command/event topics that must not be lost.
+	OffsetResetEarliest OffsetReset = "earliest"
+	// OffsetResetLatest starts from the end of the topic on first run — use for
+	// live-tail consumers that should ignore backlog.
+	OffsetResetLatest OffsetReset = "latest"
+)
+
 // ConsumeConfig holds all configuration for a consumer, regardless of broker.
 // Unused fields are silently ignored by providers that do not support them.
 type ConsumeConfig struct {
@@ -20,6 +36,7 @@ type ConsumeConfig struct {
 	MaxRetries      int           // max handler retries before dead-lettering
 	RetryBackoff    time.Duration // wait between retries
 	DeadLetterTopic string        // topic for messages that exhausted retries
+	InitialOffset   OffsetReset   // where to start when the group has no committed offset (Kafka)
 }
 
 // DefaultConsumeConfig returns a ConsumeConfig with sensible defaults.
