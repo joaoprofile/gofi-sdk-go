@@ -109,13 +109,15 @@ func TestBrokerNew(t *testing.T) {
 func TestBrokerNewProducerSuccess(t *testing.T) {
 	ch := newMockChannel()
 	b := &Broker{conn: &mockChanOpener{ch: ch}, exchange: "ex"}
-	p := b.NewProducer()
+	p, err := b.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 }
 
 func TestBrokerNewProducerChannelError(t *testing.T) {
 	b := &Broker{conn: &mockChanOpener{err: errors.New("conn error")}, exchange: "ex"}
-	p := b.NewProducer()
+	p, err := b.NewProducer()
+	require.Error(t, err)
 	assert.Nil(t, p)
 }
 

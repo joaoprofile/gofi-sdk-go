@@ -31,12 +31,12 @@ func (m *mockSyncProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
 	m.lastBatch = msgs
 	return m.batchErr
 }
-func (m *mockSyncProducer) Close() error                                   { return nil }
-func (m *mockSyncProducer) TxnStatus() sarama.ProducerTxnStatusFlag        { return 0 }
-func (m *mockSyncProducer) IsTransactional() bool                          { return false }
-func (m *mockSyncProducer) BeginTxn() error                                { return nil }
-func (m *mockSyncProducer) CommitTxn() error                               { return nil }
-func (m *mockSyncProducer) AbortTxn() error                                { return nil }
+func (m *mockSyncProducer) Close() error                            { return nil }
+func (m *mockSyncProducer) TxnStatus() sarama.ProducerTxnStatusFlag { return 0 }
+func (m *mockSyncProducer) IsTransactional() bool                   { return false }
+func (m *mockSyncProducer) BeginTxn() error                         { return nil }
+func (m *mockSyncProducer) CommitTxn() error                        { return nil }
+func (m *mockSyncProducer) AbortTxn() error                         { return nil }
 func (m *mockSyncProducer) AddOffsetsToTxn(_ map[string][]*sarama.PartitionOffsetMetadata, _ string) error {
 	return nil
 }
@@ -391,14 +391,15 @@ func TestKafkaConsumerConsumeWithCancelledContext(t *testing.T) {
 
 	mock := &mockConsumerGroup{}
 	c := &kafkaConsumer{
-		group:       mock,
 		cfg:         types.ConsumeConfig{Topic: "topic"},
 		concurrency: 1,
+		newGroup:    func() (sarama.ConsumerGroup, error) { return mock, nil },
 	}
 	err := c.Consume(ctx, port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
 		return types.Ack, nil
 	}))
 	assert.NoError(t, err)
+	assert.True(t, mock.closed, "cada worker deve fechar o próprio ConsumerGroup via defer")
 }
 
 func TestKafkaConsumerConsumeGroupErrorIsLogged(t *testing.T) {
@@ -406,9 +407,9 @@ func TestKafkaConsumerConsumeGroupErrorIsLogged(t *testing.T) {
 
 	mock := &mockConsumerGroup{consumeErr: errors.New("group error")}
 	c := &kafkaConsumer{
-		group:       mock,
 		cfg:         types.ConsumeConfig{Topic: "topic"},
 		concurrency: 1,
+		newGroup:    func() (sarama.ConsumerGroup, error) { return mock, nil },
 	}
 
 	go func() {
@@ -423,10 +424,25 @@ func TestKafkaConsumerConsumeGroupErrorIsLogged(t *testing.T) {
 }
 
 func TestKafkaConsumerClose(t *testing.T) {
-	mock := &mockConsumerGroup{}
-	c := &kafkaConsumer{group: mock}
+	// Close é no-op: cada worker fecha o próprio ConsumerGroup via defer quando
+	// Consume retorna (ctx cancelado). Validado em TestKafkaConsumerConsumeWithCancelledContext.
+	c := &kafkaConsumer{}
 	require.NoError(t, c.Close())
-	assert.True(t, mock.closed)
+}
+
+func TestKafkaConsumerConsumeGroupCreateErrorIsHandled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := &kafkaConsumer{
+		cfg:         types.ConsumeConfig{Topic: "topic"},
+		concurrency: 1,
+		newGroup:    func() (sarama.ConsumerGroup, error) { return nil, errors.New("dial failed") },
+	}
+	err := c.Consume(ctx, port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
+		return types.Ack, nil
+	}))
+	assert.NoError(t, err, "falha de criação de group num worker não derruba Consume")
 }
 
 func TestKafkaConsumerPauseAndResume(t *testing.T) {

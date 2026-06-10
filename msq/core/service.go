@@ -36,7 +36,7 @@ func NewService(cfg ServiceConfig) *BrokerService {
 }
 
 // NewProducer returns a ready-to-use Producer from the underlying broker.
-func (s *BrokerService) NewProducer() port.Producer {
+func (s *BrokerService) NewProducer() (port.Producer, error) {
 	return s.broker.NewProducer()
 }
 

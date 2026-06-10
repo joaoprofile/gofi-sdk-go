@@ -47,19 +47,19 @@ func NewCacheRedis() {
 		redisInstance.client = client
 
 		observer.Attach(&cacheDBObserver{})
-		logging.Info("Cache database connected")
+		logging.Debug("Cache database connected")
 	})
 }
 
 type cacheDBObserver struct{}
 
 func (o *cacheDBObserver) Close() {
-	logging.Info("Waiting to safely close the cache connection")
+	logging.Debug("Waiting to safely close the cache connection")
 	if observer.WaitRunningTimeout() {
 		logging.Warn("WaitGroup timed out, forcing close of the cache connection")
 	}
 
-	logging.Info("Closing cache connection")
+	logging.Debug("Closing cache connection")
 	client := InstanceRedis()
 	if err := client.Close(); err != nil {
 		logging.Error("Error when closing cache connection", slog.Any("error", err))

@@ -57,7 +57,8 @@ func TestNewWithClient(t *testing.T) {
 
 func TestNewProducerNotNil(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 
@@ -78,7 +79,8 @@ func TestNewConsumerDefaultsConcurrency(t *testing.T) {
 
 func TestProducerSendMessage(t *testing.T) {
 	broker, mr := newTestBroker(t)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
 	msg := types.NewMessageWithTopic("events", map[string]string{"action": "signup"})
@@ -104,17 +106,19 @@ func TestProducerSendMessage(t *testing.T) {
 
 func TestProducerSendMessageMissingTopic(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
-	err := producer.SendMessage(context.Background(), &types.Message{Topic: ""})
+	err = producer.SendMessage(context.Background(), &types.Message{Topic: ""})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "Topic")
 }
 
 func TestProducerSendMessagesBatch(t *testing.T) {
 	broker, mr := newTestBroker(t)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
 	sub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
@@ -145,20 +149,22 @@ func TestProducerSendMessagesBatch(t *testing.T) {
 
 func TestProducerSendMessagesBatchMissingTopic(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
 	msgs := []*types.Message{
 		types.NewMessageWithTopic("ch", "ok"),
 		{Topic: ""}, // missing topic
 	}
-	err := producer.SendMessagesBatch(context.Background(), msgs)
+	err = producer.SendMessagesBatch(context.Background(), msgs)
 	assert.Error(t, err)
 }
 
 func TestProducerClose(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	assert.NoError(t, producer.Close())
 }
 
@@ -379,13 +385,14 @@ func TestProducerSendMessagePublishError(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	broker := redisprovider.NewWithClient(client)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
 	mr.Close()
 
 	msg := types.NewMessageWithTopic("events", "data")
-	err := producer.SendMessage(context.Background(), msg)
+	err = producer.SendMessage(context.Background(), msg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "publish")
 }
@@ -395,7 +402,8 @@ func TestProducerSendMessagesBatchPipelineError(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	broker := redisprovider.NewWithClient(client)
-	producer := broker.NewProducer()
+	producer, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer producer.Close()
 
 	mr.Close()
@@ -404,6 +412,6 @@ func TestProducerSendMessagesBatchPipelineError(t *testing.T) {
 		types.NewMessageWithTopic("ch", "a"),
 		types.NewMessageWithTopic("ch", "b"),
 	}
-	err := producer.SendMessagesBatch(context.Background(), msgs)
+	err = producer.SendMessagesBatch(context.Background(), msgs)
 	assert.Error(t, err)
 }

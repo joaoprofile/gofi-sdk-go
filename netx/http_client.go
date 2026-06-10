@@ -44,9 +44,6 @@ type HttpClient struct {
 	// *circuitbreaker.CircuitBreaker
 }
 
-// rateLimiter returns the client's rate limiter, lazily building one from
-// RateLimit when the client was constructed without NewClient. The init runs
-// at most once per client, so concurrent first-callers see the same limiter.
 func (c *HttpClient) rateLimiter() *rate.Limiter {
 	c.limiterOnce.Do(func() {
 		if c.limiter != nil {
@@ -56,7 +53,7 @@ func (c *HttpClient) rateLimiter() *rate.Limiter {
 		if limit <= 0 {
 			limit = defaultRateLimit
 		}
-		c.limiter = rate.NewLimiter(rate.Limit(limit), 1)
+		c.limiter = rate.NewLimiter(rate.Limit(limit), limit)
 	})
 	return c.limiter
 }
@@ -78,8 +75,14 @@ func NewClient(config *HttpClientConfig) (*HttpClient, error) {
 		config.RetrySleep = defaultRetrySleep
 	}
 
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 200
+	transport.MaxIdleConnsPerHost = 100
+	transport.IdleConnTimeout = 90 * time.Second
+
 	client := &http.Client{
-		Timeout: config.Timeout,
+		Timeout:   config.Timeout,
+		Transport: transport,
 	}
 
 	if config.RateLimit == 0 {
@@ -93,6 +96,6 @@ func NewClient(config *HttpClientConfig) (*HttpClient, error) {
 		RetrySleep: config.RetrySleep,
 		Client:     client,
 		RateLimit:  config.RateLimit,
-		limiter:    rate.NewLimiter(rate.Limit(config.RateLimit), 1),
+		limiter:    rate.NewLimiter(rate.Limit(config.RateLimit), config.RateLimit),
 	}, nil
 }

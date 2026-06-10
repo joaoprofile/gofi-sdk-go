@@ -48,8 +48,8 @@ func NewWithSession(sess *session.Session) *Broker {
 	return &Broker{session: sess}
 }
 
-func (b *Broker) NewProducer() port.Producer {
-	return &sqsProducer{client: awssqs.New(b.session)}
+func (b *Broker) NewProducer() (port.Producer, error) {
+	return &sqsProducer{client: awssqs.New(b.session)}, nil
 }
 
 func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {

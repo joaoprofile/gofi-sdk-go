@@ -288,8 +288,9 @@ func TestHandleRateLimiting_SleepsWhenTooFast(t *testing.T) {
 	client := &HttpClient{RateLimit: 2}
 	req := &Request[string]{Ctx: context.Background(), Client: client}
 
-	// First call consumes the initial token immediately; the second call must
-	// wait ~500ms for a refill (2 req/s).
+	// Drain the initial burst (2 tokens at RateLimit=2) so the next Wait must
+	// block until the bucket refills (~500ms at 2 req/s).
+	assert.NoError(t, req.handleRateLimiting())
 	assert.NoError(t, req.handleRateLimiting())
 
 	start := time.Now()
@@ -339,11 +340,12 @@ func TestHandleRateLimiting_ConcurrentCallers_NoDataRace(t *testing.T) {
 }
 
 // Verifies the limiter actually enforces the configured rate when many
-// goroutines pile in at once. With RateLimit=10 and 10 callers, the slowest
-// caller must wait ~900ms (1 immediate + 9 refills @ 100ms each).
+// goroutines pile in at once. With RateLimit=10 (burst=10) and 20 callers,
+// the first 10 are absorbed by the burst and the remaining 10 refill at
+// 100ms each — the slowest caller must wait ~1s.
 func TestHandleRateLimiting_ConcurrentCallers_RespectsLimit(t *testing.T) {
 	client := &HttpClient{RateLimit: 10}
-	const goroutines = 10
+	const goroutines = 20
 
 	start := time.Now()
 	var wg sync.WaitGroup
@@ -359,7 +361,7 @@ func TestHandleRateLimiting_ConcurrentCallers_RespectsLimit(t *testing.T) {
 	elapsed := time.Since(start)
 
 	// Allow some scheduler jitter on the lower bound.
-	assert.GreaterOrEqual(t, elapsed, 800*time.Millisecond, "limiter should serialize 10 callers across ~900ms at 10 req/s")
+	assert.GreaterOrEqual(t, elapsed, 800*time.Millisecond, "post-burst callers should serialize across ~1s at 10 req/s")
 	assert.Less(t, elapsed, 2*time.Second, "should not take dramatically longer than the theoretical window")
 }
 
@@ -409,6 +411,24 @@ func TestExecute_Success_JSONResponse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "executed", (*resp)["message"])
+}
+
+func TestExecute_ExposesResponseHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", common.APPLICATION_JSON)
+		w.Header().Set("X-Custom-Quota", "0.5")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message":"ok"}`))
+	}))
+	defer server.Close()
+
+	req := NewRequest[map[string]string](context.Background(), newTestClient(server, 1, time.Millisecond), "GET", "/test")
+	assert.Nil(t, req.ResponseHeaders) // nil antes do Execute
+
+	_, err := req.Execute()
+	assert.NoError(t, err)
+	assert.NotNil(t, req.ResponseHeaders)
+	assert.Equal(t, "0.5", req.ResponseHeaders.Get("X-Custom-Quota"))
 }
 
 func TestExecute_Success_GetRequest(t *testing.T) {
@@ -734,4 +754,40 @@ func TestExecute_BytesBufferBody_RetainedOnRetry(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
 	assert.Equal(t, "raw buffer data", lastBody, "bytes.Buffer body must be present on every retry attempt")
+}
+
+// Execute — url.Values (form) body retained across retries
+
+func TestExecute_URLValuesBody_RetainedOnRetry(t *testing.T) {
+	var lastBody string
+	var contentType string
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		lastBody = string(bodyBytes)
+		contentType = r.Header.Get(common.CONTENT_TYPE)
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", common.APPLICATION_JSON)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer server.Close()
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", "rt-123")
+
+	req := NewRequest[map[string]string](context.Background(), newTestClient(server, 2, time.Millisecond), http.MethodPost, "/oauth/token")
+	req.SetBody(form)
+	result, err := req.Execute()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, common.APPLICATION_URL_ENCODED, contentType)
+	assert.Contains(t, lastBody, "grant_type=refresh_token", "form body must survive the retry, not be sent empty")
+	assert.Contains(t, lastBody, "refresh_token=rt-123", "form body must survive the retry, not be sent empty")
 }

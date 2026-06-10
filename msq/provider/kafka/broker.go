@@ -3,8 +3,12 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	stdlog "log"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +34,11 @@ type Config struct {
 	User     string
 	Password string
 	UseTLS   bool
-	ClientID string
+	// SASLMechanism selects the SASL mechanism: "PLAIN" (default),
+	// "SCRAM-SHA-256" or "SCRAM-SHA-512". Managed brokers such as OCI Kafka
+	// typically require SCRAM. Empty means PLAIN.
+	SASLMechanism string
+	ClientID      string
 	// Topics lists topics to be created idempotently when Setup is called.
 	Topics []TopicConfig
 }
@@ -45,9 +53,11 @@ type clusterAdmin interface {
 func ConfigFromEnv() Config {
 	env := environment.Instance()
 	return Config{
-		Brokers:  []string{fmt.Sprintf("%s:%d", env.MessagingHost, env.MessagingPort)},
-		User:     env.MessagingUser,
-		Password: env.MessagingPassword,
+		Brokers:       []string{fmt.Sprintf("%s:%d", env.MessagingHost, env.MessagingPort)},
+		User:          env.MessagingUser,
+		Password:      env.MessagingPassword,
+		UseTLS:        env.MessagingUseTLS,
+		SASLMechanism: env.MessagingSASLMechanism,
 	}
 }
 
@@ -68,19 +78,59 @@ func New(cfg Config) (*Broker, error) {
 	if cfg.ClientID != "" {
 		sc.ClientID = cfg.ClientID
 	}
+	mechanism := "PLAIN"
 	if cfg.User != "" && cfg.Password != "" {
 		sc.Net.SASL.Enable = true
 		sc.Net.SASL.User = cfg.User
 		sc.Net.SASL.Password = cfg.Password
-		sc.Net.SASL.Mechanism = sarama.SASLTypePlaintext
-		sc.Net.TLS.Enable = cfg.UseTLS
+		switch strings.ToUpper(strings.TrimSpace(cfg.SASLMechanism)) {
+		case "SCRAM-SHA-256":
+			mechanism = "SCRAM-SHA-256"
+			sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+			sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &scramClient{HashGeneratorFcn: sha256GeneratorFcn}
+			}
+		case "SCRAM-SHA-512":
+			mechanism = "SCRAM-SHA-512"
+			sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+			sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &scramClient{HashGeneratorFcn: sha512GeneratorFcn}
+			}
+		default:
+			sc.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		}
 	}
+	// TLS is independent of SASL: managed brokers commonly require SASL_SSL,
+	// but plain TLS (no auth) is also valid. Enable via MESSAGING_USE_TLS.
+	if cfg.UseTLS {
+		sc.Net.TLS.Enable = true
+		sc.Net.TLS.Config = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+
+	// Startup diagnostics: make the resolved target explicit so connection
+	// failures ("run out of available brokers") are not opaque. Set
+	// MESSAGING_DEBUG=true to surface Sarama's per-broker connection errors.
+	logging.Info("kafka: broker config",
+		slog.Any("brokers", cfg.Brokers),
+		slog.Bool("tls", cfg.UseTLS),
+		slog.Bool("sasl", sc.Net.SASL.Enable),
+		slog.String("mechanism", mechanism),
+	)
+	if enableSaramaDebug() {
+		sarama.Logger = stdlog.New(os.Stderr, "[sarama] ", stdlog.LstdFlags)
+	}
+
 	return &Broker{
 		brokers:      cfg.Brokers,
 		config:       sc,
 		topics:       cfg.Topics,
 		adminFactory: defaultAdminFactory,
 	}, nil
+}
+
+func enableSaramaDebug() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MESSAGING_DEBUG")))
+	return v == "1" || v == "true" || v == "yes"
 }
 
 func defaultAdminFactory(brokers []string, cfg *sarama.Config) (clusterAdmin, error) {
@@ -126,13 +176,13 @@ func (b *Broker) Setup(_ context.Context) error {
 	return nil
 }
 
-func (b *Broker) NewProducer() port.Producer {
+func (b *Broker) NewProducer() (port.Producer, error) {
 	prod, err := sarama.NewSyncProducer(b.brokers, b.config)
 	if err != nil {
 		logging.Error("kafka: failed to create producer", slog.Any("error", err))
-		return nil
+		return nil, fmt.Errorf("kafka: create producer: %w", err)
 	}
-	return &kafkaProducer{producer: prod}
+	return &kafkaProducer{producer: prod}, nil
 }
 
 func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
@@ -153,14 +203,14 @@ func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
 		sc.Consumer.Offsets.Initial = sarama.OffsetNewest
 	}
 
-	group, err := sarama.NewConsumerGroup(b.brokers, groupID, &sc)
-	if err != nil {
-		logging.Error("kafka: failed to create consumer group",
-			slog.String("topic", cfg.Topic),
-			slog.Any("error", err))
-		return nil
+	brokers := b.brokers
+	return &kafkaConsumer{
+		cfg:         cfg,
+		concurrency: concurrency,
+		newGroup: func() (sarama.ConsumerGroup, error) {
+			return sarama.NewConsumerGroup(brokers, groupID, &sc)
+		},
 	}
-	return &kafkaConsumer{group: group, cfg: cfg, concurrency: concurrency}
 }
 
 // Producer
@@ -225,11 +275,21 @@ func (p *kafkaProducer) Close() error { return p.producer.Close() }
 // Consumer
 
 type kafkaConsumer struct {
-	group       sarama.ConsumerGroup
 	cfg         types.ConsumeConfig
 	concurrency int
+	newGroup    func() (sarama.ConsumerGroup, error)
 }
 
+// Consume sobe `concurrency` workers, cada um com seu PRÓPRIO sarama
+// ConsumerGroup. Cada ConsumerGroup é um MEMBRO distinto no group do Kafka, então
+// as partições do tópico se distribuem entre eles (paralelismo real até
+// min(concurrency, partições)).
+//
+// Por que não 1 ConsumerGroup compartilhado por N goroutines: um ConsumerGroup
+// tem um único memberID; N goroutines chamando Consume() no mesmo group
+// re-entram no JoinGroup e invalidam a generation umas das outras → erro
+// "member not known in the current generation" em loop (rebalance churn). 1
+// group por worker elimina isso.
 func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler) error {
 	topics := []string{c.cfg.Topic}
 	var wg sync.WaitGroup
@@ -237,9 +297,19 @@ func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			group, err := c.newGroup()
+			if err != nil {
+				logging.Error("kafka consumer: failed to create consumer group",
+					slog.String("topic", c.cfg.Topic),
+					slog.String("group_id", c.cfg.GroupID),
+					slog.Any("error", err))
+				return
+			}
+			defer group.Close()
+
 			h := &groupHandler{handler: handler, cfg: c.cfg}
 			for {
-				if err := c.group.Consume(ctx, topics, h); err != nil {
+				if err := group.Consume(ctx, topics, h); err != nil {
 					logging.Error("kafka consumer: session error",
 						slog.String("topic", c.cfg.Topic),
 						slog.Any("error", err))
@@ -254,7 +324,10 @@ func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler
 	return nil
 }
 
-func (c *kafkaConsumer) Close() error  { return c.group.Close() }
+// Close é no-op: cada worker fecha o próprio ConsumerGroup via defer quando
+// Consume retorna (ctx cancelado pelo ConsumerManager). Mantido pra satisfazer
+// port.Consumer.
+func (c *kafkaConsumer) Close() error  { return nil }
 func (c *kafkaConsumer) Pause() error  { return nil }
 func (c *kafkaConsumer) Resume() error { return nil }
 
@@ -268,6 +341,20 @@ func (h *groupHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil
 func (h *groupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 
 func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	// Sinal de ofuscação de offset: start NEGATIVO (sentinel newest/oldest) =
+	// Sarama não tinha offset commitado utilizável (ausente OU out-of-range por
+	// retenção ter apagado além do commit) e caiu na política. Só importa quando
+	// HÁ dado no tópico (hwm>0): newest pulando backlog real é o ponto cego que
+	// esconde "não consome" atrás de um offset stale. WARN só nesse caso — group
+	// novo em tópico vazio (hwm==0) é normal e fica silencioso.
+	if start := claim.InitialOffset(); start == sarama.OffsetNewest && claim.HighWaterMarkOffset() > 0 {
+		logging.Warn("kafka consumer: claim começou no FIM — sem offset commitado válido, backlog existente PULADO",
+			slog.String("topic", claim.Topic()),
+			slog.String("group_id", h.cfg.GroupID),
+			slog.Int("partition", int(claim.Partition())),
+			slog.Int64("high_water_mark", claim.HighWaterMarkOffset()))
+	}
+
 	for sm := range claim.Messages() {
 		msg := &types.Message{
 			Id:        uuid.New(),

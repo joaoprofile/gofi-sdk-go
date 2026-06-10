@@ -100,6 +100,8 @@ type Environment struct {
 	MessagingPassword        string `env:"MESSAGING_PASSWORD"`
 	MessagingHost            string `env:"MESSAGING_HOST"`
 	MessagingPort            int    `env:"MESSAGING_PORT"`
+	MessagingUseTLS          bool   `env:"MESSAGING_USE_TLS"`
+	MessagingSASLMechanism   string `env:"MESSAGING_SASL_MECHANISM"`
 	MessagingPollingInterval int    `env:"MESSAGING_POLLING_INTERVAL"`
 
 	// OCI-specific messaging credentials. Use Messaging().OCI* for new code.
@@ -411,6 +413,8 @@ type MessagingConfig struct {
 	Password        string
 	Host            string
 	Port            int
+	UseTLS          bool
+	SASLMechanism   string
 	PollingInterval int
 	// OCICredentials holds Oracle Cloud Queue-specific auth fields.
 	OCICredentials MessagingOCICredentials
@@ -432,6 +436,8 @@ func (env *Environment) Messaging() MessagingConfig {
 		Password:        env.MessagingPassword,
 		Host:            env.MessagingHost,
 		Port:            env.MessagingPort,
+		UseTLS:          env.MessagingUseTLS,
+		SASLMechanism:   env.MessagingSASLMechanism,
 		PollingInterval: env.MessagingPollingInterval,
 		OCICredentials: MessagingOCICredentials{
 			TenancyId:   env.MessagingOCITenancyId,

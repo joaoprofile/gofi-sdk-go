@@ -113,7 +113,8 @@ func TestNewProducer(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
 
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 
@@ -138,7 +139,8 @@ func TestNewConsumerDefaultsConcurrency(t *testing.T) {
 func TestProducerSendMessageMissingTopic(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 
 	err = p.SendMessage(context.Background(), &types.Message{Topic: ""})
 	assert.Error(t, err)
@@ -150,7 +152,9 @@ func TestProducerSendMessageMissingTopic(t *testing.T) {
 func TestProducerClose(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	assert.NoError(t, broker.NewProducer().Close())
+	p, err := broker.NewProducer()
+	assert.NoError(t, err)
+	assert.NoError(t, p.Close())
 }
 
 func TestConsumerClose(t *testing.T) {
@@ -176,7 +180,8 @@ func TestConsumerResume(t *testing.T) {
 func TestProducerSendMessagesBatchPartialEmptyTopic(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 
 	// batch where second message has a real OCID (the network will fail but
 	// first msg triggers json.Marshal path in the loop)

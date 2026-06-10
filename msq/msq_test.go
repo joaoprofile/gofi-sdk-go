@@ -142,7 +142,8 @@ func TestNewBrokerServiceDelegates(t *testing.T) {
 	require.NoError(t, err)
 
 	// NewProducer and NewConsumer must delegate to the underlying broker.
-	p := svc.NewProducer()
+	p, err := svc.NewProducer()
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 
 	c := svc.NewConsumer(msq.DefaultConsumeConfig("t"))
@@ -165,7 +166,8 @@ func TestNewRedisProducerWorks(t *testing.T) {
 	svc, err := msq.New(msq.Config{Broker: redis.New(redis.Config{Addr: mr.Addr()})})
 	require.NoError(t, err)
 
-	producer := svc.NewProducer()
+	producer, err := svc.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, producer)
 	defer producer.Close()
 
@@ -200,5 +202,5 @@ func (s *stubConsumer) Resume() error                                          {
 
 type stubBroker struct{}
 
-func (b *stubBroker) NewProducer() port.Producer                      { return &stubProducer{} }
+func (b *stubBroker) NewProducer() (port.Producer, error)             { return &stubProducer{}, nil }
 func (b *stubBroker) NewConsumer(_ types.ConsumeConfig) port.Consumer { return &stubConsumer{} }

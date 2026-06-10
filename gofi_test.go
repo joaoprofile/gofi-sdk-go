@@ -713,7 +713,7 @@ func TestShutdownWithNilTelemetryFieldsDoesNotPanic(t *testing.T) {
 
 type mockMessaging struct{}
 
-func (m *mockMessaging) NewProducer() msq.Producer                      { return nil }
+func (m *mockMessaging) NewProducer() (msq.Producer, error)             { return nil, nil }
 func (m *mockMessaging) NewConsumer(cfg msq.ConsumeConfig) msq.Consumer { return nil }
 
 type mockBrokerWithSetup struct {
@@ -721,7 +721,7 @@ type mockBrokerWithSetup struct {
 	setupErr    error
 }
 
-func (m *mockBrokerWithSetup) NewProducer() msq.Producer                      { return nil }
+func (m *mockBrokerWithSetup) NewProducer() (msq.Producer, error)             { return nil, nil }
 func (m *mockBrokerWithSetup) NewConsumer(cfg msq.ConsumeConfig) msq.Consumer { return nil }
 func (m *mockBrokerWithSetup) Setup(ctx context.Context) error {
 	m.setupCalled = true

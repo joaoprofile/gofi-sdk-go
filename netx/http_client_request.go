@@ -53,6 +53,11 @@ type Request[T any] struct {
 	Retries    int
 	retrySleep time.Duration
 	signature  Signature
+	// ResponseHeaders carrega os headers da última resposta bem-sucedida após
+	// Execute(). Permite ao caller ler metadados de transporte (ex.: rate limit
+	// devolvido pelo provider) sem o SDK conhecer a semântica de nenhum header
+	// específico. Nil até Execute() rodar com sucesso.
+	ResponseHeaders http.Header
 }
 
 func NewRequest[T any](ctx context.Context, client *HttpClient, method, path string) *Request[T] {
@@ -90,7 +95,11 @@ func (r *Request[T]) prepareRequestBody() *RequestBodyResult {
 
 	switch v := r.Body.(type) {
 	case url.Values:
-		reqBody = strings.NewReader(v.Encode())
+		// Keep the encoded form in jsonData so executeWithRetries can rebuild the
+		// reader on retry — a one-shot strings.Reader is consumed on attempt 0 and
+		// would send an empty body (e.g. losing grant_type on an OAuth refresh retry).
+		jsonData = []byte(v.Encode())
+		reqBody = bytes.NewReader(jsonData)
 	case *bytes.Buffer:
 		jsonData = v.Bytes()
 		reqBody = bytes.NewReader(jsonData)
@@ -283,5 +292,6 @@ func (r *Request[T]) Execute() (*T, error) {
 	}
 	defer resp.Body.Close()
 
+	r.ResponseHeaders = resp.Header
 	return r.readResponseBody(resp)
 }

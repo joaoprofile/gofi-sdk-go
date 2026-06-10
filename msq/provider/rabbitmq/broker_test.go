@@ -86,7 +86,8 @@ func TestNewProducer(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 	defer p.Close()
 }
@@ -121,7 +122,8 @@ func TestProducerSendMessage(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 	defer p.Close()
 
@@ -134,7 +136,8 @@ func TestProducerSendMessagesBatch(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 	defer p.Close()
 
@@ -163,7 +166,8 @@ func TestProducerClose(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 	assert.NoError(t, p.Close())
 }

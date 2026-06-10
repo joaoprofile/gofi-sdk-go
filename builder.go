@@ -348,5 +348,12 @@ func (g *gofiInstance) WithHttpServer(server netx.HttpServer) Builder {
 // Build finalizes construction and returns the Service interface.
 // After this point, Add* methods are no longer accessible.
 func (g *gofiInstance) Build() Service {
+	// Register DB pool gauges once both the pool and telemetry exist (the usual
+	// order is AddDatabase().AddObservability(), so do it here at the end).
+	if g.telemetry != nil && g.databaseConn != nil {
+		if err := obs.ObserveDBStats("main", g.databaseConn); err != nil {
+			logging.Error("Build: failed to register DB pool stats", slog.Any("error", err))
+		}
+	}
 	return g
 }

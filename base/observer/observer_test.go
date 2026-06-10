@@ -71,6 +71,34 @@ func TestAttachAndNotify(t *testing.T) {
 	}
 }
 
+// orderObserver records the global close order so a test can assert that
+// notify() shuts resources down in reverse (LIFO) registration order.
+type orderObserver struct {
+	name  string
+	order *[]string
+}
+
+func (o *orderObserver) Close() { *o.order = append(*o.order, o.name) }
+
+// TestNotifyClosesInReverseOrder guards the shutdown invariant: a Kafka consumer
+// attaches AFTER the DB it uses (consumers are built post-Build), so it must close
+// FIRST — otherwise in-flight handlers hit a closed pool ("sql: database is closed").
+func TestNotifyClosesInReverseOrder(t *testing.T) {
+	instanceOnce = sync.Once{}
+	instance = nil
+	Instance()
+
+	var order []string
+	Attach(&orderObserver{name: "db", order: &order})       // registered during Build
+	Attach(&orderObserver{name: "cache", order: &order})    // registered during Build
+	Attach(&orderObserver{name: "consumer", order: &order}) // registered after Build
+
+	instance.notify()
+
+	assert.Equal(t, []string{"consumer", "cache", "db"}, order,
+		"consumers (registered last) must drain before the DB/cache they depend on")
+}
+
 type observerTest struct {
 	closed bool
 }

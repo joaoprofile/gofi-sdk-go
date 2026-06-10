@@ -127,7 +127,8 @@ func TestConnSetupSucceeds(t *testing.T) {
 	// identical: open channel → ExchangeDeclare → close.
 	// Here we directly call the broker's NewProducer to exercise the chanOpener path instead,
 	// and add a dedicated setup test below that constructs Conn directly.
-	p := b.NewProducer()
+	p, err := b.NewProducer()
+	require.NoError(t, err)
 	require.NotNil(t, p)
 }
 

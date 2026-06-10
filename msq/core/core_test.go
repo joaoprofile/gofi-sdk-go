@@ -64,7 +64,7 @@ type fakeBroker struct {
 	consumer port.Consumer
 }
 
-func (b *fakeBroker) NewProducer() port.Producer { return b.producer }
+func (b *fakeBroker) NewProducer() (port.Producer, error) { return b.producer, nil }
 func (b *fakeBroker) NewConsumer(_ types.ConsumeConfig) port.Consumer {
 	return b.consumer
 }
@@ -98,7 +98,8 @@ func TestBrokerServiceNewProducer(t *testing.T) {
 	broker := &fakeBroker{producer: p}
 	svc := core.NewService(core.ServiceConfig{Broker: broker})
 
-	got := svc.NewProducer()
+	got, err := svc.NewProducer()
+	assert.NoError(t, err)
 	assert.Equal(t, p, got)
 }
 
@@ -147,6 +148,33 @@ func TestConsumerManagerRegisterAndStart(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	mgr.Close()
+}
+
+// TestConsumerManagerCloseIsIdempotent guards the shutdown barrier: the main
+// goroutine's defer and the observer-driven shutdown both call Close(); it must
+// drain exactly once and be safe to call repeatedly/concurrently.
+func TestConsumerManagerCloseIsIdempotent(t *testing.T) {
+	consumer := &fakeConsumer{}
+	broker := &fakeBroker{consumer: consumer}
+
+	mgr := core.NewConsumerManager(broker)
+	mgr.Register(
+		types.ConsumeConfig{Topic: "orders", Concurrency: 1},
+		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
+	)
+	mgr.Start()
+	require.Eventually(t, func() bool { return consumer.started.Load() }, 2*time.Second, 10*time.Millisecond)
+
+	// Concurrent + repeated Close must not panic, double-drain, or hang.
+	done := make(chan struct{})
+	go func() { defer close(done); mgr.Close() }()
+	mgr.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Close() did not return — drain barrier deadlocked")
+	}
+	mgr.Close() // third call, already drained — returns immediately
 }
 
 func TestConsumerManagerChaining(t *testing.T) {

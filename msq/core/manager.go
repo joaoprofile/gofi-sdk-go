@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/joaoprofile/gofi/base/observer"
 	"github.com/joaoprofile/gofi/msq/port"
 	"github.com/joaoprofile/gofi/msq/types"
 	"github.com/joaoprofile/gofi/obs/logging"
@@ -13,12 +14,21 @@ import (
 // ConsumerManager orchestrates multiple consumers against a single BrokerService.
 // Register all consumers before calling Start or Dispatcher.
 type ConsumerManager struct {
-	broker  port.Broker
-	entries []entry
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cancel  context.CancelFunc
+	broker     port.Broker
+	entries    []entry
+	wg         sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	attachOnce sync.Once
+	closeOnce  sync.Once
 }
+
+// consumerManagerObserver lets the global observer drain a running manager on
+// shutdown. It must close BEFORE the DB/cache observers (see observer.notify's
+// reverse order) so in-flight handlers finish against a live pool.
+type consumerManagerObserver struct{ m *ConsumerManager }
+
+func (o consumerManagerObserver) Close() { o.m.Close() }
 
 type entry struct {
 	cfg     types.ConsumeConfig
@@ -63,6 +73,12 @@ func (m *ConsumerManager) Start() {
 }
 
 func (m *ConsumerManager) start() {
+	// Register for shutdown the first time consumers actually launch — a manager
+	// with nothing running has nothing to drain.
+	m.attachOnce.Do(func() {
+		observer.Attach(consumerManagerObserver{m})
+	})
+
 	for _, e := range m.entries {
 		e := e
 
@@ -101,11 +117,16 @@ func (m *ConsumerManager) start() {
 }
 
 // Close signals all consumers to stop and waits for graceful shutdown.
+// Idempotent: the main goroutine's defer and the observer-driven shutdown both
+// call it, and closeOnce makes the second caller block until the drain finishes —
+// the barrier that keeps the DB/cache pool alive until in-flight handlers return.
 func (m *ConsumerManager) Close() {
-	logging.Info("ConsumerManager: initiating graceful shutdown...")
-	m.cancel()
-	m.wg.Wait()
-	logging.Info("ConsumerManager: all consumers stopped")
+	m.closeOnce.Do(func() {
+		logging.Info("ConsumerManager: initiating graceful shutdown...")
+		m.cancel()
+		m.wg.Wait()
+		logging.Info("ConsumerManager: all consumers stopped")
+	})
 }
 
 // Shutdown is an alias for Close.

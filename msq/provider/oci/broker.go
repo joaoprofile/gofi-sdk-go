@@ -76,8 +76,8 @@ func New(cfg Config) (*Broker, error) {
 	return &Broker{client: &client}, nil
 }
 
-func (b *Broker) NewProducer() port.Producer {
-	return &ociProducer{client: b.client}
+func (b *Broker) NewProducer() (port.Producer, error) {
+	return &ociProducer{client: b.client}, nil
 }
 
 func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {

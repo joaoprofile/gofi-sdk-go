@@ -62,8 +62,11 @@ func (s *instanceObserver) attach(observer Observer) {
 func (s *instanceObserver) notify() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, observer := range s.observers {
-		observer.Close()
+	// Reverse (LIFO) order: resources registered later depend on those registered
+	// earlier. Kafka consumers attach after Build (after the DB/cache they use), so
+	// closing in reverse drains in-flight handlers before their DB/cache pool is shut.
+	for i := len(s.observers) - 1; i >= 0; i-- {
+		s.observers[i].Close()
 	}
 }
 

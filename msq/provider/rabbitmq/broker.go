@@ -42,13 +42,13 @@ func New(conn *Conn, exchange string) *Broker {
 	return &Broker{conn: conn, exchange: exchange}
 }
 
-func (b *Broker) NewProducer() port.Producer {
+func (b *Broker) NewProducer() (port.Producer, error) {
 	ch, err := b.conn.channel()
 	if err != nil {
 		logging.Error("rabbitmq: failed to open producer channel", slog.Any("error", err))
-		return nil
+		return nil, fmt.Errorf("rabbitmq: open producer channel: %w", err)
 	}
-	return &amqpProducer{channel: ch, exchange: b.exchange}
+	return &amqpProducer{channel: ch, exchange: b.exchange}, nil
 }
 
 func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {

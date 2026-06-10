@@ -55,7 +55,8 @@ func TestNewWithSession(t *testing.T) {
 
 func TestNewProducerNotNil(t *testing.T) {
 	broker := sqs.NewWithSession(newFakeSession(t))
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 
@@ -75,7 +76,8 @@ func TestNewConsumerDefaultsConcurrency(t *testing.T) {
 
 func TestProducerClose(t *testing.T) {
 	broker := sqs.NewWithSession(newFakeSession(t))
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	assert.NoError(t, p.Close())
 }
 
@@ -103,25 +105,27 @@ func TestConsumerResume(t *testing.T) {
 
 func TestProducerSendMessageReturnsErrorWhenQueueNotFound(t *testing.T) {
 	broker := sqs.NewWithSession(newFakeSession(t))
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer p.Close()
 
 	msg := types.NewMessageWithTopic("non-existent-queue", "data")
-	err := p.SendMessage(context.Background(), msg)
+	err = p.SendMessage(context.Background(), msg)
 	// With a fake endpoint, GetQueueUrl will return an error.
 	assert.Error(t, err)
 }
 
 func TestProducerSendMessagesBatchReturnsErrorWhenQueueNotFound(t *testing.T) {
 	broker := sqs.NewWithSession(newFakeSession(t))
-	p := broker.NewProducer()
+	p, err := broker.NewProducer()
+	require.NoError(t, err)
 	defer p.Close()
 
 	msgs := []*types.Message{
 		types.NewMessageWithTopic("q", "a"),
 		types.NewMessageWithTopic("q", "b"),
 	}
-	err := p.SendMessagesBatch(context.Background(), msgs)
+	err = p.SendMessagesBatch(context.Background(), msgs)
 	assert.Error(t, err)
 }
 

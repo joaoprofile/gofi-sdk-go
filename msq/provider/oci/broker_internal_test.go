@@ -343,7 +343,8 @@ func TestOCIConsumerConsumePausedThenCancelled(t *testing.T) {
 
 func TestOCIBrokerNewProducer(t *testing.T) {
 	b := &Broker{client: &mockQueueClient{}}
-	p := b.NewProducer()
+	p, err := b.NewProducer()
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 

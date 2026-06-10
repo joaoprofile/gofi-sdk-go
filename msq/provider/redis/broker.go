@@ -66,8 +66,8 @@ func NewWithClient(client goredis.UniversalClient) *Broker {
 }
 
 // NewProducer returns a Redis Pub/Sub producer.
-func (b *Broker) NewProducer() port.Producer {
-	return &producer{client: b.client}
+func (b *Broker) NewProducer() (port.Producer, error) {
+	return &producer{client: b.client}, nil
 }
 
 // NewConsumer returns a Redis Pub/Sub consumer subscribed to cfg.Topic.
