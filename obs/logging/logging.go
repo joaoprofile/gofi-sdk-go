@@ -32,9 +32,22 @@ func NewLogger(serviceName string) error {
 	return InitGlobal(context.Background(), Config{
 		ServiceName:   serviceName,
 		Environment:   env.GetEnvironmentType(),
-		EnableDebug:   env.GetLogLevel() == common.LogLevelDebug,
+		Level:         slogLevel(env.GetLogLevel()),
 		CollectorAddr: env.OtelExporterOTLPEndpoint,
 	})
+}
+
+func slogLevel(l common.LogLevel) slog.Level {
+	switch l {
+	case common.LogLevelDebug:
+		return slog.LevelDebug
+	case common.LogLevelWarn:
+		return slog.LevelWarn
+	case common.LogLevelError:
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func InitGlobal(ctx context.Context, cfg Config) error {
@@ -86,8 +99,9 @@ func Shutdown(ctx context.Context) error {
 type Config struct {
 	ServiceName   string
 	Environment   environment.EnvironmentType
-	EnableDebug   bool
-	CollectorAddr string // quando vazio, usa apenas saída no console (sem OTLP)
+	EnableDebug   bool       // legado: equivale a Level=Debug
+	Level         slog.Level // nível do handler (zero = Info); EnableDebug tem precedência
+	CollectorAddr string     // quando vazio, usa apenas saída no console (sem OTLP)
 }
 
 type Logger struct {
@@ -97,7 +111,7 @@ type Logger struct {
 }
 
 func New(ctx context.Context, cfg Config) (*Logger, error) {
-	level := slog.LevelInfo
+	level := cfg.Level
 	if cfg.EnableDebug {
 		level = slog.LevelDebug
 	}
