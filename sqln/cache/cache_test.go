@@ -164,6 +164,45 @@ func TestSetThenUniqueResult_RoundTrip(t *testing.T) {
 	assert.Equal(t, "hello", *result)
 }
 
+// Set then Get into arbitrary dest — round-trip
+func TestSetThenGet_RoundTrip(t *testing.T) {
+	withRedis(t)
+	type page struct {
+		Total   int      `json:"total"`
+		Content []string `json:"content"`
+	}
+	c := NewCache[string]("paged", time.Minute)
+	want := page{Total: 2, Content: []string{"a", "b"}}
+
+	require.NoError(t, c.Set(context.Background(), &want))
+
+	var got page
+	hit, err := c.Get(context.Background(), &got)
+	require.NoError(t, err)
+	assert.True(t, hit)
+	assert.Equal(t, want, got)
+}
+
+func TestGet_CacheMiss_ReturnsFalseNoError(t *testing.T) {
+	withRedis(t)
+	c := NewCache[string]("absent", time.Minute)
+
+	var got string
+	hit, err := c.Get(context.Background(), &got)
+	require.NoError(t, err)
+	assert.False(t, hit)
+}
+
+func TestGet_NilRedis_ReturnsError(t *testing.T) {
+	withNoRedis(t)
+	c := NewCache[string]("k", time.Minute)
+
+	var got string
+	hit, err := c.Get(context.Background(), &got)
+	assert.False(t, hit)
+	assert.Error(t, err)
+}
+
 // Set then Del — key removed
 func TestSetThenDel_KeyRemoved(t *testing.T) {
 	withRedis(t)

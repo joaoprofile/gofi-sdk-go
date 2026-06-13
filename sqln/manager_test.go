@@ -179,6 +179,21 @@ func TestExecutePagedQuery_Success(t *testing.T) {
 	assert.Equal(t, uint64(0), result.Number)
 }
 
+func TestExecutePagedQuery_WithCache_CacheMiss_FetchesFromDB(t *testing.T) {
+	// Cache without Redis → Get returns error → treated as miss → falls through to DB.
+	setupGlobal(t, "count-rows")
+	db := openDB(t, "count-rows")
+
+	c := cache.NewCache[scalarItem]("paged-key", time.Minute)
+	pr := pagination.NewPageRequest(0, 10, []Sort{NewSort("id", ASC)})
+	m := Find[scalarItem](context.Background(), "SELECT id FROM t").WithPage(pr).WithCache(c)
+
+	result, err := m.ExecutePagedQuery(db)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, uint64(10), result.Size)
+}
+
 // Execute / List / UniqueResult via global connection
 func TestList_GlobalConnection_Success(t *testing.T) {
 	setupGlobal(t, "no-rows")

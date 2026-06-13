@@ -63,6 +63,30 @@ func (c *Cache[T]) UniqueResult(ctx context.Context) (*T, error) {
 	return model, nil
 }
 
+// Get unmarshals the cached entry into dest (a non-nil pointer). Returns
+// (true, nil) on hit, (false, nil) on miss, (false, err) on infra/unmarshal
+// error. Use when the cached shape isn't T or []T — e.g. a *Page[T] from a
+// paginated query.
+func (c *Cache[T]) Get(ctx context.Context, dest any) (bool, error) {
+	if err := c.validate(); err != nil {
+		return false, err
+	}
+
+	result, err := c.get(ctx)
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, nil
+	}
+
+	if err = json.Unmarshal(result, dest); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
 func (c *Cache[T]) Set(ctx context.Context, data any) error {
 	if err := c.validate(); err != nil {
 		return err

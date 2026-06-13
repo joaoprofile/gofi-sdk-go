@@ -139,6 +139,13 @@ func (q *manager[T]) ExecutePagedQuery(instance *sql.DB) (*Page[T], error) {
 		return nil, err
 	}
 
+	if q.cache != nil {
+		var cached Page[T]
+		if hit, _ := q.cache.Get(q.ctx, &cached); hit {
+			return &cached, nil
+		}
+	}
+
 	var result Page[T]
 	var err error
 	result.TotalElements, err = q.pageTotal(instance)
@@ -151,7 +158,15 @@ func (q *manager[T]) ExecutePagedQuery(instance *sql.DB) (*Page[T], error) {
 	result.NumberOfElements = uint64(q.page.Limit)
 
 	result.Content, err = q.fetchPagedList(instance)
-	return &result, err
+	if err != nil {
+		return nil, err
+	}
+
+	if q.cache != nil {
+		q.cache.Set(q.ctx, &result)
+	}
+
+	return &result, nil
 }
 
 //  Internal fetch helpers
