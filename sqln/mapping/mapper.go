@@ -54,7 +54,9 @@ func buildTypePlan(t reflect.Type) *typePlan {
 // collectPlanFields walks struct fields recursively and appends a fieldPlan for
 // each `db`-tagged leaf. Nested structs are descended into unless they are
 // time.Time, implement sql.Scanner, or are slices (slices are leaves wrapped
-// with pq.Array at scan time).
+// with pq.Array at scan time). Byte slices ([]byte, json.RawMessage) are scalars
+// at the driver level (bytea/json/jsonb), not Postgres arrays, so they take the
+// default path — wrapping them in pq.Array breaks JSONB scans.
 func collectPlanFields(t reflect.Type, prefix []int, out *[]fieldPlan) {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -63,7 +65,9 @@ func collectPlanFields(t reflect.Type, prefix []int, out *[]fieldPlan) {
 		}
 		path := append(append([]int(nil), prefix...), i)
 		switch {
-		case reflect.PtrTo(f.Type).Implements(scannerType):
+		case reflect.PointerTo(f.Type).Implements(scannerType):
+			*out = append(*out, fieldPlan{indexPath: path})
+		case f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Uint8:
 			*out = append(*out, fieldPlan{indexPath: path})
 		case f.Type.Kind() == reflect.Slice:
 			*out = append(*out, fieldPlan{indexPath: path, isSlice: true})
@@ -85,7 +89,7 @@ func isNestedScannableType(t reflect.Type) bool {
 	if t == timeType {
 		return false
 	}
-	if reflect.PtrTo(t).Implements(scannerType) {
+	if reflect.PointerTo(t).Implements(scannerType) {
 		return false
 	}
 	return true

@@ -3,6 +3,7 @@ package mapping
 import (
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -232,6 +233,12 @@ type sliceModel struct {
 	Tags []string `db:"tags"`
 }
 
+type byteSliceModel struct {
+	ID      int64           `db:"id"`
+	Raw     []byte          `db:"raw"`
+	Payload json.RawMessage `db:"payload"`
+}
+
 func TestGetMappedCols_WithGofiTags_ReturnsAddresses(t *testing.T) {
 	m := &mappedModel{ID: 1, Name: "test"}
 	cols := GetMappedCols(m)
@@ -254,6 +261,20 @@ func TestGetMappedCols_SliceField_UsesPqArray(t *testing.T) {
 	m := &sliceModel{}
 	cols := GetMappedCols(m)
 	require.Len(t, cols, 1)
+}
+
+func TestGetMappedCols_ByteSlice_NotWrappedInPqArray(t *testing.T) {
+	plan := getTypePlan(reflect.TypeOf(byteSliceModel{}))
+	require.Len(t, plan.fields, 3)
+	assert.False(t, plan.fields[0].isSlice, "id is scalar")
+	assert.False(t, plan.fields[1].isSlice, "[]byte must scan as scalar, not pq.Array")
+	assert.False(t, plan.fields[2].isSlice, "json.RawMessage must scan as scalar, not pq.Array")
+}
+
+func TestGetMappedCols_StringSlice_StillUsesPqArray(t *testing.T) {
+	plan := getTypePlan(reflect.TypeOf(sliceModel{}))
+	require.Len(t, plan.fields, 1)
+	assert.True(t, plan.fields[0].isSlice, "[]string is a Postgres array")
 }
 
 func TestGetMappedCols_NonStructNonPointer_ReturnsAddr(t *testing.T) {
