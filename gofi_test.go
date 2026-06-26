@@ -613,7 +613,7 @@ func TestShutdownWithActiveTelemetryNilProvidersNoError(t *testing.T) {
 //  brokerFromEnv
 
 func TestBrokerFromEnvUnknownTypeReturnsError(t *testing.T) {
-	_, err := brokerFromEnv("not_a_real_broker", "")
+	_, err := brokerFromEnv(&environment.Environment{}, "not_a_real_broker", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown BrokerType")
 }
@@ -622,27 +622,27 @@ func TestBrokerFromEnvRedisReturnsNonNilBroker(t *testing.T) {
 	g := newTestInstance()
 	g.env.CacheURI = "localhost:6399"
 
-	broker, err := brokerFromEnv(msq.BrokerRedis, "")
+	broker, err := brokerFromEnv(g.env, msq.BrokerRedis, "")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, broker)
 }
 
 func TestBrokerFromEnvKafkaReturnsNonNilBroker(t *testing.T) {
-	broker, err := brokerFromEnv(msq.BrokerKafka, "")
+	broker, err := brokerFromEnv(&environment.Environment{}, msq.BrokerKafka, "")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, broker)
 }
 
 func TestBrokerFromEnvSQSReturnsErrorWhenNoSession(t *testing.T) {
-	_, err := brokerFromEnv(msq.BrokerSQS, "")
+	_, err := brokerFromEnv(&environment.Environment{}, msq.BrokerSQS, "")
 
 	assert.Error(t, err)
 }
 
 func TestBrokerFromEnvOCIReturnsErrorWhenNoCredentials(t *testing.T) {
-	_, err := brokerFromEnv(msq.BrokerOCI, "")
+	_, err := brokerFromEnv(&environment.Environment{}, msq.BrokerOCI, "")
 
 	assert.Error(t, err)
 }

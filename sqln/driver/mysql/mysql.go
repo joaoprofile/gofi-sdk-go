@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/joaoprofile/gofi/sqln/connection"
 	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
@@ -18,6 +19,11 @@ type Driver struct{}
 
 func (Driver) Name() connection.DriverName {
 	return connection.DriverMySQL
+}
+
+// DSN builds a go-sql-driver/mysql DSN: user:pass@tcp(host:port)/dbname.
+func (Driver) DSN(s connection.Settings) string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", s.User, s.Password, s.Host, s.Port, s.Name)
 }
 
 func (Driver) Open(cfg connection.Config) (*sql.DB, error) {

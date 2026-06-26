@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
-
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 // pprofRoutes are the standard net/http/pprof endpoints registered on
@@ -81,19 +79,9 @@ func (s *Server) run() error {
 	return nil
 }
 
-// Start reads the service configuration from the environment and, when the
-// debug flag is enabled, starts the pprof server in a background goroutine.
-func Start() {
-	env := environment.Instance()
-	if !env.ServiceDebug {
-		return
-	}
-
-	srv := New(Config{
-		Addr: env.ServiceDebugAddr,
-		User: env.ServiceDebugUser,
-		Pass: env.ServiceDebugPass, // was incorrectly set to ServiceDebugUser
-	})
-
-	go srv.run() //nolint:errcheck
+// Start launches the pprof server in a background goroutine using cfg. The
+// caller decides whether debugging is enabled; gofi's config.StartDebug reads
+// SERVICE_DEBUG and the SERVICE_DEBUG_* settings from the environment.
+func Start(cfg Config) {
+	go New(cfg).run() //nolint:errcheck
 }

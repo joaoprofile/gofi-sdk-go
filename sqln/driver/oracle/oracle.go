@@ -2,6 +2,7 @@ package oracle
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/joaoprofile/gofi/sqln/connection"
 	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
@@ -16,6 +17,11 @@ type Driver struct{}
 
 func (Driver) Name() connection.DriverName {
 	return connection.DriverOracle
+}
+
+// DSN builds a go-ora URL: oracle://user:pass@host:port/service.
+func (Driver) DSN(s connection.Settings) string {
+	return fmt.Sprintf("oracle://%s:%s@%s:%d/%s", s.User, s.Password, s.Host, s.Port, s.Name)
 }
 
 func (Driver) Open(cfg connection.Config) (*sql.DB, error) {

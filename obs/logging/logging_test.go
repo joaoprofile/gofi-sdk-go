@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
@@ -59,7 +58,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func devCfg(name string) Config {
-	return Config{ServiceName: name, Environment: environment.ENV_DEV}
+	return Config{ServiceName: name, Environment: EnvDevelopment}
 }
 
 func TestInstance_PanicsWhenNotInitialized(t *testing.T) {
@@ -94,7 +93,7 @@ func TestShutdown_WhenInstanceExists(t *testing.T) {
 func TestNew_DevEnvironment(t *testing.T) {
 	l, err := New(context.Background(), Config{
 		ServiceName: "svc",
-		Environment: environment.ENV_DEV,
+		Environment: EnvDevelopment,
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, l)
@@ -104,7 +103,7 @@ func TestNew_DevEnvironment(t *testing.T) {
 func TestNew_NonDevEnvironment_UsesJSONHandler(t *testing.T) {
 	l, err := New(context.Background(), Config{
 		ServiceName: "svc",
-		Environment: environment.ENV_PROD,
+		Environment: EnvProduction,
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, l)
@@ -274,7 +273,7 @@ func TestNew_WithOTLPCollectorAddr_Dev(t *testing.T) {
 	// Covers the CollectorAddr != "" branch: resource, exporter, LoggerProvider, TeeHandler
 	l, err := New(context.Background(), Config{
 		ServiceName:   "svc-otlp",
-		Environment:   environment.ENV_DEV,
+		Environment:   EnvDevelopment,
 		CollectorAddr: "localhost:4317",
 	})
 	require.NoError(t, err)
@@ -296,7 +295,7 @@ func TestNew_WithOTLPCollectorAddr_Prod(t *testing.T) {
 	// JSON handler (non-dev) + OTLP branch
 	l, err := New(context.Background(), Config{
 		ServiceName:   "svc-otlp",
-		Environment:   environment.ENV_PROD,
+		Environment:   EnvProduction,
 		CollectorAddr: "localhost:4317",
 	})
 	require.NoError(t, err)
@@ -310,7 +309,7 @@ func TestNew_WithOTLPCollectorAddr_Prod(t *testing.T) {
 func TestNew_WithOTLPCollectorAddr_EmptyServiceName(t *testing.T) {
 	// Covers the `if cfg.ServiceName != ""` false branch in the OTLP path
 	l, err := New(context.Background(), Config{
-		Environment:   environment.ENV_DEV,
+		Environment:   EnvDevelopment,
 		CollectorAddr: "localhost:4317",
 	})
 	require.NoError(t, err)
@@ -324,7 +323,7 @@ func TestNew_WithOTLPCollectorAddr_EmptyServiceName(t *testing.T) {
 func TestNew_WithOTLPCollectorAddr_EnableDebug(t *testing.T) {
 	l, err := New(context.Background(), Config{
 		ServiceName:   "svc-debug",
-		Environment:   environment.ENV_DEV,
+		Environment:   EnvDevelopment,
 		EnableDebug:   true,
 		CollectorAddr: "localhost:4317",
 	})
@@ -353,7 +352,7 @@ func TestResetForTesting_ResetsState(t *testing.T) {
 
 func TestNewLogger_InitializesGlobalInstance(t *testing.T) {
 	resetSingleton(t)
-	// environment.Instance() returns defaults when no .env file is present
+	// NewLogger initialises the global logger with built-in defaults (no env).
 	err := NewLogger("my-service")
 	require.NoError(t, err)
 	assert.NotNil(t, instance)

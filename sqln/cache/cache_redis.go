@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/base/observer"
 	"github.com/joaoprofile/gofi/obs/logging"
 	"github.com/redis/go-redis/v9"
@@ -31,11 +30,9 @@ func NewCacheRedis() {
 	}
 
 	redisInstance.once.Do(func() {
-		env := environment.Instance()
-
 		opts := &redis.UniversalOptions{
-			Addrs:    []string{env.CacheURI},
-			Password: env.CachePassword,
+			Addrs:    []string{cfg.URI},
+			Password: cfg.Password,
 		}
 
 		client := redis.NewUniversalClient(opts)

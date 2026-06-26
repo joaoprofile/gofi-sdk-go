@@ -1,10 +1,11 @@
 // Package mail sends transactional and bulk e-mail over any SMTP provider, with
-// HTML + plain-text bodies, attachments and HTML templates. It is configurable
-// via the environment (MAIL_*) and built to be robust: TLS/STARTTLS, multiple
-// SMTP AUTH mechanisms, timeouts, retry with backoff, and connection reuse for
-// bulk sends with per-message error reporting.
+// HTML + plain-text bodies, attachments and HTML templates. It is built to be
+// robust: TLS/STARTTLS, multiple SMTP AUTH mechanisms, timeouts, retry with
+// backoff, and connection reuse for bulk sends with per-message error
+// reporting. Build a Config explicitly and pass it to New; gofi's config
+// package can populate that Config from MAIL_* environment variables.
 //
-//	m, err := mail.NewFromEnv()
+//	m, err := mail.New(cfg)
 //	err = m.Send(ctx, &mail.Message{
 //	    From:    mail.Address{Name: "BlueFamly", Email: "no-reply@bluefamly.app"},
 //	    To:      []mail.Address{{Email: "user@example.com"}},
@@ -134,16 +135,6 @@ func New(cfg Config) (Mailer, error) {
 		return nil, err
 	}
 	return newSMTPMailer(cfg), nil
-}
-
-// NewFromEnv builds a Mailer from the environment (MAIL_*). Returns
-// ErrNotConfigured when the minimum settings are absent.
-func NewFromEnv() (Mailer, error) {
-	cfg, err := FromEnv()
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
 }
 
 // itoa avoids importing strconv just for error strings.

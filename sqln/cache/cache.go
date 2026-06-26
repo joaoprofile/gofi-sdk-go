@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 const errRedisNil = "redis: nil"
@@ -119,7 +117,7 @@ func (c *Cache[T]) validate() error {
 }
 
 func (c *Cache[T]) getNamePrefixed() string {
-	return fmt.Sprintf("%s::%s", environment.Instance().AppName, c.name)
+	return fmt.Sprintf("%s::%s", cfg.Prefix, c.name)
 }
 
 func (c *Cache[T]) get(ctx context.Context) ([]byte, error) {

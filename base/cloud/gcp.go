@@ -1,9 +1,7 @@
 package cloud
 
-import "github.com/joaoprofile/gofi/base/environment"
-
 func init() {
-	RegisterProvider(environment.CLOUD_GCP, func(cfg environment.CloudConfig) Provider {
+	RegisterProvider(ProviderGCP, func(cfg Config) Provider {
 		return NewGCP(cfg)
 	})
 }
@@ -11,10 +9,10 @@ func init() {
 // GCP implements Provider for Google Cloud Platform.
 // Bootstrap and session management are stubs pending a real GCP SDK integration.
 type GCP struct {
-	cfg environment.CloudConfig
+	cfg Config
 }
 
-func NewGCP(cfg environment.CloudConfig) *GCP {
+func NewGCP(cfg Config) *GCP {
 	return &GCP{cfg: cfg}
 }
 

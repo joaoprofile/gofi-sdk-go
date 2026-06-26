@@ -84,7 +84,8 @@ func (r *fakeRows) Next(_ []driver.Value) error { return io.EOF }
 
 type fakeConnDriver struct{}
 
-func (d fakeConnDriver) Name() DriverName { return DriverName(testDriverDSN) }
+func (d fakeConnDriver) Name() DriverName    { return DriverName(testDriverDSN) }
+func (d fakeConnDriver) DSN(Settings) string { return "" }
 func (d fakeConnDriver) Open(cfg Config) (*sql.DB, error) {
 	return sql.Open(testDriverDSN, cfg.DSN)
 }

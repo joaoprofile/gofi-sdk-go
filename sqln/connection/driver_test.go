@@ -50,6 +50,7 @@ type overwriteDriver struct {
 }
 
 func (d overwriteDriver) Name() DriverName               { return d.name }
+func (d overwriteDriver) DSN(Settings) string            { return "" }
 func (d overwriteDriver) Open(_ Config) (*sql.DB, error) { return nil, nil }
 func (d overwriteDriver) ParseError(err error) error     { return err }
 func (d overwriteDriver) Dialect() sqln_driver.Dialect   { return fakeDialect{} }

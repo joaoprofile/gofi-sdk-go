@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/msq/port"
 	"github.com/joaoprofile/gofi/msq/types"
 	"github.com/joaoprofile/gofi/msq/worker"
@@ -33,18 +32,6 @@ type Config struct {
 	FingerPrint string
 	PrivateKey  string
 	QueueURL    string // defaults to São Paulo region endpoint
-}
-
-// ConfigFromEnv builds a Config from environment variables.
-func ConfigFromEnv() Config {
-	env := environment.Instance()
-	return Config{
-		TenancyID:   env.MessagingOCITenancyId,
-		UserID:      env.MessagingOCIUserId,
-		Region:      env.MessagingOCIRegion,
-		FingerPrint: env.MessagingOCIFingerPrint,
-		PrivateKey:  "OCI_PRIVATE_KEY", // TODO: Get it from the environment too
-	}
 }
 
 // Broker implements port.Broker for OCI Queue.

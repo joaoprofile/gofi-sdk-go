@@ -1,7 +1,7 @@
 // Package oci implements bucket.Store on top of OCI Object Storage.
 //
 // Build a Store with New. To select the backend from configuration at runtime,
-// use the base/bucket/bucketenv wiring instead of importing this package
+// use gofi's config.OpenBucket wiring instead of importing this package
 // directly.
 package oci
 

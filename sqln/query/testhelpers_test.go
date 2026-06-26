@@ -72,7 +72,8 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 // that need a Driver; the query package tests use *sql.DB directly.
 type fakeConnDriver struct{}
 
-func (d fakeConnDriver) Name() connection.DriverName { return connection.DriverName(testDriver) }
+func (d fakeConnDriver) Name() connection.DriverName    { return connection.DriverName(testDriver) }
+func (d fakeConnDriver) DSN(connection.Settings) string { return "" }
 func (d fakeConnDriver) Open(cfg connection.Config) (*sql.DB, error) {
 	return sql.Open(testDriver, cfg.DSN)
 }

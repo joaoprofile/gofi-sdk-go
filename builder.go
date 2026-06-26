@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/joaoprofile/gofi/base/cloud"
 	"github.com/joaoprofile/gofi/base/common"
 	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/base/observer"
 	"github.com/joaoprofile/gofi/base/session"
+	"github.com/joaoprofile/gofi/config"
 	"github.com/joaoprofile/gofi/msq"
 	"github.com/joaoprofile/gofi/msq/port"
 	"github.com/joaoprofile/gofi/msq/provider/kafka"
@@ -55,8 +55,9 @@ func newInstance(serviceName string) *gofiInstance {
 	}
 
 	common.SetBrazil()
-	logging.NewLogger(env.AppName)
-	cloud.Instance()
+	config.InitLogging(env, env.AppName)
+	config.ConfigureCache(env)
+	config.InitCloud(env)
 	observer.Instance()
 
 	return &gofiInstance{
@@ -69,35 +70,14 @@ func newInstance(serviceName string) *gofiInstance {
 // Infrastructure
 
 func (g *gofiInstance) AddDatabase() Builder {
-	dbCfg := g.env.Database()
-
-	if dbCfg.URI == "" {
-		logging.Fatal("database URI is empty")
+	cfg, err := config.Database(g.env)
+	if err != nil {
+		logging.Error("failed to build database config", slog.Any("error", err))
 		return g
 	}
 
-	pool := connection.DefaultPoolConfig()
-	if dbCfg.MaxOpenConns > 0 {
-		pool.MaxOpenConns = dbCfg.MaxOpenConns
-	}
-	if dbCfg.MaxIdleConns > 0 {
-		pool.MaxIdleConns = dbCfg.MaxIdleConns
-	}
-	if dbCfg.MaxLifetime > 0 {
-		pool.MaxConnLifeTime = dbCfg.MaxLifetime
-	}
-
-	cfg := connection.Config{
-		Driver: connection.DriverName(dbCfg.Driver),
-		DSN:    dbCfg.URI,
-		Pool:   pool,
-	}
-	if cfg.Driver == "" {
-		cfg.Driver = connection.DriverPostgres
-	}
-
 	opts := []connection.Option{}
-	if dbCfg.Migration {
+	if g.env.DatabaseMigration {
 		opts = append(opts, connection.WithMigrations(migrate.Config{Path: ".migrations"}))
 	}
 
@@ -105,7 +85,7 @@ func (g *gofiInstance) AddDatabase() Builder {
 	if err != nil {
 		logging.Error(
 			"failed to initialize database connection",
-			slog.String("dsn", dbCfg.URI),
+			slog.String("driver", string(cfg.Driver)),
 			slog.Any("error", err),
 		)
 		return g
@@ -183,17 +163,13 @@ func (g *gofiInstance) UseAuth(auth netx.Middleware) Builder {
 // AddObservability initialises distributed tracing, metrics and logs via
 // OpenTelemetry. Configuration is read from the environment:
 func (g *gofiInstance) AddObservability() Builder {
-	obsCfg := g.env.Observability()
-	if obsCfg.OTLPEndpoint == "" {
+	teleCfg := config.Observability(g.env)
+	if teleCfg.CollectorAddr == "" {
 		logging.Warn("AddObservability: OTEL_EXPORTER_OTLP_ENDPOINT is not set, skipping")
 		return g
 	}
 
-	tele, err := obs.Init(context.Background(), obs.TeleConfig{
-		ServiceName:   g.env.AppName,
-		ServiceEnv:    g.env.AppEnvironment,
-		CollectorAddr: obsCfg.OTLPEndpoint,
-	})
+	tele, err := obs.Init(context.Background(), teleCfg)
 	if err != nil {
 		logging.Error("AddObservability: failed to initialise telemetry", slog.Any("error", err))
 		return g
@@ -221,15 +197,16 @@ func messagingEventHandler(_ context.Context, ev msq.BrokerEvent) {
 	}
 }
 
-// brokerFromEnv builds a port.Broker from environment variables for the given type.
-// All credentials are read via environment.Instance() using the MESSAGING_* vars.
-func brokerFromEnv(bt msq.BrokerType, exchange string) (port.Broker, error) {
+// brokerFromEnv builds a port.Broker for the given type, mapping the MESSAGING_*
+// (and CACHE_* for Redis) variables of env into each provider's typed Config via
+// the config package. The providers themselves stay decoupled from environment.
+func brokerFromEnv(env *environment.Environment, bt msq.BrokerType, exchange string) (port.Broker, error) {
 	switch bt {
 	case msq.BrokerKafka:
-		return kafka.New(kafka.ConfigFromEnv())
+		return kafka.New(config.Kafka(env))
 
 	case msq.BrokerRabbitMQ:
-		conn, err := rabbitmq.Dial()
+		conn, err := rabbitmq.DialURL(config.RabbitMQURL(env))
 		if err != nil {
 			return nil, fmt.Errorf("rabbitmq: dial failed: %w", err)
 		}
@@ -239,14 +216,10 @@ func brokerFromEnv(bt msq.BrokerType, exchange string) (port.Broker, error) {
 		return sqs.New()
 
 	case msq.BrokerOCI:
-		return oci.New(oci.ConfigFromEnv())
+		return oci.New(config.OCIQueue(env))
 
 	case msq.BrokerRedis:
-		env := environment.Instance()
-		return redisbroker.New(redisbroker.Config{
-			Addr:     env.CacheURI,
-			Password: env.CachePassword,
-		}), nil
+		return redisbroker.New(config.RedisBroker(env)), nil
 
 	default:
 		return nil, fmt.Errorf("msq: unknown BrokerType %q — use BrokerKafka, BrokerRabbitMQ, BrokerSQS, BrokerOCI or BrokerRedis", bt)
@@ -291,7 +264,7 @@ func (g *gofiInstance) AddMessaging(cfg ...msq.Config) Builder {
 
 	// Build broker from env when only BrokerType is given.
 	if c.Broker == nil {
-		b, err := brokerFromEnv(c.BrokerType, c.Exchange)
+		b, err := brokerFromEnv(g.env, c.BrokerType, c.Exchange)
 		if err != nil {
 			logging.Error("AddMessaging: failed to build broker from env", slog.Any("error", err))
 			return g

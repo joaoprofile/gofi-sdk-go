@@ -14,7 +14,6 @@ import (
 
 	"github.com/IBM/sarama"
 	"github.com/google/uuid"
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/msq/port"
 	"github.com/joaoprofile/gofi/msq/types"
 	"github.com/joaoprofile/gofi/obs/logging"
@@ -47,18 +46,6 @@ type Config struct {
 type clusterAdmin interface {
 	CreateTopic(topic string, detail *sarama.TopicDetail, validateOnly bool) error
 	Close() error
-}
-
-// ConfigFromEnv builds a Config from environment variables.
-func ConfigFromEnv() Config {
-	env := environment.Instance()
-	return Config{
-		Brokers:       []string{fmt.Sprintf("%s:%d", env.MessagingHost, env.MessagingPort)},
-		User:          env.MessagingUser,
-		Password:      env.MessagingPassword,
-		UseTLS:        env.MessagingUseTLS,
-		SASLMechanism: env.MessagingSASLMechanism,
-	}
 }
 
 // Broker implements port.Broker for Kafka.

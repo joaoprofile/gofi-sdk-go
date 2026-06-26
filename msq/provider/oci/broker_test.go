@@ -84,13 +84,6 @@ func TestNewAllEmptyCredentials(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ConfigFromEnv
-
-func TestConfigFromEnv(t *testing.T) {
-	cfg := oci.ConfigFromEnv()
-	assert.IsType(t, oci.Config{}, cfg)
-}
-
 // Successful construction
 
 func TestNewWithValidConfig(t *testing.T) {

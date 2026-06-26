@@ -613,6 +613,7 @@ func (filterTestDialect) BuildCount(q string) string {
 type filterTestDriver struct{ dialect sqln_driver.Dialect }
 
 func (d filterTestDriver) Name() connection.DriverName               { return "filter-test-driver" }
+func (d filterTestDriver) DSN(connection.Settings) string            { return "" }
 func (d filterTestDriver) Open(_ connection.Config) (*sql.DB, error) { return nil, nil }
 func (d filterTestDriver) ParseError(err error) error                { return err }
 func (d filterTestDriver) Dialect() sqln_driver.Dialect              { return d.dialect }

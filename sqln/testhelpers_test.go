@@ -105,7 +105,8 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 // fakeConnDriver implements connection.Driver
 type fakeConnDriver struct{}
 
-func (d fakeConnDriver) Name() connection.DriverName { return connection.DriverName(testDriverName) }
+func (d fakeConnDriver) Name() connection.DriverName    { return connection.DriverName(testDriverName) }
+func (d fakeConnDriver) DSN(connection.Settings) string { return "" }
 func (d fakeConnDriver) Open(cfg connection.Config) (*sql.DB, error) {
 	return sql.Open(testDriverName, cfg.DSN)
 }

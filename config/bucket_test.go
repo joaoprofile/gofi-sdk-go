@@ -1,4 +1,4 @@
-package bucketenv
+package config
 
 import (
 	"testing"
@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpen_OCI_BuildsTypedStore(t *testing.T) {
-	store, err := Open(environment.BucketConfig{
-		Provider: environment.BUCKET_OCI,
+func TestOpenBucket_OCI_BuildsTypedStore(t *testing.T) {
+	store, err := OpenBucket(bucket.Config{
+		Provider: bucket.ProviderOCI,
 		Name:     "my-bucket",
 		Region:   "sa-saopaulo-1",
-		OCICredentials: environment.BucketOCICredentials{
+		OCICredentials: bucket.OCICredentials{
 			Namespace:   "ns",
 			TenancyID:   "ocid1.tenancy.oc1..aaaa",
 			UserID:      "ocid1.user.oc1..bbbb",
@@ -29,12 +29,12 @@ func TestOpen_OCI_BuildsTypedStore(t *testing.T) {
 	assert.True(t, ok, "expected *oci.Store")
 }
 
-func TestOpen_MinIO_BuildsTypedStore(t *testing.T) {
-	store, err := Open(environment.BucketConfig{
-		Provider: environment.BUCKET_MINIO,
+func TestOpenBucket_MinIO_BuildsTypedStore(t *testing.T) {
+	store, err := OpenBucket(bucket.Config{
+		Provider: bucket.ProviderMinIO,
 		Name:     "my-bucket",
 		Endpoint: "localhost:9000",
-		S3Credentials: environment.BucketS3Credentials{
+		S3Credentials: bucket.S3Credentials{
 			AccessKey: "minioadmin",
 			SecretKey: "minioadmin",
 			UseSSL:    true,
@@ -45,20 +45,65 @@ func TestOpen_MinIO_BuildsTypedStore(t *testing.T) {
 	assert.True(t, ok, "expected *minio.Store")
 }
 
-func TestOpen_UnsetProvider_ReturnsInvalidConfig(t *testing.T) {
-	_, err := Open(environment.BucketConfig{})
+func TestOpenBucket_UnsetProvider_ReturnsInvalidConfig(t *testing.T) {
+	_, err := OpenBucket(bucket.Config{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, bucket.ErrInvalidConfig)
 }
 
-func TestOpen_PropagatesProviderValidation(t *testing.T) {
+func TestOpenBucket_PropagatesProviderValidation(t *testing.T) {
 	// MinIO selected but credentials missing — the typed provider must reject it.
-	_, err := Open(environment.BucketConfig{Provider: environment.BUCKET_MINIO, Name: "b"})
+	_, err := OpenBucket(bucket.Config{Provider: bucket.ProviderMinIO, Name: "b"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, bucket.ErrInvalidConfig)
 }
 
-func TestOpenFromEnv_MinIO(t *testing.T) {
+func TestBucket_MapsEnv(t *testing.T) {
+	environment.ResetForTesting()
+	t.Cleanup(environment.ResetForTesting)
+	t.Setenv("BUCKET_PROVIDER", "oci")
+	t.Setenv("BUCKET_NAME", "my-bucket")
+	t.Setenv("BUCKET_REGION", "sa-saopaulo-1")
+	t.Setenv("BUCKET_ENDPOINT", "objectstorage.example.com")
+	t.Setenv("BUCKET_OCI_TENANCY_ID", "tenancy")
+	t.Setenv("BUCKET_OCI_USER_ID", "user")
+	t.Setenv("BUCKET_S3_ACCESS_KEY", "ak")
+	t.Setenv("BUCKET_S3_USE_SSL", "true")
+
+	cfg := Bucket(environment.Instance())
+	if cfg.Provider != bucket.ProviderOCI {
+		t.Errorf("Provider=%q, want oci", cfg.Provider)
+	}
+	if cfg.Name != "my-bucket" || cfg.Region != "sa-saopaulo-1" {
+		t.Errorf("name/region not mapped: %+v", cfg)
+	}
+	if cfg.Endpoint != "objectstorage.example.com" {
+		t.Errorf("Endpoint=%q", cfg.Endpoint)
+	}
+	if cfg.OCICredentials.TenancyID != "tenancy" || cfg.OCICredentials.UserID != "user" {
+		t.Errorf("oci creds not mapped: %+v", cfg.OCICredentials)
+	}
+	if cfg.S3Credentials.AccessKey != "ak" || !cfg.S3Credentials.UseSSL {
+		t.Errorf("s3 creds not mapped: %+v", cfg.S3Credentials)
+	}
+	if !cfg.IsConfigured() {
+		t.Error("expected IsConfigured() true for oci provider")
+	}
+}
+
+func TestBucketConfig_IsConfigured(t *testing.T) {
+	if (bucket.Config{}).IsConfigured() {
+		t.Error("empty provider must report not configured")
+	}
+	if (bucket.Config{Provider: bucket.ProviderNone}).IsConfigured() {
+		t.Error("'none' provider must report not configured")
+	}
+	if !(bucket.Config{Provider: bucket.ProviderMinIO}).IsConfigured() {
+		t.Error("'minio' provider must report configured")
+	}
+}
+
+func TestOpenBucketFromEnv_MinIO(t *testing.T) {
 	environment.ResetForTesting()
 	t.Cleanup(environment.ResetForTesting)
 	t.Setenv("BUCKET_PROVIDER", "minio")
@@ -67,7 +112,7 @@ func TestOpenFromEnv_MinIO(t *testing.T) {
 	t.Setenv("BUCKET_S3_ACCESS_KEY", "minioadmin")
 	t.Setenv("BUCKET_S3_SECRET_KEY", "minioadmin")
 
-	store, err := OpenFromEnv()
+	store, err := OpenBucketFromEnv(environment.Instance())
 	require.NoError(t, err)
 	assert.NotNil(t, store)
 }

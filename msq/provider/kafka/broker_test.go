@@ -18,13 +18,6 @@ func TestMain(m *testing.M) {
 
 // Config
 
-func TestConfigFromEnv(t *testing.T) {
-	// Does not connect; purely reads env vars and builds a Config struct.
-	cfg := kafka.ConfigFromEnv()
-	// Verify the struct is populated (env may be empty in CI, but it must not panic).
-	assert.IsType(t, kafka.Config{}, cfg)
-}
-
 func TestNewBroker(t *testing.T) {
 	cfg := kafka.Config{
 		Brokers:  []string{"localhost:9092"},

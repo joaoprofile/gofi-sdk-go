@@ -31,15 +31,6 @@ func TestDialURLReturnsErrorWhenServerUnreachable(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestDialReturnsErrorOrSucceeds(t *testing.T) {
-	// Dial uses environment variables. In CI without a broker it returns an error.
-	// With a broker it succeeds. Both outcomes are valid; we only verify no panic.
-	conn, err := rabbitmq.Dial()
-	if err == nil && conn != nil {
-		conn.Close() //nolint:errcheck
-	}
-}
-
 // Broker and producer/consumer construction (require real Conn)
 
 // tryDial attempts to establish a real AMQP connection.

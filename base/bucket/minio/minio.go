@@ -2,7 +2,7 @@
 // S3-compatible service) using the AWS S3 client with path-style addressing.
 //
 // Build a Store with New. To select the backend from configuration at runtime,
-// use the base/bucket/bucketenv wiring instead of importing this package
+// use gofi's config.OpenBucket wiring instead of importing this package
 // directly.
 package minio
 

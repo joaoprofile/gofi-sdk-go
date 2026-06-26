@@ -1,9 +1,7 @@
 package cloud
 
-import "github.com/joaoprofile/gofi/base/environment"
-
 func init() {
-	RegisterProvider(environment.CLOUD_OCI, func(cfg environment.CloudConfig) Provider {
+	RegisterProvider(ProviderOCI, func(cfg Config) Provider {
 		return NewOCI(cfg)
 	})
 }
@@ -11,10 +9,10 @@ func init() {
 // OCI implements Provider for Oracle Cloud Infrastructure.
 // Bootstrap and session management are stubs pending a real OCI SDK integration.
 type OCI struct {
-	cfg environment.CloudConfig
+	cfg Config
 }
 
-func NewOCI(cfg environment.CloudConfig) *OCI {
+func NewOCI(cfg Config) *OCI {
 	return &OCI{cfg: cfg}
 }
 

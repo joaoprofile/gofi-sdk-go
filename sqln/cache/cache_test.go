@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/obs/logging"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -283,9 +282,9 @@ func TestUniqueResult_UnmarshalError_ReturnsError(t *testing.T) {
 
 func TestNewCacheRedis_InitializesClient(t *testing.T) {
 	mr := miniredis.RunT(t)
-	t.Setenv("CACHE_URI", mr.Addr())
-	environment.ResetForTesting()
-	t.Cleanup(environment.ResetForTesting)
+	prevCfg := cfg
+	Configure(Config{URI: mr.Addr()})
+	t.Cleanup(func() { cfg = prevCfg })
 
 	prev := redisInstance
 	redisInstance = nil
@@ -301,9 +300,9 @@ func TestNewCacheRedis_InitializesClient(t *testing.T) {
 
 func TestNewCacheRedis_Idempotent_SecondCallIsNoOp(t *testing.T) {
 	mr := miniredis.RunT(t)
-	t.Setenv("CACHE_URI", mr.Addr())
-	environment.ResetForTesting()
-	t.Cleanup(environment.ResetForTesting)
+	prevCfg := cfg
+	Configure(Config{URI: mr.Addr()})
+	t.Cleanup(func() { cfg = prevCfg })
 
 	prev := redisInstance
 	redisInstance = nil
@@ -321,9 +320,9 @@ func TestNewCacheRedis_Idempotent_SecondCallIsNoOp(t *testing.T) {
 
 func TestInstanceRedis_ClientNil_TriggersNewCacheRedis(t *testing.T) {
 	mr := miniredis.RunT(t)
-	t.Setenv("CACHE_URI", mr.Addr())
-	environment.ResetForTesting()
-	t.Cleanup(environment.ResetForTesting)
+	prevCfg := cfg
+	Configure(Config{URI: mr.Addr()})
+	t.Cleanup(func() { cfg = prevCfg })
 
 	prev := redisInstance
 	redisInstance = &singletonRedis{client: nil, once: sync.Once{}}

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 // Encryption is the transport security used to reach the SMTP server.
@@ -30,12 +28,12 @@ const (
 
 // Defaults applied by the package when a value is missing.
 const (
-	defaultPort       = 587
-	defaultTimeout    = 10 * time.Second
-	defaultMaxRetries = 2
+	defaultPort    = 587
+	defaultTimeout = 10 * time.Second
 )
 
-// Config configures the SMTP mailer. Build it explicitly or via FromEnv().
+// Config configures the SMTP mailer. Build it explicitly and pass it to New;
+// gofi's config package can populate it from MAIL_* environment variables.
 type Config struct {
 	Host     string
 	Port     int
@@ -91,31 +89,6 @@ func (c *Config) validate() error {
 		return fmt.Errorf("%w: unknown Auth %q", ErrInvalidConfig, c.Auth)
 	}
 	return nil
-}
-
-// FromEnv builds a Config from environment.Mail() (MAIL_*). Returns
-// ErrNotConfigured when MAIL_HOST/MAIL_FROM_EMAIL are absent.
-func FromEnv() (Config, error) {
-	env := environment.Instance()
-	if !env.IsMailConfigured() {
-		return Config{}, ErrNotConfigured
-	}
-	mc := env.Mail()
-	return Config{
-		Host:     mc.Host,
-		Port:     mc.Port,
-		Username: mc.Username,
-		Password: mc.Password,
-		From:     Address{Name: mc.FromName, Email: mc.FromEmail},
-
-		Encryption: Encryption(mc.Encryption),
-		Auth:       AuthMechanism(mc.Auth),
-
-		Timeout:    mc.Timeout,
-		MaxRetries: mc.MaxRetries,
-		PoolSize:   mc.PoolSize,
-		HELODomain: mc.HELODomain,
-	}, nil
 }
 
 // tlsConfig returns the TLS settings for the connection.

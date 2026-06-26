@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/joaoprofile/gofi/base/common"
-	"github.com/joaoprofile/gofi/base/environment"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/sdk/log"
@@ -27,17 +26,16 @@ var (
 	once     sync.Once
 )
 
+// NewLogger initialises the global logger with sane defaults (Info level, JSON
+// console, no OTLP). It reads no environment; gofi's config.InitLogging builds
+// an env-driven Config and is what services should use in production.
 func NewLogger(serviceName string) error {
-	env := environment.Instance()
-	return InitGlobal(context.Background(), Config{
-		ServiceName:   serviceName,
-		Environment:   env.GetEnvironmentType(),
-		Level:         slogLevel(env.GetLogLevel()),
-		CollectorAddr: env.OtelExporterOTLPEndpoint,
-	})
+	return InitGlobal(context.Background(), Config{ServiceName: serviceName})
 }
 
-func slogLevel(l common.LogLevel) slog.Level {
+// SlogLevel maps a common.LogLevel to its slog.Level. Exported so gofi's config
+// package can build a logging.Config from the environment.
+func SlogLevel(l common.LogLevel) slog.Level {
 	switch l {
 	case common.LogLevelDebug:
 		return slog.LevelDebug
@@ -96,9 +94,16 @@ func Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// Deployment environment values that influence console formatting. Development
+// uses a human-readable text handler; any other value uses a JSON handler.
+const (
+	EnvDevelopment = "dev"
+	EnvProduction  = "prod"
+)
+
 type Config struct {
 	ServiceName   string
-	Environment   environment.EnvironmentType
+	Environment   string     // deployment environment; EnvDevelopment selects text output
 	EnableDebug   bool       // legado: equivale a Level=Debug
 	Level         slog.Level // nível do handler (zero = Info); EnableDebug tem precedência
 	CollectorAddr string     // quando vazio, usa apenas saída no console (sem OTLP)
@@ -106,8 +111,7 @@ type Config struct {
 
 type Logger struct {
 	*slog.Logger
-	env environment.EnvironmentType
-	lp  *log.LoggerProvider
+	lp *log.LoggerProvider
 }
 
 func New(ctx context.Context, cfg Config) (*Logger, error) {
@@ -118,7 +122,7 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 	opts := &slog.HandlerOptions{Level: level}
 
 	var consoleHandler slog.Handler
-	if cfg.Environment == environment.ENV_DEV {
+	if cfg.Environment == EnvDevelopment {
 		consoleHandler = slog.NewTextHandler(os.Stdout, opts)
 	} else {
 		consoleHandler = slog.NewJSONHandler(os.Stdout, opts)
@@ -131,7 +135,7 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 			l = l.With("service", cfg.ServiceName)
 		}
 		slog.SetDefault(l)
-		return &Logger{Logger: l, env: cfg.Environment}, nil
+		return &Logger{Logger: l}, nil
 	}
 
 	res, err := resource.New(ctx,
@@ -171,7 +175,6 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 
 	return &Logger{
 		Logger: l,
-		env:    cfg.Environment,
 		lp:     lp,
 	}, nil
 }

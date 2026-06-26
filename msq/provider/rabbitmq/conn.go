@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/base/observer"
 	"github.com/joaoprofile/gofi/obs/logging"
 	"github.com/rabbitmq/amqp091-go"
@@ -28,19 +27,8 @@ type connObserver struct{ c *Conn }
 
 func (o connObserver) Close() { o.c.Close() }
 
-// Dial establishes a connection to RabbitMQ using environment variables.
-func Dial() (*Conn, error) {
-	env := environment.Instance()
-	url := fmt.Sprintf("amqp://%s:%s@%s:%d/",
-		env.MessagingUser,
-		env.MessagingPassword,
-		env.MessagingHost,
-		env.MessagingPort,
-	)
-	return DialURL(url)
-}
-
-// DialURL establishes a connection to the given AMQP URL.
+// DialURL establishes a connection to the given AMQP URL. gofi's config package
+// builds the URL from the MESSAGING_* environment variables (config.RabbitMQURL).
 func DialURL(url string) (*Conn, error) {
 	conn, err := amqp091.Dial(url)
 	if err != nil {

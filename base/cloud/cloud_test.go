@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,17 +13,15 @@ import (
 // Test helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// resetAll resets the cloud singleton, the environment singleton, and the
-// provider registry between tests so each test starts with a clean slate.
+// resetAll resets the cloud singleton and the provider registry between tests
+// so each test starts with a clean slate.
 func resetAll(t *testing.T) {
 	t.Helper()
 	ResetForTesting()
 	resetRegistryForTesting()
-	environment.ResetForTesting()
 	t.Cleanup(func() {
 		ResetForTesting()
 		resetRegistryForTesting()
-		environment.ResetForTesting()
 	})
 }
 
@@ -44,7 +41,7 @@ func (s *stubProvider) GetSession() any  { return s.session }
 func TestRegisterProvider_DuplicatePanics(t *testing.T) {
 	// CLOUD_AWS is already registered via init(); a second registration must panic.
 	assert.Panics(t, func() {
-		RegisterProvider(environment.CLOUD_AWS, func(cfg environment.CloudConfig) Provider {
+		RegisterProvider(ProviderAWS, func(cfg Config) Provider {
 			return NewAWS(cfg)
 		})
 	})
@@ -52,9 +49,9 @@ func TestRegisterProvider_DuplicatePanics(t *testing.T) {
 
 func TestRegisterProvider_NewNameSucceeds(t *testing.T) {
 	resetAll(t)
-	const custom environment.CloudProvider = "custom"
+	const custom ProviderName = "custom"
 	assert.NotPanics(t, func() {
-		RegisterProvider(custom, func(cfg environment.CloudConfig) Provider {
+		RegisterProvider(custom, func(cfg Config) Provider {
 			return &stubProvider{}
 		})
 	})
@@ -65,40 +62,40 @@ func TestRegisterProvider_NewNameSucceeds(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestNewProvider_AWS(t *testing.T) {
-	p, err := newProvider(environment.CloudConfig{Provider: environment.CLOUD_AWS})
+	p, err := newProvider(Config{Provider: ProviderAWS})
 	require.NoError(t, err)
 	_, ok := p.(*AWS)
 	assert.True(t, ok, "expected *AWS")
 }
 
 func TestNewProvider_GCP(t *testing.T) {
-	p, err := newProvider(environment.CloudConfig{Provider: environment.CLOUD_GCP})
+	p, err := newProvider(Config{Provider: ProviderGCP})
 	require.NoError(t, err)
 	_, ok := p.(*GCP)
 	assert.True(t, ok, "expected *GCP")
 }
 
 func TestNewProvider_OCI(t *testing.T) {
-	p, err := newProvider(environment.CloudConfig{Provider: environment.CLOUD_OCI})
+	p, err := newProvider(Config{Provider: ProviderOCI})
 	require.NoError(t, err)
 	_, ok := p.(*OCI)
 	assert.True(t, ok, "expected *OCI")
 }
 
 func TestNewProvider_NoneReturnsErrNoProvider(t *testing.T) {
-	_, err := newProvider(environment.CloudConfig{Provider: environment.CLOUD_NONE})
+	_, err := newProvider(Config{Provider: ProviderNone})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errNoProvider)
 }
 
 func TestNewProvider_EmptyReturnsErrNoProvider(t *testing.T) {
-	_, err := newProvider(environment.CloudConfig{Provider: ""})
+	_, err := newProvider(Config{Provider: ""})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errNoProvider)
 }
 
 func TestNewProvider_UnknownReturnsUnsupportedError(t *testing.T) {
-	_, err := newProvider(environment.CloudConfig{Provider: "azure"})
+	_, err := newProvider(Config{Provider: "azure"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported provider")
 	assert.Contains(t, err.Error(), "azure")
@@ -106,11 +103,11 @@ func TestNewProvider_UnknownReturnsUnsupportedError(t *testing.T) {
 
 func TestNewProvider_CustomRegisteredProvider(t *testing.T) {
 	resetAll(t)
-	const custom environment.CloudProvider = "custom"
+	const custom ProviderName = "custom"
 	stub := &stubProvider{session: "custom-session"}
-	RegisterProvider(custom, func(_ environment.CloudConfig) Provider { return stub })
+	RegisterProvider(custom, func(_ Config) Provider { return stub })
 
-	p, err := newProvider(environment.CloudConfig{Provider: custom})
+	p, err := newProvider(Config{Provider: custom})
 	require.NoError(t, err)
 	assert.Equal(t, stub, p)
 }
@@ -120,12 +117,12 @@ func TestNewProvider_CustomRegisteredProvider(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestAWS_ImplementsProvider(t *testing.T) {
-	var _ Provider = NewAWS(environment.CloudConfig{})
+	var _ Provider = NewAWS(Config{})
 }
 
 func TestAWS_Bootstrap_Success(t *testing.T) {
-	a := NewAWS(environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	a := NewAWS(Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "fake-token",
 		Secret:   "fake-secret",
@@ -134,13 +131,13 @@ func TestAWS_Bootstrap_Success(t *testing.T) {
 }
 
 func TestAWS_GetSession_BeforeBootstrap_ReturnsNil(t *testing.T) {
-	a := NewAWS(environment.CloudConfig{Provider: environment.CLOUD_AWS})
+	a := NewAWS(Config{Provider: ProviderAWS})
 	assert.Nil(t, a.GetSession())
 }
 
 func TestAWS_GetSession_AfterBootstrap_ReturnsTypedSession(t *testing.T) {
-	a := NewAWS(environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	a := NewAWS(Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "fake-token",
 		Secret:   "fake-secret",
@@ -158,15 +155,15 @@ func TestAWS_GetSession_AfterBootstrap_ReturnsTypedSession(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestGCP_ImplementsProvider(t *testing.T) {
-	var _ Provider = NewGCP(environment.CloudConfig{})
+	var _ Provider = NewGCP(Config{})
 }
 
 func TestGCP_Bootstrap_ReturnsNil(t *testing.T) {
-	assert.NoError(t, NewGCP(environment.CloudConfig{}).Bootstrap())
+	assert.NoError(t, NewGCP(Config{}).Bootstrap())
 }
 
 func TestGCP_GetSession_ReturnsNil(t *testing.T) {
-	assert.Nil(t, NewGCP(environment.CloudConfig{}).GetSession())
+	assert.Nil(t, NewGCP(Config{}).GetSession())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,15 +171,15 @@ func TestGCP_GetSession_ReturnsNil(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestOCI_ImplementsProvider(t *testing.T) {
-	var _ Provider = NewOCI(environment.CloudConfig{})
+	var _ Provider = NewOCI(Config{})
 }
 
 func TestOCI_Bootstrap_ReturnsNil(t *testing.T) {
-	assert.NoError(t, NewOCI(environment.CloudConfig{}).Bootstrap())
+	assert.NoError(t, NewOCI(Config{}).Bootstrap())
 }
 
 func TestOCI_GetSession_ReturnsNil(t *testing.T) {
-	assert.Nil(t, NewOCI(environment.CloudConfig{}).GetSession())
+	assert.Nil(t, NewOCI(Config{}).GetSession())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,7 +210,7 @@ func TestTypedAdapter_TypeMismatch_ReturnsError(t *testing.T) {
 }
 
 func TestTypedAdapter_Success(t *testing.T) {
-	a := NewAWS(environment.CloudConfig{
+	a := NewAWS(Config{
 		Region: "us-east-1",
 		Token:  "t",
 		Secret: "s",
@@ -235,8 +232,8 @@ func TestTypedAdapter_ImplementsAdapter(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestSessionAs_Success(t *testing.T) {
-	cfg := environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	cfg := Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "t",
 		Secret:   "s",
@@ -250,8 +247,8 @@ func TestSessionAs_Success(t *testing.T) {
 }
 
 func TestSessionAs_TypeMismatch_ReturnsError(t *testing.T) {
-	cfg := environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	cfg := Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "t",
 		Secret:   "s",
@@ -270,8 +267,8 @@ func TestSessionAs_TypeMismatch_ReturnsError(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestNewCloud_AWS_Success(t *testing.T) {
-	c, err := newCloud(environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	c, err := newCloud(Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "t",
 		Secret:   "s",
@@ -281,38 +278,38 @@ func TestNewCloud_AWS_Success(t *testing.T) {
 }
 
 func TestNewCloud_GCP_Success(t *testing.T) {
-	c, err := newCloud(environment.CloudConfig{Provider: environment.CLOUD_GCP})
+	c, err := newCloud(Config{Provider: ProviderGCP})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
 func TestNewCloud_OCI_Success(t *testing.T) {
-	c, err := newCloud(environment.CloudConfig{Provider: environment.CLOUD_OCI})
+	c, err := newCloud(Config{Provider: ProviderOCI})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
 func TestNewCloud_UnknownProvider_ReturnsError(t *testing.T) {
-	c, err := newCloud(environment.CloudConfig{Provider: "unknown"})
+	c, err := newCloud(Config{Provider: "unknown"})
 	assert.Nil(t, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported provider")
 }
 
 func TestNewCloud_NoProvider_ReturnsErrNoProvider(t *testing.T) {
-	_, err := newCloud(environment.CloudConfig{Provider: environment.CLOUD_NONE})
+	_, err := newCloud(Config{Provider: ProviderNone})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errNoProvider)
 }
 
 func TestNewCloud_BootstrapError_WrapsError(t *testing.T) {
 	resetAll(t)
-	const failing environment.CloudProvider = "failing"
-	RegisterProvider(failing, func(_ environment.CloudConfig) Provider {
+	const failing ProviderName = "failing"
+	RegisterProvider(failing, func(_ Config) Provider {
 		return &stubProvider{bootstrapErr: errors.New("dial timeout")}
 	})
 
-	c, err := newCloud(environment.CloudConfig{Provider: failing})
+	c, err := newCloud(Config{Provider: failing})
 	assert.Nil(t, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bootstrap failed")
@@ -324,8 +321,8 @@ func TestNewCloud_BootstrapError_WrapsError(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestCloud_GetSession_DelegatesToProvider(t *testing.T) {
-	c, err := newCloud(environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	c, err := newCloud(Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "t",
 		Secret:   "s",
@@ -352,8 +349,8 @@ func TestGetSession_ReturnsSessionAfterInjection(t *testing.T) {
 	ResetForTesting()
 	t.Cleanup(ResetForTesting)
 
-	c, err := newCloud(environment.CloudConfig{
-		Provider: environment.CLOUD_AWS,
+	c, err := newCloud(Config{
+		Provider: ProviderAWS,
 		Region:   "us-east-1",
 		Token:    "t",
 		Secret:   "s",
@@ -368,78 +365,69 @@ func TestGetSession_ReturnsSessionAfterInjection(t *testing.T) {
 // Instance singleton
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestInstance_UnknownProvider_ReturnsError(t *testing.T) {
+func TestInit_UnknownProvider_ReturnsError(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "azure")
-
-	c, err := Instance()
+	c, err := Init(Config{Provider: "azure"})
 	assert.Nil(t, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported provider")
 }
 
-func TestInstance_NoProvider_ReturnsErrNoProvider(t *testing.T) {
+func TestInit_NoProvider_ReturnsErrNoProvider(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "none")
-
-	c, err := Instance()
+	c, err := Init(Config{Provider: ProviderNone})
 	assert.Nil(t, c)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errNoProvider)
 }
 
-func TestInstance_AWS_Success(t *testing.T) {
+func TestInit_AWS_Success(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "aws")
-	t.Setenv("CLOUD_REGION", "us-east-1")
-	t.Setenv("CLOUD_TOKEN", "fake-token")
-	t.Setenv("CLOUD_SECRET", "fake-secret")
-
-	c, err := Instance()
+	c, err := Init(Config{Provider: ProviderAWS, Region: "us-east-1", Token: "fake-token", Secret: "fake-secret"})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
-func TestInstance_IsSingleton(t *testing.T) {
+func TestInit_IsSingleton(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "aws")
-	t.Setenv("CLOUD_REGION", "us-east-1")
-	t.Setenv("CLOUD_TOKEN", "fake-token")
-	t.Setenv("CLOUD_SECRET", "fake-secret")
-
-	c1, err1 := Instance()
-	c2, err2 := Instance()
+	cfg := Config{Provider: ProviderAWS, Region: "us-east-1", Token: "fake-token", Secret: "fake-secret"}
+	c1, err1 := Init(cfg)
+	c2, err2 := Init(cfg)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	assert.Same(t, c1, c2, "Instance must return the same pointer on every call")
+	assert.Same(t, c1, c2, "Init must return the same pointer on every call")
 }
 
-func TestInstance_ErrorIsSticky(t *testing.T) {
+func TestInit_ErrorIsSticky(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "bad-provider")
-
-	_, err1 := Instance()
-	_, err2 := Instance()
+	_, err1 := Init(Config{Provider: "bad-provider"})
+	_, err2 := Init(Config{Provider: "bad-provider"})
 	require.Error(t, err1)
 	require.Error(t, err2)
 	assert.Equal(t, err1, err2, "same error must be returned on every call after failure")
 }
 
+func TestInstance_NilBeforeInit(t *testing.T) {
+	resetAll(t)
+	assert.Nil(t, Instance())
+}
+
+func TestInstance_ReturnsSingletonAfterInit(t *testing.T) {
+	resetAll(t)
+	c, err := Init(Config{Provider: ProviderAWS, Region: "us-east-1", Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	assert.Same(t, c, Instance())
+}
+
 func TestResetForTesting_AllowsReinit(t *testing.T) {
 	resetAll(t)
-	t.Setenv("CLOUD_PROVIDER", "bad-provider")
-	_, err := Instance()
+	_, err := Init(Config{Provider: "bad-provider"})
 	require.Error(t, err)
 
 	// Reset and reinitialise with a valid provider.
 	ResetForTesting()
-	environment.ResetForTesting()
-	t.Setenv("CLOUD_PROVIDER", "aws")
-	t.Setenv("CLOUD_REGION", "us-east-1")
-	t.Setenv("CLOUD_TOKEN", "tok")
-	t.Setenv("CLOUD_SECRET", "sec")
-
-	c, err2 := Instance()
+	resetRegistryForTesting()
+	c, err2 := Init(Config{Provider: ProviderAWS, Region: "us-east-1", Token: "tok", Secret: "sec"})
 	require.NoError(t, err2)
 	assert.NotNil(t, c)
 }

@@ -6,22 +6,21 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 func init() {
-	RegisterProvider(environment.CLOUD_AWS, func(cfg environment.CloudConfig) Provider {
+	RegisterProvider(ProviderAWS, func(cfg Config) Provider {
 		return NewAWS(cfg)
 	})
 }
 
 // AWS implements Provider for Amazon Web Services.
 type AWS struct {
-	cfg     environment.CloudConfig
+	cfg     Config
 	session *session.Session
 }
 
-func NewAWS(cfg environment.CloudConfig) *AWS {
+func NewAWS(cfg Config) *AWS {
 	return &AWS{cfg: cfg}
 }
 

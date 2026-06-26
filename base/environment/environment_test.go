@@ -116,14 +116,14 @@ func TestBootstrap(t *testing.T) {
 
 func TestEnvironmentCheckFunctions(t *testing.T) {
 	cases := []struct {
-		name            string
-		env             EnvironmentType
-		wantDev         bool
-		wantProd        bool
-		wantStage       bool
-		wantTest        bool
-		wantCloud       bool
-		wantLocal       bool
+		name      string
+		env       EnvironmentType
+		wantDev   bool
+		wantProd  bool
+		wantStage bool
+		wantTest  bool
+		wantCloud bool
+		wantLocal bool
 	}{
 		{"dev", ENV_DEV, true, false, false, false, false, true},
 		{"prod", ENV_PROD, false, true, false, false, true, false},
@@ -159,69 +159,8 @@ func TestEnvironmentCheckFunctions(t *testing.T) {
 	}
 }
 
-// ---- GetDatabaseURI ----
-
-func TestGetDatabaseURI(t *testing.T) {
-	cases := []struct {
-		name   string
-		env    Environment
-		wantURI string
-	}{
-		{
-			name: "postgres default",
-			env: Environment{
-				DatabaseHost: "localhost", DatabasePort: 5432,
-				DatabaseUser: "user", DatabasePassword: "pass",
-				DatabaseName: "mydb", DatabaseSSLMode: "disable",
-			},
-			wantURI: "host=localhost port=5432 user=user password=pass dbname=mydb sslmode=disable",
-		},
-		{
-			name: "mysql",
-			env: Environment{
-				DatabaseDriver: "mysql",
-				DatabaseHost:   "localhost", DatabasePort: 3306,
-				DatabaseUser: "user", DatabasePassword: "pass",
-				DatabaseName: "mydb",
-			},
-			wantURI: "user:pass@tcp(localhost:3306)/mydb",
-		},
-		{
-			name: "sqlite",
-			env: Environment{
-				DatabaseDriver: "sqlite",
-				DatabaseName:   "/data/app.db",
-			},
-			wantURI: "/data/app.db",
-		},
-		{
-			name: "sqlite3",
-			env: Environment{
-				DatabaseDriver: "sqlite3",
-				DatabaseName:   "/data/app.db",
-			},
-			wantURI: "/data/app.db",
-		},
-		{
-			name: "pgx treated as postgres",
-			env: Environment{
-				DatabaseDriver: "pgx",
-				DatabaseHost:   "db", DatabasePort: 5432,
-				DatabaseUser: "u", DatabasePassword: "p",
-				DatabaseName: "d", DatabaseSSLMode: "require",
-			},
-			wantURI: "host=db port=5432 user=u password=p dbname=d sslmode=require",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.env.GetDatabaseURI(); got != tc.wantURI {
-				t.Errorf("GetDatabaseURI()=%q, want %q", got, tc.wantURI)
-			}
-		})
-	}
-}
+// DSN construction is tested per driver (sqln/driver/*) and end-to-end via the
+// config package (config.Database); the environment no longer assembles DSNs.
 
 // ---- typed accessors ----
 
@@ -298,94 +237,6 @@ func TestIsConfigured(t *testing.T) {
 }
 
 // ---- segregated config structs ----
-
-func TestDatabaseConfig(t *testing.T) {
-	env := Environment{
-		DatabaseDriver:       "postgres",
-		DatabaseHost:         "localhost",
-		DatabasePort:         5432,
-		DatabaseUser:         "user",
-		DatabasePassword:     "pass",
-		DatabaseName:         "mydb",
-		DatabaseSSLMode:      "disable",
-		DatabaseMigration:    true,
-		DatabaseMaxOpenConns: 20,
-		DatabaseMaxIdleConns: 5,
-		DatabaseMaxLifetime:  30 * time.Second,
-	}
-
-	cfg := env.Database()
-	if cfg.Driver != "postgres" {
-		t.Errorf("Driver=%q, want postgres", cfg.Driver)
-	}
-	if cfg.MaxOpenConns != 20 {
-		t.Errorf("MaxOpenConns=%d, want 20", cfg.MaxOpenConns)
-	}
-	if cfg.MaxLifetime != 30*time.Second {
-		t.Errorf("MaxLifetime=%v, want 30s", cfg.MaxLifetime)
-	}
-	if cfg.URI == "" {
-		t.Error("URI must not be empty")
-	}
-}
-
-func TestMessagingConfig(t *testing.T) {
-	env := Environment{
-		MessagingProvider:       "rabbitmq",
-		MessagingHost:           "localhost",
-		MessagingPort:           5672,
-		MessagingOCITenancyId:   "t1",
-		MessagingOCIUserId:      "u1",
-		MessagingOCIRegion:      "us-east-1",
-		MessagingOCIFingerPrint: "fp",
-	}
-
-	cfg := env.Messaging()
-	if cfg.Provider != MESSAGING_RABBITMQ {
-		t.Errorf("Provider=%q, want rabbitmq", cfg.Provider)
-	}
-	if cfg.OCICredentials.TenancyId != "t1" {
-		t.Errorf("OCICredentials.TenancyId=%q, want t1", cfg.OCICredentials.TenancyId)
-	}
-	if cfg.OCICredentials.FingerPrint != "fp" {
-		t.Errorf("OCICredentials.FingerPrint=%q, want fp", cfg.OCICredentials.FingerPrint)
-	}
-}
-
-func TestCloudConfig(t *testing.T) {
-	env := Environment{
-		CloudProvider:   "gcp",
-		CloudRegion:     "us-central1",
-		CloudDisableSSL: true,
-	}
-
-	cfg := env.Cloud()
-	if cfg.Provider != CLOUD_GCP {
-		t.Errorf("Provider=%q, want gcp", cfg.Provider)
-	}
-	if cfg.Region != "us-central1" {
-		t.Errorf("Region=%q, want us-central1", cfg.Region)
-	}
-	if !cfg.DisableSSL {
-		t.Error("expected DisableSSL=true")
-	}
-}
-
-func TestCacheConfig(t *testing.T) {
-	env := Environment{
-		CacheType:     "redis",
-		CacheURI:      "redis://localhost:6379",
-		CachePassword: "secret",
-	}
-
-	cfg := env.Cache()
-	if cfg.Type != REDIS_CACHE {
-		t.Errorf("Type=%q, want redis", cfg.Type)
-	}
-	if cfg.URI != "redis://localhost:6379" {
-		t.Errorf("URI=%q, want redis://localhost:6379", cfg.URI)
-	}
-}
 
 func TestObservabilityConfig(t *testing.T) {
 	env := Environment{

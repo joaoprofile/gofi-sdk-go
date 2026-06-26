@@ -117,6 +117,26 @@ type Environment struct {
 	CloudToken      string `env:"CLOUD_TOKEN"`
 	CloudDisableSSL bool   `env:"CLOUD_DISABLE_SSL"`
 
+	// Object-storage bucket configuration. gofi's config.Bucket maps these into
+	// the typed bucket.Config.
+	BucketProvider string `env:"BUCKET_PROVIDER"`
+	BucketName     string `env:"BUCKET_NAME"`
+	BucketRegion   string `env:"BUCKET_REGION"`
+	BucketEndpoint string `env:"BUCKET_ENDPOINT"`
+
+	// OCI Object Storage credentials.
+	BucketOCINamespace   string `env:"BUCKET_OCI_NAMESPACE"`
+	BucketOCITenancyID   string `env:"BUCKET_OCI_TENANCY_ID"`
+	BucketOCIUserID      string `env:"BUCKET_OCI_USER_ID"`
+	BucketOCIFingerPrint string `env:"BUCKET_OCI_FINGERPRINT"`
+	BucketOCIPrivateKey  string `env:"BUCKET_OCI_PRIVATE_KEY"`
+	BucketOCIPassphrase  string `env:"BUCKET_OCI_PASSPHRASE"`
+
+	// MinIO / S3-compatible credentials.
+	BucketS3AccessKey string `env:"BUCKET_S3_ACCESS_KEY"`
+	BucketS3SecretKey string `env:"BUCKET_S3_SECRET_KEY"`
+	BucketS3UseSSL    bool   `env:"BUCKET_S3_USE_SSL"`
+
 	OtelExporterOTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 	OtelExporterOTLPHeaders  string `env:"OTEL_EXPORTER_OTLP_HEADERS"`
 
@@ -133,6 +153,20 @@ type Environment struct {
 
 	// HTTP / CORS — origens permitidas como CSV ("a,b,c").
 	AllowedOrigins string `env:"ALLOWED_ORIGINS"`
+
+	// Mail / SMTP — envio transacional e em massa por qualquer provedor SMTP.
+	MailHost       string        `env:"MAIL_HOST"`
+	MailPort       int           `env:"MAIL_PORT"`
+	MailUsername   string        `env:"MAIL_USERNAME"`
+	MailPassword   string        `env:"MAIL_PASSWORD"`
+	MailFromName   string        `env:"MAIL_FROM_NAME"`
+	MailFromEmail  string        `env:"MAIL_FROM_EMAIL"`
+	MailEncryption string        `env:"MAIL_ENCRYPTION"` // none | starttls | tls
+	MailAuth       string        `env:"MAIL_AUTH"`       // plain | login | cram-md5 | none
+	MailTimeout    time.Duration `env:"MAIL_TIMEOUT"`
+	MailMaxRetries int           `env:"MAIL_MAX_RETRIES"`
+	MailPoolSize   int           `env:"MAIL_POOL_SIZE"`
+	MailHELODomain string        `env:"MAIL_HELO_DOMAIN"`
 }
 
 // Defaults aplicados pelo SDK quando o env não traz valor.
@@ -270,33 +304,9 @@ func IsEnvironmentTest() bool  { return Instance().GetEnvironmentType() == ENV_T
 func IsCloudEnvironment() bool { return IsEnvironmentProd() || IsEnvironmentStage() }
 func IsLocalEnvironment() bool { return IsEnvironmentDev() || IsEnvironmentTest() }
 
-// =============================================================================
-// Phase 3: GetDatabaseURI — multi-driver DSN builder
-// =============================================================================
-
-// GetDatabaseURI returns the connection string for the configured database
-// driver. Supported drivers: postgres/pgx (default), mysql, sqlite/sqlite3.
-func (env *Environment) GetDatabaseURI() string {
-	switch strings.ToLower(env.DatabaseDriver) {
-	case "mysql":
-		return fmt.Sprintf(
-			"%s:%s@tcp(%s:%d)/%s",
-			env.DatabaseUser, env.DatabasePassword,
-			env.DatabaseHost, env.DatabasePort,
-			env.DatabaseName,
-		)
-	case "sqlite", "sqlite3":
-		// For SQLite the "name" is the file path.
-		return env.DatabaseName
-	default: // postgres, pgx, etc.
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-			env.DatabaseHost, env.DatabasePort,
-			env.DatabaseUser, env.DatabasePassword,
-			env.DatabaseName, env.DatabaseSSLMode,
-		)
-	}
-}
+// Database DSN construction lives with each sqln driver (Driver.DSN) and is
+// wired from these raw fields by gofi's config.Database. The environment only
+// reports whether a database is configured (IsDatabaseConfigured).
 
 // =============================================================================
 // Phase 4: Typed accessors & convenience methods
@@ -353,122 +363,10 @@ func (env *Environment) IsDatabaseConfigured() bool {
 // Phase 5: Segregated config structs
 // =============================================================================
 
-// DatabaseConfig groups all database-related configuration.
-type DatabaseConfig struct {
-	Driver       string
-	Host         string
-	Port         int
-	User         string
-	Password     string
-	Name         string
-	SSLMode      string
-	Migration    bool
-	MaxOpenConns int
-	MaxIdleConns int
-	MaxLifetime  time.Duration
-	// URI is the fully-assembled connection string for the configured driver.
-	URI string
-}
-
-// Database returns a DatabaseConfig populated from the environment.
-func (env *Environment) Database() DatabaseConfig {
-	return DatabaseConfig{
-		Driver:       env.DatabaseDriver,
-		Host:         env.DatabaseHost,
-		Port:         env.DatabasePort,
-		User:         env.DatabaseUser,
-		Password:     env.DatabasePassword,
-		Name:         env.DatabaseName,
-		SSLMode:      env.DatabaseSSLMode,
-		Migration:    env.DatabaseMigration,
-		MaxOpenConns: env.DatabaseMaxOpenConns,
-		MaxIdleConns: env.DatabaseMaxIdleConns,
-		MaxLifetime:  env.DatabaseMaxLifetime,
-		URI:          env.GetDatabaseURI(),
-	}
-}
-
-// CacheConfig groups all cache-related configuration.
-type CacheConfig struct {
-	Type     CacheType
-	URI      string
-	Password string
-}
-
-// Cache returns a CacheConfig populated from the environment.
-func (env *Environment) Cache() CacheConfig {
-	return CacheConfig{
-		Type:     env.GetCacheType(),
-		URI:      env.CacheURI,
-		Password: env.CachePassword,
-	}
-}
-
-// MessagingConfig groups all messaging-related configuration.
-// OCI-specific credentials are nested in the OCICredentials field to keep
-// the struct extensible as new providers are added.
-type MessagingConfig struct {
-	Provider        MessagingProvider
-	User            string
-	Password        string
-	Host            string
-	Port            int
-	UseTLS          bool
-	SASLMechanism   string
-	PollingInterval int
-	// OCICredentials holds Oracle Cloud Queue-specific auth fields.
-	OCICredentials MessagingOCICredentials
-}
-
-// MessagingOCICredentials holds auth fields exclusive to the OCI Queue provider.
-type MessagingOCICredentials struct {
-	TenancyId   string
-	UserId      string
-	Region      string
-	FingerPrint string
-}
-
-// Messaging returns a MessagingConfig populated from the environment.
-func (env *Environment) Messaging() MessagingConfig {
-	return MessagingConfig{
-		Provider:        env.GetMessagingProvider(),
-		User:            env.MessagingUser,
-		Password:        env.MessagingPassword,
-		Host:            env.MessagingHost,
-		Port:            env.MessagingPort,
-		UseTLS:          env.MessagingUseTLS,
-		SASLMechanism:   env.MessagingSASLMechanism,
-		PollingInterval: env.MessagingPollingInterval,
-		OCICredentials: MessagingOCICredentials{
-			TenancyId:   env.MessagingOCITenancyId,
-			UserId:      env.MessagingOCIUserId,
-			Region:      env.MessagingOCIRegion,
-			FingerPrint: env.MessagingOCIFingerPrint,
-		},
-	}
-}
-
-// CloudConfig groups all cloud provider configuration.
-type CloudConfig struct {
-	Provider   CloudProvider
-	Host       string
-	Region     string
-	Secret     string
-	Token      string
-	DisableSSL bool
-}
-
-// Cloud returns a CloudConfig populated from the environment.
-func (env *Environment) Cloud() CloudConfig {
-	return CloudConfig{
-		Provider:   env.GetCloudProvider(),
-		Host:       env.CloudHost,
-		Region:     env.CloudRegion,
-		Secret:     env.CloudSecret,
-		Token:      env.CloudToken,
-		DisableSSL: env.CloudDisableSSL,
-	}
-}
+// Cache, messaging and cloud configuration is assembled into each library's
+// own typed Config by gofi's config package (config.Cloud, config.Kafka,
+// config.ConfigureCache, …) directly from the raw fields above. The strongly
+// typed Get* accessors below remain for convenience.
 
 // ObservabilityConfig groups all OpenTelemetry configuration.
 type ObservabilityConfig struct {

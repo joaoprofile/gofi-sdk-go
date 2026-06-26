@@ -11,8 +11,6 @@ import (
 	"math/big"
 	"testing"
 	"time"
-
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 func selfSignedCert(t *testing.T) tls.Certificate {
@@ -92,28 +90,5 @@ func TestSMTP_SendBulk_PoolRecycle(t *testing.T) {
 	}
 	if len(fs.messages()) != 3 {
 		t.Fatalf("expected 3 delivered, got %d", len(fs.messages()))
-	}
-}
-
-func TestNewFromEnv(t *testing.T) {
-	t.Setenv("MAIL_HOST", "smtp.example.com")
-	t.Setenv("MAIL_FROM_EMAIL", "no-reply@example.com")
-	environment.ResetForTesting()
-	t.Cleanup(environment.ResetForTesting)
-
-	m, err := NewFromEnv()
-	if err != nil || m == nil {
-		t.Fatalf("NewFromEnv: m=%v err=%v", m, err)
-	}
-}
-
-func TestNewFromEnv_NotConfigured(t *testing.T) {
-	t.Setenv("MAIL_HOST", "")
-	t.Setenv("MAIL_FROM_EMAIL", "")
-	environment.ResetForTesting()
-	t.Cleanup(environment.ResetForTesting)
-
-	if _, err := NewFromEnv(); err == nil {
-		t.Fatal("expected error when not configured")
 	}
 }

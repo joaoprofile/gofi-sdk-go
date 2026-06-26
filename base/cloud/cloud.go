@@ -3,8 +3,6 @@ package cloud
 import (
 	"fmt"
 	"sync"
-
-	"github.com/joaoprofile/gofi/base/environment"
 )
 
 // Provider is the interface every cloud-provider implementation must satisfy.
@@ -34,24 +32,25 @@ var (
 	initErr  error
 )
 
-// Instance returns the singleton Cloud, initialising it on the first call.
-// If initialisation fails the error is sticky — subsequent calls return the
-// same error without retrying.
-func Instance() (*Cloud, error) {
+// Init initialises the singleton Cloud from cfg on the first call and returns
+// it. The result is sticky: later calls return the same instance/error without
+// rebuilding, ignoring cfg. gofi's config.InitCloud populates cfg from CLOUD_*.
+func Init(cfg Config) (*Cloud, error) {
 	initOnce.Do(func() {
-		cfg := environment.Instance().Cloud()
-		p, err := newProvider(cfg)
+		c, err := newCloud(cfg)
 		if err != nil {
 			initErr = err
 			return
 		}
-		if err := p.Bootstrap(); err != nil {
-			initErr = fmt.Errorf("cloud: bootstrap failed: %w", err)
-			return
-		}
-		instance = &Cloud{provider: p}
+		instance = c
 	})
 	return instance, initErr
+}
+
+// Instance returns the singleton Cloud built by Init, or nil when Init has not
+// been called (or failed).
+func Instance() *Cloud {
+	return instance
 }
 
 // ResetForTesting clears the singleton so that Instance() re-initialises on
@@ -72,8 +71,8 @@ func GetSession() any {
 }
 
 // newCloud creates a Cloud from a config without touching the singleton.
-// Intended for use in tests and in Instance().
-func newCloud(cfg environment.CloudConfig) (*Cloud, error) {
+// Intended for use in tests and in Init().
+func newCloud(cfg Config) (*Cloud, error) {
 	p, err := newProvider(cfg)
 	if err != nil {
 		return nil, err
