@@ -69,6 +69,10 @@ type Environment struct {
 	AppTenant             int    `env:"APP_TENANT"`
 	AppMaxParallelWorkers int    `env:"APP_MAX_PARALLEL_WORKERS"`
 
+	// Timezone is the IANA name applied to time.Local at startup. Empty defaults
+	// to Brazil (America/Sao_Paulo).
+	Timezone string `env:"TIMEZONE"`
+
 	ServiceDebug     bool   `env:"SERVICE_DEBUG"`
 	ServiceDebugAddr string `env:"SERVICE_DEBUG_ADDR"`
 	ServiceDebugUser string `env:"SERVICE_DEBUG_USER"`

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/joaoprofile/gofi/base/common"
 	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/base/observer"
 	"github.com/joaoprofile/gofi/base/session"
@@ -54,7 +53,7 @@ func newInstance(serviceName string) *gofiInstance {
 		env.AppName = serviceName
 	}
 
-	common.SetBrazil()
+	config.SetTimezone(env)
 	config.InitLogging(env, env.AppName)
 	config.ConfigureCache(env)
 	config.InitCloud(env)
