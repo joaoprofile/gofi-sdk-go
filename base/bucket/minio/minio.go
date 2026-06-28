@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -188,6 +189,22 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return mapErr(fmt.Errorf("minio bucket: delete %q: %w", key, err))
 	}
 	return nil
+}
+
+// PresignGet returns a presigned GET URL for a single object, valid for ttl.
+func (s *Store) PresignGet(_ context.Context, key string, ttl time.Duration) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("%w: key is required", bucket.ErrInvalidConfig)
+	}
+	req, _ := s.client.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+	})
+	url, err := req.Presign(ttl)
+	if err != nil {
+		return "", fmt.Errorf("minio bucket: presign %q: %w", key, err)
+	}
+	return url, nil
 }
 
 // toReadSeeker returns r when it already supports seeking, otherwise it buffers

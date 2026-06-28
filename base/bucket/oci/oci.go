@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/joaoprofile/gofi/base/bucket"
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -46,6 +49,9 @@ type Config struct {
 type Store struct {
 	client objectstorage.ObjectStorageClient
 	bucket string
+	// parBaseURL is the scheme+host used to turn a PAR AccessUri (a path) into an
+	// absolute download URL.
+	parBaseURL string
 
 	nsOnce    sync.Once
 	namespace string
@@ -91,7 +97,12 @@ func New(cfg Config) (*Store, error) {
 		client.Host = cfg.Endpoint
 	}
 
-	s := &Store{client: client, bucket: cfg.Bucket}
+	base := cfg.Endpoint
+	if base == "" {
+		base = fmt.Sprintf("https://objectstorage.%s.oraclecloud.com", cfg.Region)
+	}
+
+	s := &Store{client: client, bucket: cfg.Bucket, parBaseURL: strings.TrimRight(base, "/")}
 	if cfg.Namespace != "" {
 		// Pre-seed the namespace so the first call skips the lookup.
 		s.nsOnce.Do(func() { s.namespace = cfg.Namespace })
@@ -225,6 +236,39 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return mapped
 	}
 	return nil
+}
+
+// PresignGet issues a read-only Pre-Authenticated Request (PAR) scoped to a
+// single object and returns the absolute download URL valid for ttl.
+func (s *Store) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("%w: key is required", bucket.ErrInvalidConfig)
+	}
+	ns, err := s.resolveNamespace(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	name := "dl-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	expires := &common.SDKTime{Time: time.Now().Add(ttl)}
+
+	resp, err := s.client.CreatePreauthenticatedRequest(ctx, objectstorage.CreatePreauthenticatedRequestRequest{
+		NamespaceName: &ns,
+		BucketName:    &s.bucket,
+		CreatePreauthenticatedRequestDetails: objectstorage.CreatePreauthenticatedRequestDetails{
+			Name:        &name,
+			ObjectName:  &key,
+			AccessType:  objectstorage.CreatePreauthenticatedRequestDetailsAccessTypeObjectread,
+			TimeExpires: expires,
+		},
+	})
+	if err != nil {
+		return "", mapErr(fmt.Errorf("oci bucket: presign %q: %w", key, err))
+	}
+	if resp.AccessUri == nil {
+		return "", fmt.Errorf("oci bucket: presign %q: empty access uri", key)
+	}
+	return s.parBaseURL + *resp.AccessUri, nil
 }
 
 // resolveNamespace fetches the tenancy's Object Storage namespace once and

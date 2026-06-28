@@ -70,4 +70,10 @@ type Store interface {
 	// Delete removes an object. It is idempotent: deleting a key that does not
 	// exist is not an error.
 	Delete(ctx context.Context, key string) error
+
+	// PresignGet returns a time-limited, read-only URL for a single object that
+	// a client can download directly from the backend, without proxying the
+	// bytes through the application. ttl bounds the URL's validity. OCI issues a
+	// Pre-Authenticated Request; S3/MinIO a presigned GET.
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 }
