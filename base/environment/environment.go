@@ -128,7 +128,11 @@ type Environment struct {
 	BucketRegion   string `env:"BUCKET_REGION"`
 	BucketEndpoint string `env:"BUCKET_ENDPOINT"`
 
-	// OCI Object Storage credentials.
+	// OCI Object Storage credentials. BUCKET_OCI_AUTH_MODE selects the
+	// credential source (empty/"api_key", "instance_principal",
+	// "resource_principal", "workload_identity"); the key fields below are
+	// consumed only by the api_key mode.
+	BucketOCIAuthMode    string `env:"BUCKET_OCI_AUTH_MODE"`
 	BucketOCINamespace   string `env:"BUCKET_OCI_NAMESPACE"`
 	BucketOCITenancyID   string `env:"BUCKET_OCI_TENANCY_ID"`
 	BucketOCIUserID      string `env:"BUCKET_OCI_USER_ID"`

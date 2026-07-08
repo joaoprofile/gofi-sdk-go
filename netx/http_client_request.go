@@ -159,6 +159,9 @@ func (r *Request[T]) readResponseBody(resp *http.Response) (*T, error) {
 
 	var result T
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf(ErrFailedToUnmarshalResponseBody, err)
 	}
 
@@ -233,9 +236,7 @@ func (r *Request[T]) executeWithRetries(bodyResult *RequestBodyResult) (*http.Re
 
 		if resp.StatusCode == http.StatusInternalServerError {
 			if attempt == r.Retries {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				return nil, errors.New(string(bodyBytes))
+				return nil, r.handleAPIError(resp, resp.StatusCode, http.StatusText(resp.StatusCode))
 			}
 			resp.Body.Close()
 			fmt.Printf("Retrying due to status %d (attempt %d/%d)\n", resp.StatusCode, attempt+1, r.Retries)

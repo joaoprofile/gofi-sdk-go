@@ -270,6 +270,24 @@ func TestReadResponseBody_InvalidJSON(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+// A 2xx with Content-Type: application/json but an EMPTY body is a success with
+// no content, not an unmarshal failure. Decoding an empty stream yields io.EOF —
+// it must be treated as (nil, nil), the same as 204. Guards against a provider
+// (e.g. Meli DELETE) that answers 200 + application/json + empty body being
+// misread as a transient error and driving false retries.
+func TestReadResponseBody_EmptyBodyWithJSONContentType(t *testing.T) {
+	header := make(http.Header)
+	header.Set(common.CONTENT_TYPE, common.APPLICATION_JSON)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("")),
+		Header:     header,
+	}
+	result, err := (&Request[any]{}).readResponseBody(resp)
+	assert.NoError(t, err)
+	assert.Nil(t, result)
+}
+
 // isClientError─
 
 func TestIsClientError(t *testing.T) {
@@ -459,6 +477,27 @@ func TestExecute_NoContentResponse(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+// Reproduces the Meli promotion exit: DELETE answered with 200 +
+// Content-Type: application/json + empty body. Before the fix this surfaced as
+// "failed to unmarshal response body: EOF", got a fabricated 500 from FromError,
+// and drove 5 false transient retries. It must now succeed with (nil, nil).
+func TestExecute_EmptyJSONBody_TreatedAsNoContent(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.Header().Set("Content-Type", common.APPLICATION_JSON)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req := NewRequest[any](context.Background(), newTestClient(server, 3, time.Millisecond), http.MethodDelete, "/seller-promotions/items/MLB123")
+	result, err := req.Execute()
+
+	assert.NoError(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&attempts), "empty 200 body must not trigger retries")
+}
+
 func TestExecute_ClientError_NoRetry(t *testing.T) {
 	var attempts int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +550,13 @@ func TestExecute_500_MaxRetriesExceeded(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "internal error")
+
+	// A real 5xx must surface as a typed *HttpError carrying the actual status,
+	// so callers can distinguish a genuine marketplace 500 from a client-side
+	// error (decode/marshal) that has no HTTP status at all.
+	var httpErr *HttpError
+	assert.True(t, errors.As(err, &httpErr))
+	assert.Equal(t, http.StatusInternalServerError, httpErr.Status)
 }
 
 func TestExecute_429_RetryThenSuccess(t *testing.T) {
