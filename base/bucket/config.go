@@ -25,8 +25,33 @@ type Config struct {
 	S3Credentials S3Credentials
 }
 
-// OCICredentials holds auth fields exclusive to the OCI backend.
+// OCIAuthMode selects how the OCI backend obtains its credentials. The OCI SDK
+// never auto-detects instance identity: the caller must name the principal it
+// wants, so this choice is always explicit.
+type OCIAuthMode string
+
+// Supported OCI authentication modes. Empty is treated as OCIAuthAPIKey.
+const (
+	// OCIAuthAPIKey signs requests with a user API key whose fields
+	// (TenancyID, UserID, FingerPrint, PrivateKey) are injected via env.
+	OCIAuthAPIKey OCIAuthMode = "api_key"
+	// OCIAuthInstancePrincipal derives credentials from the compute
+	// instance's identity via the OCI metadata service. Works only inside
+	// an OCI instance; requires no key material.
+	OCIAuthInstancePrincipal OCIAuthMode = "instance_principal"
+	// OCIAuthResourcePrincipal derives credentials from resource-principal
+	// environment variables (Functions and similar resources).
+	OCIAuthResourcePrincipal OCIAuthMode = "resource_principal"
+	// OCIAuthWorkloadIdentity derives credentials from an OKE pod's workload
+	// identity (service-account based).
+	OCIAuthWorkloadIdentity OCIAuthMode = "workload_identity"
+)
+
+// OCICredentials holds auth fields exclusive to the OCI backend. AuthMode
+// selects the credential source; the API-key fields are consumed only when
+// AuthMode is OCIAuthAPIKey (or empty).
 type OCICredentials struct {
+	AuthMode    OCIAuthMode
 	Namespace   string
 	TenancyID   string
 	UserID      string

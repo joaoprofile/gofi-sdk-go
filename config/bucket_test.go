@@ -65,6 +65,7 @@ func TestBucket_MapsEnv(t *testing.T) {
 	t.Setenv("BUCKET_NAME", "my-bucket")
 	t.Setenv("BUCKET_REGION", "sa-saopaulo-1")
 	t.Setenv("BUCKET_ENDPOINT", "objectstorage.example.com")
+	t.Setenv("BUCKET_OCI_AUTH_MODE", "instance_principal")
 	t.Setenv("BUCKET_OCI_TENANCY_ID", "tenancy")
 	t.Setenv("BUCKET_OCI_USER_ID", "user")
 	t.Setenv("BUCKET_S3_ACCESS_KEY", "ak")
@@ -82,6 +83,9 @@ func TestBucket_MapsEnv(t *testing.T) {
 	}
 	if cfg.OCICredentials.TenancyID != "tenancy" || cfg.OCICredentials.UserID != "user" {
 		t.Errorf("oci creds not mapped: %+v", cfg.OCICredentials)
+	}
+	if cfg.OCICredentials.AuthMode != bucket.OCIAuthInstancePrincipal {
+		t.Errorf("AuthMode=%q, want instance_principal", cfg.OCICredentials.AuthMode)
 	}
 	if cfg.S3Credentials.AccessKey != "ak" || !cfg.S3Credentials.UseSSL {
 		t.Errorf("s3 creds not mapped: %+v", cfg.S3Credentials)

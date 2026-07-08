@@ -17,6 +17,7 @@ func Bucket(env *environment.Environment) bucket.Config {
 		Region:   env.BucketRegion,
 		Endpoint: env.BucketEndpoint,
 		OCICredentials: bucket.OCICredentials{
+			AuthMode:    bucket.OCIAuthMode(env.BucketOCIAuthMode),
 			Namespace:   env.BucketOCINamespace,
 			TenancyID:   env.BucketOCITenancyID,
 			UserID:      env.BucketOCIUserID,
@@ -45,6 +46,7 @@ func OpenBucket(bc bucket.Config) (bucket.Store, error) {
 			Bucket:      bc.Name,
 			Region:      bc.Region,
 			Endpoint:    bc.Endpoint,
+			AuthMode:    c.AuthMode,
 			Namespace:   c.Namespace,
 			TenancyID:   c.TenancyID,
 			UserID:      c.UserID,

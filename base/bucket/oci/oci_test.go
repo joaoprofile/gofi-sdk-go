@@ -84,6 +84,14 @@ func TestNew_PreSeededNamespace_SkipsLookup(t *testing.T) {
 	assert.Equal(t, "my-namespace", ns)
 }
 
+func TestNew_UnsupportedAuthMode_ReturnsInvalidConfig(t *testing.T) {
+	cfg := validConfig()
+	cfg.AuthMode = "bogus"
+	_, err := New(cfg)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, bucket.ErrInvalidConfig)
+}
+
 func TestNew_SatisfiesStoreInterface(t *testing.T) {
 	s, err := New(validConfig())
 	require.NoError(t, err)

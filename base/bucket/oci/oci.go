@@ -18,6 +18,7 @@ import (
 
 	"github.com/joaoprofile/gofi/base/bucket"
 	"github.com/oracle/oci-go-sdk/v65/common"
+	"github.com/oracle/oci-go-sdk/v65/common/auth"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 )
 
@@ -35,7 +36,11 @@ type Config struct {
 	// endpoints, emulators).
 	Endpoint string
 
-	// API-signing credentials. All required.
+	// AuthMode selects the credential source. Empty means API key.
+	AuthMode bucket.OCIAuthMode
+
+	// API-signing credentials. Required only when AuthMode is API key;
+	// ignored by the principal-based modes.
 	TenancyID   string
 	UserID      string
 	Fingerprint string
@@ -65,28 +70,17 @@ var _ bucket.Store = (*Store)(nil)
 // constructs the SDK client but performs no network I/O; the namespace and
 // bucket are contacted only when a Store method is called.
 func New(cfg Config) (*Store, error) {
-	switch {
-	case cfg.Bucket == "":
+	if cfg.Bucket == "" {
 		return nil, fmt.Errorf("%w: bucket is required", bucket.ErrInvalidConfig)
-	case cfg.TenancyID == "":
-		return nil, fmt.Errorf("%w: tenancy id is required", bucket.ErrInvalidConfig)
-	case cfg.UserID == "":
-		return nil, fmt.Errorf("%w: user id is required", bucket.ErrInvalidConfig)
-	case cfg.Region == "":
+	}
+	if cfg.Region == "" {
 		return nil, fmt.Errorf("%w: region is required", bucket.ErrInvalidConfig)
-	case cfg.Fingerprint == "":
-		return nil, fmt.Errorf("%w: fingerprint is required", bucket.ErrInvalidConfig)
-	case cfg.PrivateKey == "":
-		return nil, fmt.Errorf("%w: private key is required", bucket.ErrInvalidConfig)
 	}
 
-	var passphrase *string
-	if cfg.Passphrase != "" {
-		passphrase = &cfg.Passphrase
+	provider, err := newConfigurationProvider(cfg)
+	if err != nil {
+		return nil, err
 	}
-	provider := common.NewRawConfigurationProvider(
-		cfg.TenancyID, cfg.UserID, cfg.Region, cfg.Fingerprint, cfg.PrivateKey, passphrase,
-	)
 
 	client, err := objectstorage.NewObjectStorageClientWithConfigurationProvider(provider)
 	if err != nil {
@@ -108,6 +102,47 @@ func New(cfg Config) (*Store, error) {
 		s.nsOnce.Do(func() { s.namespace = cfg.Namespace })
 	}
 	return s, nil
+}
+
+// newConfigurationProvider selects the OCI credential source from cfg.AuthMode.
+// The SDK never auto-detects instance identity, so the principal is always named
+// explicitly here; an unknown mode is a configuration error.
+func newConfigurationProvider(cfg Config) (common.ConfigurationProvider, error) {
+	switch cfg.AuthMode {
+	case "", bucket.OCIAuthAPIKey:
+		return apiKeyProvider(cfg)
+	case bucket.OCIAuthInstancePrincipal:
+		return auth.InstancePrincipalConfigurationProvider()
+	case bucket.OCIAuthResourcePrincipal:
+		return auth.ResourcePrincipalConfigurationProvider()
+	case bucket.OCIAuthWorkloadIdentity:
+		return auth.OkeWorkloadIdentityConfigurationProvider()
+	default:
+		return nil, fmt.Errorf("%w: unsupported oci auth mode %q", bucket.ErrInvalidConfig, cfg.AuthMode)
+	}
+}
+
+// apiKeyProvider builds a raw API-key provider, validating the signing fields
+// that only this mode consumes.
+func apiKeyProvider(cfg Config) (common.ConfigurationProvider, error) {
+	switch {
+	case cfg.TenancyID == "":
+		return nil, fmt.Errorf("%w: tenancy id is required", bucket.ErrInvalidConfig)
+	case cfg.UserID == "":
+		return nil, fmt.Errorf("%w: user id is required", bucket.ErrInvalidConfig)
+	case cfg.Fingerprint == "":
+		return nil, fmt.Errorf("%w: fingerprint is required", bucket.ErrInvalidConfig)
+	case cfg.PrivateKey == "":
+		return nil, fmt.Errorf("%w: private key is required", bucket.ErrInvalidConfig)
+	}
+
+	var passphrase *string
+	if cfg.Passphrase != "" {
+		passphrase = &cfg.Passphrase
+	}
+	return common.NewRawConfigurationProvider(
+		cfg.TenancyID, cfg.UserID, cfg.Region, cfg.Fingerprint, cfg.PrivateKey, passphrase,
+	), nil
 }
 
 // Put uploads an object, overwriting any existing object with the same key.
