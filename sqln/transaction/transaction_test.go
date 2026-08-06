@@ -150,3 +150,46 @@ func TestExecute_NestedContext_TxPropagated(t *testing.T) {
 	assert.NotNil(t, outerTx)
 	assert.Equal(t, outerTx, innerTx, "same *sql.Tx must be visible through ctx")
 }
+
+func TestExecute_NestedExecute_JoinsOuterTransaction(t *testing.T) {
+	setupGlobal(t, "ok")
+	beginCount.Store(0)
+
+	var outerTx, innerTx *sql.Tx
+
+	err := NewTransaction().Execute(context.Background(), func(ctx context.Context) error {
+		outerTx, _ = ctx.Value(connection.SqlTxContextKey).(*sql.Tx)
+
+		return NewTransaction().Execute(ctx, func(innerCtx context.Context) error {
+			innerTx, _ = innerCtx.Value(connection.SqlTxContextKey).(*sql.Tx)
+			return nil
+		})
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, outerTx)
+	assert.Same(t, outerTx, innerTx, "Execute aninhado deve reusar a *sql.Tx externa")
+	assert.Equal(t, int32(1), beginCount.Load(), "apenas uma transação pode ser aberta no driver")
+}
+
+func TestExecute_NestedExecute_InnerErrorRollsBackOuter(t *testing.T) {
+	setupGlobal(t, "ok")
+	beginCount.Store(0)
+
+	innerErr := errors.New("inner failed")
+	afterInner := false
+
+	err := NewTransaction().Execute(context.Background(), func(ctx context.Context) error {
+		if inner := NewTransaction().Execute(ctx, func(context.Context) error {
+			return innerErr
+		}); inner != nil {
+			return inner
+		}
+		afterInner = true
+		return nil
+	})
+
+	require.ErrorIs(t, err, innerErr)
+	assert.False(t, afterInner)
+	assert.Equal(t, int32(1), beginCount.Load())
+}

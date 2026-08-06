@@ -42,6 +42,10 @@ func (t *transaction) Execute(ctx context.Context, fn func(ctx context.Context) 
 }
 
 func (t *transaction) executeTransaction(ctx context.Context, db *sql.DB, fn func(ctx context.Context) error) error {
+	if outer, ok := ctx.Value(connection.SqlTxContextKey).(*sql.Tx); ok && outer != nil {
+		return fn(ctx)
+	}
+
 	tx, err := t.beginTransaction(ctx, db)
 	if err != nil {
 		return err

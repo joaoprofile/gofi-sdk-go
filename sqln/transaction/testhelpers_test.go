@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/joaoprofile/gofi/obs/logging"
@@ -47,12 +48,17 @@ func (d *fakeSQLDriver) Open(name string) (driver.Conn, error) {
 	}
 }
 
+var beginCount atomic.Int32
+
 // fakeConn — all operations succeed
 type fakeConn struct{}
 
 func (c *fakeConn) Prepare(_ string) (driver.Stmt, error) { return &fakeStmt{}, nil }
 func (c *fakeConn) Close() error                          { return nil }
-func (c *fakeConn) Begin() (driver.Tx, error)             { return &fakeTx{}, nil }
+func (c *fakeConn) Begin() (driver.Tx, error) {
+	beginCount.Add(1)
+	return &fakeTx{}, nil
+}
 
 // failBeginConn — Begin always fails
 type failBeginConn struct{ fakeConn }
