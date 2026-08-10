@@ -83,6 +83,15 @@ func (q *Query) LeftJoin(table, alias, on string) *Query {
 	return q
 }
 
+// LeftJoinLateral adds a LEFT JOIN LATERAL clause over a subquery correlated with the
+// outer row. The ON condition is always TRUE: a lateral subquery expresses its own
+// correlation in its WHERE, so an outer ON would only ever be redundant.
+// subquery is the parenthesized SELECT, e.g. "(SELECT x FROM t WHERE t.id = p.id LIMIT 1)".
+func (q *Query) LeftJoinLateral(subquery, alias string) *Query {
+	q.joins = append(q.joins, joinClause{joinType: "LEFT JOIN LATERAL", table: subquery, alias: alias, on: "TRUE"})
+	return q
+}
+
 // RightJoin adds a RIGHT JOIN clause.
 func (q *Query) RightJoin(table, alias, on string) *Query {
 	q.joins = append(q.joins, joinClause{joinType: "RIGHT JOIN", table: table, alias: alias, on: on})

@@ -102,6 +102,15 @@ func TestBuild_LeftJoin(t *testing.T) {
 	assert.Equal(t, "SELECT * FROM users u LEFT JOIN orders o ON o.user_id = u.id", sql)
 }
 
+func TestBuild_LeftJoinLateral(t *testing.T) {
+	sql, _ := criteria.From("users", "u").
+		LeftJoinLateral("(SELECT o.total FROM orders o WHERE o.user_id = u.id ORDER BY o.created_at DESC LIMIT 1)", "last_order").
+		Build(pg)
+	assert.Equal(t,
+		"SELECT * FROM users u LEFT JOIN LATERAL (SELECT o.total FROM orders o WHERE o.user_id = u.id ORDER BY o.created_at DESC LIMIT 1) last_order ON TRUE",
+		sql)
+}
+
 func TestBuild_RightJoin(t *testing.T) {
 	sql, _ := criteria.From("users", "u").
 		RightJoin("orders", "o", "o.user_id = u.id").
