@@ -9,7 +9,9 @@ type FilterDialect interface {
 type Dialect interface {
 	FilterDialect
 
-	BuildPagination(query string, order string, limit uint16, offset uint16) string
+	// offset is uint64 because it is page*limit: two uint16 multiplied overflow
+	// past 65535 and silently wrap to a different page.
+	BuildPagination(query string, order string, limit uint16, offset uint64) string
 
 	BuildCount(query string) string
 }

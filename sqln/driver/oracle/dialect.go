@@ -16,10 +16,10 @@ func (OracleDialect) NotLike(field string, param string) string {
 	return fmt.Sprintf("%s NOT LIKE %s", field, param)
 }
 
-func (OracleDialect) BuildPagination(query string, order string, limit uint16, offset uint16) string {
+func (OracleDialect) BuildPagination(query string, order string, limit uint16, offset uint64) string {
 	return fmt.Sprintf(
 		"SELECT * FROM (SELECT tb.*, ROWNUM rn FROM (%s ORDER BY %s) tb WHERE ROWNUM <= %d) WHERE rn > %d",
-		query, order, offset+limit, offset,
+		query, order, offset+uint64(limit), offset,
 	)
 }
 

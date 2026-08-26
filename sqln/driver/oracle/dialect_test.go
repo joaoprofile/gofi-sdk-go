@@ -92,3 +92,11 @@ func TestBuildCount_ComplexSubquery(t *testing.T) {
 	result := dialect.BuildCount("SELECT id FROM orders WHERE status = :1")
 	assert.Equal(t, "SELECT COUNT(*) FROM (SELECT id FROM orders WHERE status = :1) tb", result)
 }
+
+// Regression: offset is page*limit and used to be uint16. Oracle carried a
+// second overflow of its own in the ROWNUM ceiling, which is offset+limit.
+func TestBuildPagination_DeepOffset_BeyondUint16(t *testing.T) {
+	result := dialect.BuildPagination("SELECT id FROM t", "id ASC", 15, 66000)
+	assert.Contains(t, result, "ROWNUM <= 66015")
+	assert.Contains(t, result, "rn > 66000")
+}

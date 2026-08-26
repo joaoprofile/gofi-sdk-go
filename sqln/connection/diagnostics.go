@@ -11,8 +11,8 @@ import (
 
 const slowQueryThreshold = 300 * time.Millisecond
 
-// LogQueryDuration registra a duração de uma query.
-// Queries acima de 300ms são registradas como warning; abaixo como debug.
+// LogQueryDuration records how long a query took.
+// Queries above 300ms are logged as warning, below that as debug.
 func LogQueryDuration(start time.Time, query string) {
 	duration := time.Since(start)
 	if duration > slowQueryThreshold {
@@ -28,8 +28,8 @@ func LogQueryDuration(start time.Time, query string) {
 	)
 }
 
-// LogPostgresError loga erros de banco de forma estruturada.
-// Para erros do driver pq, extrai campos como code, table e constraint.
+// LogPostgresError logs database errors in structured form.
+// For pq driver errors it extracts fields such as code, table and constraint.
 func LogPostgresError(err error) {
 	if err == nil {
 		return
@@ -52,8 +52,8 @@ func LogPostgresError(err error) {
 	logging.Error("database error", slog.String("error", err.Error()))
 }
 
-// AsPQError tenta extrair um *pq.Error do erro fornecido.
-// Retorna true e popula out se for um erro do driver pq.
+// AsPQError tries to extract a *pq.Error from the given error.
+// Returns true and fills out when the error comes from the pq driver.
 func AsPQError(err error, out **pq.Error) bool {
 	if err == nil {
 		return false

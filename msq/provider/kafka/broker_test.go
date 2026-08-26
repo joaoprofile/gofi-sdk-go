@@ -61,9 +61,10 @@ func TestNewProducerErrorsWhenNoBroker(t *testing.T) {
 	assert.Nil(t, p)
 }
 
-// Consumer — NewConsumer é lazy: não conecta nem cria ConsumerGroup na
-// construção (isso acontece por-worker em Consume), então retorna não-nil mesmo
-// sem broker disponível. A conexão só é tentada quando Consume roda.
+// Consumer — NewConsumer is lazy: it neither connects nor creates a
+// ConsumerGroup at construction time (that happens per worker in Consume), so it
+// returns non-nil even with no broker available. The connection is only
+// attempted once Consume runs.
 
 func TestNewConsumerIsLazyAndReturnsConsumer(t *testing.T) {
 	cfg := kafka.Config{Brokers: []string{"localhost:19099"}}

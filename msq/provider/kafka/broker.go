@@ -62,6 +62,32 @@ func New(cfg Config) (*Broker, error) {
 	sc.Producer.Return.Successes = true
 	sc.Producer.Partitioner = sarama.NewHashPartitioner
 	sc.Version = sarama.V2_8_0_0
+
+	// Consumption — sarama's defaults are tuned for minimal latency, not for a
+	// topic shared by many consumer groups.
+	//
+	// Fetch.Min=1 (the default) makes the broker answer as soon as a single byte
+	// is available: every member fetches continuously without bringing volume,
+	// and the cost is paid in broker CPU rather than throughput. Requiring a
+	// minimum per response — capped by MaxWaitTime, so this is batching, not
+	// latency starvation — brings the same data in far fewer round trips.
+	sc.Consumer.Fetch.Min = 64 * 1024
+	sc.Consumer.MaxWaitTime = 500 * time.Millisecond
+
+	// Handlers do network I/O (marketplace API, rate limiter waits). The 100ms
+	// default is exceeded by every real message, and each overrun pauses and
+	// resumes the partition for nothing.
+	sc.Consumer.MaxProcessingTime = 5 * time.Second
+
+	// Sticky keeps the assignment across rebalances; with Range (the default)
+	// every pod restart reassigns everything and the whole group stalls. Range
+	// stays as a fallback so that a rolling deploy, with members of different
+	// versions in the same group, can still negotiate a common strategy instead
+	// of failing the join.
+	sc.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{
+		sarama.NewBalanceStrategySticky(),
+		sarama.NewBalanceStrategyRange(),
+	}
 	if cfg.ClientID != "" {
 		sc.ClientID = cfg.ClientID
 	}
@@ -267,16 +293,16 @@ type kafkaConsumer struct {
 	newGroup    func() (sarama.ConsumerGroup, error)
 }
 
-// Consume sobe `concurrency` workers, cada um com seu PRÓPRIO sarama
-// ConsumerGroup. Cada ConsumerGroup é um MEMBRO distinto no group do Kafka, então
-// as partições do tópico se distribuem entre eles (paralelismo real até
-// min(concurrency, partições)).
+// Consume starts `concurrency` workers, each with its OWN sarama ConsumerGroup.
+// Each ConsumerGroup is a distinct MEMBER of the Kafka group, so
+// the topic partitions spread across them (real parallelism up to
+// min(concurrency, partitions)).
 //
-// Por que não 1 ConsumerGroup compartilhado por N goroutines: um ConsumerGroup
-// tem um único memberID; N goroutines chamando Consume() no mesmo group
-// re-entram no JoinGroup e invalidam a generation umas das outras → erro
-// "member not known in the current generation" em loop (rebalance churn). 1
-// group por worker elimina isso.
+// Why not one ConsumerGroup shared by N goroutines: a single ConsumerGroup
+// has a single memberID; N goroutines calling Consume() on the same group
+// re-enter JoinGroup and invalidate each other's generation → error
+// "member not known in the current generation" in a loop (rebalance churn). One
+// group per worker removes that.
 func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler) error {
 	topics := []string{c.cfg.Topic}
 	var wg sync.WaitGroup
@@ -311,8 +337,8 @@ func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler
 	return nil
 }
 
-// Close é no-op: cada worker fecha o próprio ConsumerGroup via defer quando
-// Consume retorna (ctx cancelado pelo ConsumerManager). Mantido pra satisfazer
+// Close is a no-op: each worker closes its own ConsumerGroup via defer when
+// Consume returns (ctx cancelled by the ConsumerManager). Kept to satisfy
 // port.Consumer.
 func (c *kafkaConsumer) Close() error  { return nil }
 func (c *kafkaConsumer) Pause() error  { return nil }
@@ -328,14 +354,15 @@ func (h *groupHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil
 func (h *groupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 
 func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	// Sinal de ofuscação de offset: start NEGATIVO (sentinel newest/oldest) =
-	// Sarama não tinha offset commitado utilizável (ausente OU out-of-range por
-	// retenção ter apagado além do commit) e caiu na política. Só importa quando
-	// HÁ dado no tópico (hwm>0): newest pulando backlog real é o ponto cego que
-	// esconde "não consome" atrás de um offset stale. WARN só nesse caso — group
-	// novo em tópico vazio (hwm==0) é normal e fica silencioso.
+	// Offset obfuscation signal: a NEGATIVE start (newest/oldest sentinel) means
+	// Sarama had no usable committed offset (missing OR out-of-range because
+	// retention deleted past the commit) and fell back to the policy. It only
+	// matters when there IS data in the topic (hwm>0): newest skipping a real
+	// backlog is the blind spot that hides "not consuming" behind a stale
+	// offset. WARN only in that case — a group that is new on an empty topic
+	// (hwm==0) is normal and stays silent.
 	if start := claim.InitialOffset(); start == sarama.OffsetNewest && claim.HighWaterMarkOffset() > 0 {
-		logging.Warn("kafka consumer: claim começou no FIM — sem offset commitado válido, backlog existente PULADO",
+		logging.Warn("kafka consumer: claim started at the END — no valid committed offset, existing backlog SKIPPED",
 			slog.String("topic", claim.Topic()),
 			slog.String("group_id", h.cfg.GroupID),
 			slog.Int("partition", int(claim.Partition())),

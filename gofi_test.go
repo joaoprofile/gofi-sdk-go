@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joaoprofile/gofi/base/cloud"
 	"github.com/joaoprofile/gofi/base/environment"
 	"github.com/joaoprofile/gofi/base/session"
 	"github.com/joaoprofile/gofi/msq"
@@ -636,6 +637,14 @@ func TestBrokerFromEnvKafkaReturnsNonNilBroker(t *testing.T) {
 }
 
 func TestBrokerFromEnvSQSReturnsErrorWhenNoSession(t *testing.T) {
+	// sqs.New reads the process-wide cloud singleton, not the env passed in, and
+	// that singleton is sticky: any earlier test here that builds a gofi instance
+	// runs config.InitCloud, which succeeds whenever CLOUD_* is populated — a .env
+	// at the repository root is enough. Without this reset the session leaks into
+	// the test and the expected "no session" error never happens.
+	cloud.ResetForTesting()
+	t.Cleanup(cloud.ResetForTesting)
+
 	_, err := brokerFromEnv(&environment.Environment{}, msq.BrokerSQS, "")
 
 	assert.Error(t, err)

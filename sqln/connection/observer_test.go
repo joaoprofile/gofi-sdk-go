@@ -25,7 +25,7 @@ func TestConnectionObserver_Close_DoesNotPanic(t *testing.T) {
 }
 
 func TestConnectionObserver_Close_LogsStats(t *testing.T) {
-	// Verifica que Close() executa sem erro mesmo com conexão fechada.
+	// Checks that Close() runs without error even on an already closed connection.
 	conn := newTestConnection("ok")
 	_ = conn.Close()
 

@@ -1,6 +1,6 @@
 module github.com/joaoprofile/gofi/obs
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/joaoprofile/gofi/base v0.0.0

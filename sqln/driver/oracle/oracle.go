@@ -8,11 +8,11 @@ import (
 	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
 )
 
-// Driver Oracle. Para ativar, importe com blank import:
+// Oracle driver. To enable it, blank-import this package:
 //
 //	import _ "github.com/joaoprofile/gofi/sqln/driver/oracle"
 //
-// Requer godror ou go-oci8 no go.mod.
+// Requires godror or go-oci8 in go.mod.
 type Driver struct{}
 
 func (Driver) Name() connection.DriverName {

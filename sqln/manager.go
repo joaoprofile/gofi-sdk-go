@@ -27,6 +27,8 @@ type manager[T any] struct {
 	page          *pagination.PageRequest
 	query         string
 	args          []any
+	countQuery    string // optional; when empty the total comes from dialect.BuildCount(query)
+	countArgs     []any
 	criteriaQuery *criteria.Query // non-nil when created via FindFromCriteria; built lazily
 }
 
@@ -64,6 +66,21 @@ func (q *manager[T]) WithPage(page *pagination.PageRequest) *manager[T] {
 
 func (q *manager[T]) WithCache(c *cache.Cache[T]) *manager[T] {
 	q.cache = c
+	return q
+}
+
+// WithCountQuery overrides the query that computes the pagination total.
+// Without it the total comes from dialect.BuildCount(query), which wraps the
+// whole page query — projection, joins and all. It serves the caller that knows
+// some part of that query cannot affect the count yet carries a cost the planner
+// will not remove on its own: a projection-only LEFT JOIN LATERAL is the typical
+// case, since it yields 0-or-1 row per left row (never changing the total) but
+// runs once per row.
+// The query is used as given — BuildCount is not applied on top — and must
+// return a single row holding one integer.
+func (q *manager[T]) WithCountQuery(query string, args ...any) *manager[T] {
+	q.countQuery = query
+	q.countArgs = args
 	return q
 }
 
@@ -210,11 +227,14 @@ func (q *manager[T]) fetchUniqueResult(instance *sql.DB) (*T, error) {
 func (q *manager[T]) fetchPagedList(instance *sql.DB) ([]T, error) {
 	conn := q.connection()
 
+	// Widen before multiplying: Page and Limit are both uint16, so the product
+	// wraps past 65535 and the caller silently receives a different page —
+	// page=4400 limit=15 asks for offset 66000 and gets 464.
 	sqlQuery := conn.Dialect().BuildPagination(
 		q.query,
 		q.page.GetOrder(),
 		q.page.Limit,
-		q.page.Page*q.page.Limit,
+		uint64(q.page.Page)*uint64(q.page.Limit),
 	)
 
 	rows, err := NewQuery().FetchRows(q.ctx, instance, sqlQuery, q.args...)
@@ -227,11 +247,14 @@ func (q *manager[T]) fetchPagedList(instance *sql.DB) ([]T, error) {
 }
 
 func (q *manager[T]) pageTotal(instance *sql.DB) (uint64, error) {
-	conn := q.connection()
-	sqlQuery := conn.Dialect().BuildCount(q.query)
+	sqlQuery, args := q.countQuery, q.countArgs
+	if sqlQuery == "" {
+		sqlQuery = q.connection().Dialect().BuildCount(q.query)
+		args = q.args
+	}
 
 	var result uint64
-	err := NewQuery().FetchRow(q.ctx, instance, sqlQuery, q.args...).Scan(&result)
+	err := NewQuery().FetchRow(q.ctx, instance, sqlQuery, args...).Scan(&result)
 
 	return result, err
 }

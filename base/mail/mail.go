@@ -9,7 +9,7 @@
 //	err = m.Send(ctx, &mail.Message{
 //	    From:    mail.Address{Name: "BlueFamly", Email: "no-reply@bluefamly.app"},
 //	    To:      []mail.Address{{Email: "user@example.com"}},
-//	    Subject: "Olá",
+//	    Subject: "Hello",
 //	    HTML:    "<h1>Oi</h1>",
 //	    Text:    "Oi",
 //	})

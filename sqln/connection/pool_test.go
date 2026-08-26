@@ -37,7 +37,7 @@ func TestApplyPool_ZeroValuesSkipped(t *testing.T) {
 	// Aplicar valores iniciais
 	applyPool(db, PoolConfig{MaxOpenConns: 10, MaxIdleConns: 5, MaxConnLifeTime: time.Minute})
 
-	// Aplicar config com zeros — não deve alterar
+	// Applying a zero-valued config — must not change anything
 	applyPool(db, PoolConfig{MaxOpenConns: 0, MaxIdleConns: 0, MaxConnLifeTime: 0})
 
 	stats := db.Stats()

@@ -60,7 +60,8 @@ type fakeConn struct {
 	rows [][]driver.Value
 }
 
-func (c *fakeConn) Prepare(_ string) (driver.Stmt, error) {
+func (c *fakeConn) Prepare(query string) (driver.Stmt, error) {
+	recordQuery(query)
 	return &fakeStmt{cols: c.cols, rows: c.rows}, nil
 }
 func (c *fakeConn) Close() error              { return nil }
@@ -102,6 +103,49 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 	return nil
 }
 
+// Query recorder — without it the fake cannot assert WHICH SQL was issued, and
+// the count hook is only provable by looking at the query that reached the driver.
+
+var (
+	recordedMu      sync.Mutex
+	recordedQueries []string
+)
+
+var lastPaginationOffset uint64
+
+func recordPaginationOffset(offset uint64) {
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	lastPaginationOffset = offset
+}
+
+func paginationOffset(t *testing.T) uint64 {
+	t.Helper()
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	return lastPaginationOffset
+}
+
+func recordQuery(query string) {
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	recordedQueries = append(recordedQueries, query)
+}
+
+func resetRecordedQueries(t *testing.T) {
+	t.Helper()
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	recordedQueries = nil
+}
+
+func recorded(t *testing.T) []string {
+	t.Helper()
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	return append([]string(nil), recordedQueries...)
+}
+
 // fakeConnDriver implements connection.Driver
 type fakeConnDriver struct{}
 
@@ -118,8 +162,14 @@ type fakeDialect struct{}
 func (fakeDialect) Param(_ int) string         { return "?" }
 func (fakeDialect) Like(f, p string) string    { return f + " LIKE " + p }
 func (fakeDialect) NotLike(f, p string) string { return f + " NOT LIKE " + p }
-func (fakeDialect) BuildPagination(q, order string, limit, offset uint16) string {
-	return q // pass through — fake driver returns same rows regardless
+
+// Records the offset it was handed: the pagination bug lives in how the manager
+// computes offset, not in how a dialect renders it, so the value received is
+// what a test has to be able to assert on. The query itself passes through —
+// the fake driver returns the same rows regardless.
+func (fakeDialect) BuildPagination(q, order string, limit uint16, offset uint64) string {
+	recordPaginationOffset(offset)
+	return q
 }
 func (fakeDialect) BuildCount(q string) string {
 	return "SELECT COUNT(*) FROM (" + q + ") t"

@@ -107,7 +107,7 @@ func TestUseAuth_ReplacesExistingMiddleware(t *testing.T) {
 	ws.UseAuth(first)
 	ws.UseAuth(second)
 
-	// Não há como comparar funções diretamente; basta verificar que não é nil.
+	// Functions cannot be compared directly; asserting non-nil is enough.
 	assert.NotNil(t, ws.auth)
 }
 
@@ -231,7 +231,7 @@ func TestRegisterRoute_PrivateRouteUsesAuth(t *testing.T) {
 
 func TestRegisterRoute_PrivateRouteWithoutAuthMiddleware(t *testing.T) {
 	ws := newTestHTTPServer()
-	// ws.auth é nil — não deve causar pânico
+	// ws.auth is nil — must not panic
 
 	route := PrivateRoutes("/api", GET("/secured").To(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -275,7 +275,7 @@ func TestRegisterRoute_WithCorsConfig_SetsHeaders(t *testing.T) {
 func TestRegisterRoute_PathNormalizationRootPath(t *testing.T) {
 	ws := newTestHTTPServer()
 
-	// Rota com path igual ao prefix — deve ser registrada como "/"
+	// Route whose path equals the prefix — must be registered as "/"
 	route := &Route{
 		method:  http.MethodGet,
 		path:    "/api",
@@ -321,7 +321,7 @@ func TestListenAndServe_GracefulShutdown(t *testing.T) {
 		return resp.StatusCode == http.StatusOK
 	}, 3*time.Second, 50*time.Millisecond, "servidor não ficou disponível a tempo")
 
-	// Envia SIGTERM para o processo
+	// Send SIGTERM to the process
 	proc, err := os.FindProcess(os.Getpid())
 	require.NoError(t, err)
 	require.NoError(t, proc.Signal(syscall.SIGTERM))

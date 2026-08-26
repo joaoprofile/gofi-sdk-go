@@ -23,7 +23,7 @@ func TestGetDriver_Registered(t *testing.T) {
 }
 
 func TestRegisterDriver_OverwritesSameName(t *testing.T) {
-	// Registrar um driver com nome diferente para cobrir RegisterDriver
+	// Register a driver under a different name to cover RegisterDriver
 	name := DriverName("overwrite-test")
 	drv1 := overwriteDriver{name: name, id: 1}
 	drv2 := overwriteDriver{name: name, id: 2}
@@ -43,7 +43,7 @@ func TestGetDriver_KnownDriverNames(t *testing.T) {
 	assert.Equal(t, DriverName("sqlserver"), DriverSQLServer)
 }
 
-// overwriteDriver é um Driver mínimo para testar sobrescrita no registry.
+// overwriteDriver is a minimal Driver used to test registry overwriting.
 type overwriteDriver struct {
 	name DriverName
 	id   int

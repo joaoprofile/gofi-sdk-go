@@ -53,10 +53,10 @@ type Request[T any] struct {
 	Retries    int
 	retrySleep time.Duration
 	signature  Signature
-	// ResponseHeaders carrega os headers da última resposta bem-sucedida após
-	// Execute(). Permite ao caller ler metadados de transporte (ex.: rate limit
-	// devolvido pelo provider) sem o SDK conhecer a semântica de nenhum header
-	// específico. Nil até Execute() rodar com sucesso.
+	// ResponseHeaders carries the headers of the last successful response after
+	// Execute(). Lets the caller read transport metadata (a provider-returned
+	// rate limit, for instance) without the SDK knowing the semantics of any
+	// particular header. Nil until Execute() has run successfully.
 	ResponseHeaders http.Header
 }
 

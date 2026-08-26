@@ -14,14 +14,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestLogQueryDuration_FastQuery(t *testing.T) {
-	// start = agora → duração < 300ms → caminho debug
+	// start = now → duration < 300ms → debug path
 	assert.NotPanics(t, func() {
 		LogQueryDuration(time.Now(), "SELECT 1")
 	})
 }
 
 func TestLogQueryDuration_SlowQuery(t *testing.T) {
-	// start no passado → duração > 300ms → caminho warning
+	// start in the past → duration > 300ms → warning path
 	assert.NotPanics(t, func() {
 		LogQueryDuration(time.Now().Add(-1*time.Second), "SELECT * FROM big_table")
 	})

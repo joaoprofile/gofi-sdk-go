@@ -148,7 +148,7 @@ type Environment struct {
 	OtelExporterOTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 	OtelExporterOTLPHeaders  string `env:"OTEL_EXPORTER_OTLP_HEADERS"`
 
-	// Auth / IAM — universais para qualquer serviço com sessão.
+	// Auth / IAM — universal to any service that has sessions.
 	JWTSecret       string        `env:"JWT_SECRET"`
 	JWTIssuer       string        `env:"JWT_ISSUER"`
 	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL"`
@@ -177,7 +177,7 @@ type Environment struct {
 	MailHELODomain string        `env:"MAIL_HELO_DOMAIN"`
 }
 
-// Defaults aplicados pelo SDK quando o env não traz valor.
+// Defaults applied by the SDK when the environment carries no value.
 const (
 	defaultAccessTokenTTL  = 15 * time.Minute
 	defaultRefreshTokenTTL = 7 * 24 * time.Hour

@@ -94,11 +94,11 @@ func (d fakeConnDriver) Dialect() sqln_driver.Dialect { return fakeDialect{} }
 
 type fakeDialect struct{}
 
-func (fakeDialect) Param(_ int) string                              { return "?" }
-func (fakeDialect) Like(f, p string) string                         { return f + " LIKE " + p }
-func (fakeDialect) NotLike(f, p string) string                      { return f + " NOT LIKE " + p }
-func (fakeDialect) BuildPagination(q, _ string, _, _ uint16) string { return q }
-func (fakeDialect) BuildCount(q string) string                      { return "SELECT COUNT(*) FROM (" + q + ") t" }
+func (fakeDialect) Param(_ int) string                                     { return "?" }
+func (fakeDialect) Like(f, p string) string                                { return f + " LIKE " + p }
+func (fakeDialect) NotLike(f, p string) string                             { return f + " NOT LIKE " + p }
+func (fakeDialect) BuildPagination(q, _ string, _ uint16, _ uint64) string { return q }
+func (fakeDialect) BuildCount(q string) string                             { return "SELECT COUNT(*) FROM (" + q + ") t" }
 
 // Helpers
 

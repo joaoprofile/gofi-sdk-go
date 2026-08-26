@@ -74,3 +74,9 @@ func TestBuildCount_ComplexSubquery(t *testing.T) {
 	result := dialect.BuildCount("SELECT id FROM orders WHERE status = ?")
 	assert.Equal(t, "SELECT COUNT(*) FROM (SELECT id FROM orders WHERE status = ?) tb", result)
 }
+
+// Regression: offset is page*limit and used to be uint16, wrapping past 65535.
+func TestBuildPagination_DeepOffset_BeyondUint16(t *testing.T) {
+	result := dialect.BuildPagination("SELECT id FROM t", "id ASC", 15, 66000)
+	assert.Equal(t, "SELECT id FROM t ORDER BY id ASC LIMIT 15 OFFSET 66000", result)
+}

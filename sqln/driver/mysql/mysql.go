@@ -8,11 +8,11 @@ import (
 	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
 )
 
-// Driver MySQL. Para ativar, importe este pacote com blank import:
+// MySQL driver. To enable it, blank-import this package:
 //
 //	import _ "github.com/joaoprofile/gofi/sqln/driver/mysql"
 //
-// Requer o driver go-sql-driver/mysql no go.mod:
+// Requires the go-sql-driver/mysql driver in go.mod:
 //
 //	go get github.com/go-sql-driver/mysql
 type Driver struct{}

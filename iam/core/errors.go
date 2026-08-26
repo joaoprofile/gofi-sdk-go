@@ -8,8 +8,8 @@ var (
 	ErrAccountInactive    = errors.New("iam: account inactive")
 
 	// Token errors.
-	ErrTokenExpired  = errors.New("iam: token expired")
-	ErrTokenInvalid  = errors.New("iam: token invalid")
+	ErrTokenExpired    = errors.New("iam: token expired")
+	ErrTokenInvalid    = errors.New("iam: token invalid")
 	ErrSessionRevoked  = errors.New("iam: session revoked")
 	ErrSessionNotFound = errors.New("iam: session not found")
 	ErrSessionExpired  = errors.New("iam: session expired")

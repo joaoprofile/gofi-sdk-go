@@ -5,7 +5,7 @@ import (
 	"github.com/joaoprofile/gofi/sqln/pagination"
 )
 
-// SortDirection re-exportado de pagination para backward compatibility.
+// SortDirection re-exported from pagination for backward compatibility.
 type SortDirection = pagination.SortDirection
 
 const (

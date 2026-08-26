@@ -1,6 +1,6 @@
 module github.com/joaoprofile/gofi/sqln
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0

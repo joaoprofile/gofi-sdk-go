@@ -424,8 +424,8 @@ func TestKafkaConsumerConsumeGroupErrorIsLogged(t *testing.T) {
 }
 
 func TestKafkaConsumerClose(t *testing.T) {
-	// Close é no-op: cada worker fecha o próprio ConsumerGroup via defer quando
-	// Consume retorna (ctx cancelado). Validado em TestKafkaConsumerConsumeWithCancelledContext.
+	// Close is a no-op: each worker closes its own ConsumerGroup via defer when
+	// Consume returns (ctx cancelled). Covered by TestKafkaConsumerConsumeWithCancelledContext.
 	c := &kafkaConsumer{}
 	require.NoError(t, c.Close())
 }

@@ -71,7 +71,7 @@ var AllowedOperators = map[string]struct{}{
 	Contains: {}, NotContains: {},
 	Like: {}, NotLike: {},
 	Between: {},
-	IsNull: {}, IsNotNull: {},
+	IsNull:  {}, IsNotNull: {},
 	IsTrue: {}, IsFalse: {},
 	Group: {},
 }

@@ -47,14 +47,14 @@ func (d *fakeSQLDriver) Open(name string) (driver.Conn, error) {
 	}
 }
 
-// fakeConn — conexão que sempre tem sucesso
+// fakeConn — a connection that always succeeds
 type fakeConn struct{}
 
 func (c *fakeConn) Prepare(query string) (driver.Stmt, error) { return &fakeStmt{}, nil }
 func (c *fakeConn) Close() error                              { return nil }
 func (c *fakeConn) Begin() (driver.Tx, error)                 { return &fakeTx{}, nil }
 
-// failPingConn — conexão que implementa Pinger e retorna erro
+// failPingConn — a connection that implements Pinger and returns an error
 type failPingConn struct{ fakeConn }
 
 func (c *failPingConn) Ping(_ context.Context) error { return errors.New("ping failed") }
@@ -79,7 +79,7 @@ func (r *fakeRows) Next(_ []driver.Value) error { return io.EOF }
 
 // ---------------------------------------------------------------------------
 // Fake connection.Driver (gofi connection level)
-// Usa cfg.DSN para permitir testar diferentes cenários (fail-open, fail-ping).
+// Uses cfg.DSN so different scenarios can be exercised (fail-open, fail-ping).
 // ---------------------------------------------------------------------------
 
 type fakeConnDriver struct{}
@@ -96,21 +96,21 @@ func (d fakeConnDriver) Dialect() sqln_driver.Dialect {
 
 type fakeDialect struct{}
 
-func (fakeDialect) Param(_ int) string                              { return "?" }
-func (fakeDialect) Like(field, param string) string                 { return field + " LIKE " + param }
-func (fakeDialect) NotLike(field, param string) string              { return field + " NOT LIKE " + param }
-func (fakeDialect) BuildPagination(q, _ string, _, _ uint16) string { return q }
-func (fakeDialect) BuildCount(q string) string                      { return "SELECT COUNT(*) FROM (" + q + ") t" }
+func (fakeDialect) Param(_ int) string                                     { return "?" }
+func (fakeDialect) Like(field, param string) string                        { return field + " LIKE " + param }
+func (fakeDialect) NotLike(field, param string) string                     { return field + " NOT LIKE " + param }
+func (fakeDialect) BuildPagination(q, _ string, _ uint16, _ uint64) string { return q }
+func (fakeDialect) BuildCount(q string) string                             { return "SELECT COUNT(*) FROM (" + q + ") t" }
 
 // ---------------------------------------------------------------------------
-// Global state reset — testes precisam de estado limpo entre execuções.
+// Global state reset — tests need clean state between runs.
 // ---------------------------------------------------------------------------
 
 func resetGlobal() {
 	ResetGlobalForTest()
 }
 
-// mustOpenTestDB abre um *sql.DB via fake driver para uso direto em testes.
+// mustOpenTestDB opens a *sql.DB through the fake driver for direct use in tests.
 func mustOpenTestDB(dsn string) *sql.DB {
 	initTestSQLDriver()
 	db, err := sql.Open(testDriverDSN, dsn)
@@ -129,7 +129,7 @@ func registerFakeDriverOnce() {
 	})
 }
 
-// newTestConnection cria uma *Connection com fake driver para testes.
+// newTestConnection builds a *Connection backed by the fake driver for tests.
 func newTestConnection(dsn string) *Connection {
 	registerFakeDriverOnce()
 	conn, err := NewConnection(Config{Driver: DriverName(testDriverDSN), DSN: dsn})
@@ -139,5 +139,5 @@ func newTestConnection(dsn string) *Connection {
 	return conn
 }
 
-// Silencia o "declared and not used" do testing import quando TestMain é a única função.
+// Silences the "declared and not used" testing import when TestMain is the only function.
 var _ testing.TB

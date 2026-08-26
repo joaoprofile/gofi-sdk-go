@@ -8,11 +8,11 @@ import (
 	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
 )
 
-// Driver SQL Server. Para ativar, importe com blank import:
+// SQL Server driver. To enable it, blank-import this package:
 //
 //	import _ "github.com/joaoprofile/gofi/sqln/driver/sqlserver"
 //
-// Requer github.com/denisenkom/go-mssqldb no go.mod:
+// Requires github.com/denisenkom/go-mssqldb in go.mod:
 //
 //	go get github.com/denisenkom/go-mssqldb
 type Driver struct{}

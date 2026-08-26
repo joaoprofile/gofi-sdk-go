@@ -397,3 +397,65 @@ func TestPagedList_PanicsWhenGlobalNotSet(t *testing.T) {
 
 // Unused — suppress compiler warning for unused sql import
 var _ = sql.ErrNoRows
+
+// WithCountQuery — the page total comes from the caller's query, not BuildCount
+
+func TestWithCountQuery_SetsQueryAndArgs(t *testing.T) {
+	m := Find[scalarItem](context.Background(), "SELECT id FROM t").
+		WithCountQuery("SELECT COUNT(*) FROM t WHERE x = ?", 7)
+	assert.Equal(t, "SELECT COUNT(*) FROM t WHERE x = ?", m.countQuery)
+	assert.Equal(t, []any{7}, m.countArgs)
+}
+
+// Regression: without the hook the total wraps the whole page query, which
+// drags in the projection-only LEFT JOIN LATERAL — it does not change the count
+// but runs once per row (measured in production: 5.6s of count against 11ms).
+func TestPagedList_WithCountQuery_ReplacesBuildCount(t *testing.T) {
+	setupGlobal(t, "count-rows")
+	resetRecordedQueries(t)
+
+	const lean = "SELECT COUNT(*) FROM t"
+	m := Find[scalarItem](context.Background(), "SELECT id FROM t LEFT JOIN LATERAL (SELECT 1) l ON TRUE").
+		WithPage(pagination.NewPageRequest(0, 10, nil)).
+		WithCountQuery(lean)
+
+	result, err := m.PagedList()
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, uint64(5), result.TotalElements)
+
+	queries := recorded(t)
+	assert.Contains(t, queries, lean)
+	for _, q := range queries {
+		assert.NotContains(t, q, "SELECT COUNT(*) FROM (", "BuildCount should not have been used")
+	}
+}
+
+func TestPagedList_WithoutCountQuery_FallsBackToBuildCount(t *testing.T) {
+	setupGlobal(t, "count-rows")
+	resetRecordedQueries(t)
+
+	m := Find[scalarItem](context.Background(), "SELECT id FROM t").
+		WithPage(pagination.NewPageRequest(0, 10, nil))
+
+	_, err := m.PagedList()
+	require.NoError(t, err)
+
+	assert.Contains(t, recorded(t), "SELECT COUNT(*) FROM (SELECT id FROM t) t")
+}
+
+// Regression: offset is page*limit, and both are uint16 — multiplying them in
+// uint16 wraps past 65535, so page=4400 limit=15 asked for offset 66000 and
+// silently got 464, i.e. a completely different page with no error.
+func TestFetchPagedList_DeepOffset_DoesNotOverflow(t *testing.T) {
+	setupGlobal(t, "count-rows")
+	resetRecordedQueries(t)
+
+	m := Find[scalarItem](context.Background(), "SELECT id FROM t").
+		WithPage(pagination.NewPageRequest(4400, 15, []pagination.Sort{pagination.NewSort("id", pagination.ASC)}))
+
+	_, err := m.PagedList()
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(66000), paginationOffset(t))
+}

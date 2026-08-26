@@ -32,8 +32,8 @@ func (c *Connection) Dialect() driver.Dialect {
 	return c.driver.Dialect()
 }
 
-// NewRaw cria uma Connection a partir de um *sql.DB já existente e um Dialect.
-// Útil para integração com código legado que gerencie o pool manualmente.
+// NewRaw builds a Connection from an existing *sql.DB and a Dialect.
+// Useful when integrating with legacy code that manages the pool itself.
 func NewRaw(db *sql.DB, d Driver) *Connection {
 	return &Connection{db: db, driver: d}
 }

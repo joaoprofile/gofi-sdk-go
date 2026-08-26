@@ -602,7 +602,7 @@ type filterTestDialect struct{}
 func (filterTestDialect) Param(i int) string         { return fmt.Sprintf("@p%d", i) }
 func (filterTestDialect) Like(f, p string) string    { return f + " LIKE " + p }
 func (filterTestDialect) NotLike(f, p string) string { return f + " NOT LIKE " + p }
-func (filterTestDialect) BuildPagination(q, _ string, _, _ uint16) string {
+func (filterTestDialect) BuildPagination(q, _ string, _ uint16, _ uint64) string {
 	return q
 }
 func (filterTestDialect) BuildCount(q string) string {
