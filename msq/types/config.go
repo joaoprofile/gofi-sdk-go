@@ -31,7 +31,7 @@ type ConsumeConfig struct {
 	RoutingKey      string        // AMQP routing key (RabbitMQ only)
 	QueueID         string        // provider-assigned queue ID (OCI only)
 	Concurrency     int           // number of parallel goroutines
-	AutoCommit      bool          // auto-commit offsets (Kafka)
+	AutoCommit      bool          // deprecated, no-op: Kafka offsets always commit via Sarama's auto-commit
 	PollInterval    time.Duration // polling interval for pull-based brokers
 	MaxRetries      int           // max handler retries before dead-lettering
 	RetryBackoff    time.Duration // wait between retries

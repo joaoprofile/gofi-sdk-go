@@ -33,6 +33,9 @@ type mockSQS struct {
 	receiveOut *awssqs.ReceiveMessageOutput
 	receiveErr error
 	deleteErr  error
+
+	deleteCalls   int
+	deletedHandle string
 }
 
 func (m *mockSQS) GetQueueUrlWithContext(_ context.Context, in *awssqs.GetQueueUrlInput, _ ...request.Option) (*awssqs.GetQueueUrlOutput, error) {
@@ -71,7 +74,9 @@ func (m *mockSQS) ReceiveMessageWithContext(_ context.Context, _ *awssqs.Receive
 	return &awssqs.ReceiveMessageOutput{}, nil
 }
 
-func (m *mockSQS) DeleteMessage(_ *awssqs.DeleteMessageInput) (*awssqs.DeleteMessageOutput, error) {
+func (m *mockSQS) DeleteMessage(in *awssqs.DeleteMessageInput) (*awssqs.DeleteMessageOutput, error) {
+	m.deleteCalls++
+	m.deletedHandle = aws.StringValue(in.ReceiptHandle)
 	return &awssqs.DeleteMessageOutput{}, m.deleteErr
 }
 
@@ -223,25 +228,39 @@ func TestSQSConsumerPollReceiveError(t *testing.T) {
 
 // sqsConsumer.handle
 
-func TestSQSConsumerHandleAck(t *testing.T) {
-	c := newTestConsumer(&mockSQS{})
+// handleResult runs handle with a fixed result and returns the mock client.
+func handleResult(t *testing.T, result types.Result) *mockSQS {
+	t.Helper()
+	client := &mockSQS{}
+	c := newTestConsumer(client)
 	msg := types.NewMessageWithTopic("q", "payload")
 	c.handle(context.Background(), aws.String("https://fake/q"), &awssqs.Message{Body: sqsBody(msg), ReceiptHandle: aws.String("rh")},
-		port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil }))
+		port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) { return result, nil }))
+	return client
+}
+
+func TestSQSConsumerHandleAck(t *testing.T) {
+	client := handleResult(t, types.Ack)
+	assert.Equal(t, 1, client.deleteCalls)
+	assert.Equal(t, "rh", client.deletedHandle)
 }
 
 func TestSQSConsumerHandleNack(t *testing.T) {
-	c := newTestConsumer(&mockSQS{})
-	msg := types.NewMessageWithTopic("q", "payload")
-	c.handle(context.Background(), aws.String("https://fake/q"), &awssqs.Message{Body: sqsBody(msg), ReceiptHandle: aws.String("rh")},
-		port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Nack, nil }))
+	client := handleResult(t, types.Nack)
+	assert.Equal(t, 0, client.deleteCalls) // kept for the visibility timeout to requeue
 }
 
+// Ignore must delete: on a visibility-timeout queue, not deleting is a requeue.
 func TestSQSConsumerHandleIgnore(t *testing.T) {
-	c := newTestConsumer(&mockSQS{})
-	msg := types.NewMessageWithTopic("q", "payload")
-	c.handle(context.Background(), aws.String("https://fake/q"), &awssqs.Message{Body: sqsBody(msg), ReceiptHandle: aws.String("rh")},
-		port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ignore, nil }))
+	client := handleResult(t, types.Ignore)
+	assert.Equal(t, 1, client.deleteCalls)
+	assert.Equal(t, "rh", client.deletedHandle)
+}
+
+// An unknown result must not delete.
+func TestSQSConsumerHandleUnknownResult(t *testing.T) {
+	client := handleResult(t, types.Result(99))
+	assert.Equal(t, 0, client.deleteCalls)
 }
 
 func TestSQSConsumerHandleInvalidJSON(t *testing.T) {

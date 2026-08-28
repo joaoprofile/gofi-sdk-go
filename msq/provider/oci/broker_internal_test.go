@@ -24,6 +24,9 @@ type mockQueueClient struct {
 	getErr    error
 	getResp   queue.GetMessagesResponse
 	deleteErr error
+
+	deleteCalls    int
+	deletedReceipt string
 }
 
 func (m *mockQueueClient) PutMessages(_ context.Context, _ queue.PutMessagesRequest) (queue.PutMessagesResponse, error) {
@@ -34,7 +37,11 @@ func (m *mockQueueClient) GetMessages(_ context.Context, _ queue.GetMessagesRequ
 	return m.getResp, m.getErr
 }
 
-func (m *mockQueueClient) DeleteMessage(_ context.Context, _ queue.DeleteMessageRequest) (queue.DeleteMessageResponse, error) {
+func (m *mockQueueClient) DeleteMessage(_ context.Context, in queue.DeleteMessageRequest) (queue.DeleteMessageResponse, error) {
+	m.deleteCalls++
+	if in.MessageReceipt != nil {
+		m.deletedReceipt = *in.MessageReceipt
+	}
 	return queue.DeleteMessageResponse{}, m.deleteErr
 }
 
@@ -234,7 +241,8 @@ func TestOCIConsumerHandleAckWithDelete(t *testing.T) {
 	c.handle(context.Background(), queue.GetMessage{Content: &content, Receipt: &receipt}, port.MessageHandlerFunc(
 		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
 	))
-	// delete was called — no error expected since mockQueueClient.deleteErr is nil.
+	assert.Equal(t, 1, client.deleteCalls)
+	assert.Equal(t, receipt, client.deletedReceipt)
 }
 
 func TestOCIConsumerHandleAckDeleteError(t *testing.T) {
@@ -248,20 +256,51 @@ func TestOCIConsumerHandleAckDeleteError(t *testing.T) {
 	))
 }
 
-func TestOCIConsumerHandleNack(t *testing.T) {
-	c := newTestOCIConsumer(&mockQueueClient{}, types.ConsumeConfig{QueueID: "q"})
-	content := `{"Topic":"test"}`
-	c.handle(context.Background(), queue.GetMessage{Content: &content}, port.MessageHandlerFunc(
-		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Nack, nil },
+// handleResult runs handle with a fixed result and returns the mock client.
+func handleResult(t *testing.T, result types.Result) *mockQueueClient {
+	t.Helper()
+	client := &mockQueueClient{}
+	c := newTestOCIConsumer(client, types.ConsumeConfig{QueueID: "q"})
+	content := `{"Topic":"test","Value":"dGVzdA=="}`
+	receipt := "rh"
+	c.handle(context.Background(), queue.GetMessage{Content: &content, Receipt: &receipt}, port.MessageHandlerFunc(
+		func(_ context.Context, _ *types.Message) (types.Result, error) { return result, nil },
 	))
+	return client
 }
 
+func TestOCIConsumerHandleNack(t *testing.T) {
+	client := handleResult(t, types.Nack)
+	assert.Equal(t, 0, client.deleteCalls) // kept for the visibility timeout to requeue
+}
+
+// Ignore must delete: on a visibility-timeout queue, not deleting is a requeue.
 func TestOCIConsumerHandleIgnore(t *testing.T) {
+	client := handleResult(t, types.Ignore)
+	assert.Equal(t, 1, client.deleteCalls)
+	assert.Equal(t, "rh", client.deletedReceipt)
+}
+
+// An unknown result must not delete.
+func TestOCIConsumerHandleUnknownResult(t *testing.T) {
+	client := handleResult(t, types.Result(99))
+	assert.Equal(t, 0, client.deleteCalls)
+}
+
+// Valid JSON that is not a types.Message envelope must reach the handler as a
+// raw body, not as an empty Value.
+func TestOCIConsumerHandleRawNotificationBody(t *testing.T) {
+	raw := `{"NotificationType":"AnyOfferChanged","Payload":{"SellerId":"A1B2C3"}}`
+	called := false
 	c := newTestOCIConsumer(&mockQueueClient{}, types.ConsumeConfig{QueueID: "q"})
-	content := `{"Topic":"test"}`
-	c.handle(context.Background(), queue.GetMessage{Content: &content}, port.MessageHandlerFunc(
-		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ignore, nil },
+	c.handle(context.Background(), queue.GetMessage{Content: &raw}, port.MessageHandlerFunc(
+		func(_ context.Context, msg *types.Message) (types.Result, error) {
+			called = true
+			assert.Equal(t, raw, string(msg.Value))
+			return types.Ack, nil
+		},
 	))
+	assert.True(t, called)
 }
 
 func TestOCIConsumerHandleInvalidJSON(t *testing.T) {

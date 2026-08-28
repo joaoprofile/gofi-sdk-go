@@ -11,7 +11,7 @@ import (
 // Return semantics:
 //   - (Ack, nil)    — message processed successfully; commit offset or delete from queue
 //   - (Nack, err)   — processing failed; requeue if the broker supports it
-//   - (Ignore, nil) — skip explicit acknowledgment; let broker visibility timeout decide
+//   - (Ignore, nil) — message discarded on purpose; removed without requeue
 type MessageHandler interface {
 	Handle(ctx context.Context, msg *types.Message) (types.Result, error)
 }

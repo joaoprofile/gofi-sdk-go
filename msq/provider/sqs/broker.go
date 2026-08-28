@@ -201,12 +201,12 @@ func (c *sqsConsumer) handle(ctx context.Context, url *string, sqsMsg *awssqs.Me
 	}
 
 	switch result {
-	case types.Ack:
+	case types.Ack, types.Ignore:
+		// Ack = processed, Ignore = discarded on purpose. Both remove the
+		// message: on a visibility-timeout queue, not deleting IS a requeue.
 		c.delete(url, sqsMsg)
 	case types.Nack:
 		// Do not delete — let visibility timeout expire for requeue.
-	case types.Ignore:
-		// Caller owns the ack decision.
 	}
 }
 

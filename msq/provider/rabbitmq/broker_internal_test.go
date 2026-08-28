@@ -336,7 +336,8 @@ func TestAmqpConsumerHandleIgnore(t *testing.T) {
 		port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
 			return types.Ignore, nil
 		}))
-	assert.False(t, ack.acked)
+	// Must ack: an unacked delivery holds a prefetch slot and is requeued on close.
+	assert.True(t, ack.acked)
 	assert.False(t, ack.nacked)
 }
 

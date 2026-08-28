@@ -195,7 +195,9 @@ func (c *ociConsumer) handle(ctx context.Context, ociMsg queue.GetMessage, handl
 		content = *ociMsg.Content
 	}
 	var msg types.Message
-	if err := json.Unmarshal([]byte(content), &msg); err != nil {
+	// Valid JSON that is not a types.Message envelope unmarshals into all-zero
+	// fields — deliver the raw body instead of an empty Value.
+	if err := json.Unmarshal([]byte(content), &msg); err != nil || len(msg.Value) == 0 {
 		msg = types.Message{Value: []byte(content)}
 	}
 
@@ -205,12 +207,12 @@ func (c *ociConsumer) handle(ctx context.Context, ociMsg queue.GetMessage, handl
 	}
 
 	switch result {
-	case types.Ack:
+	case types.Ack, types.Ignore:
+		// Ack = processed, Ignore = discarded on purpose. Both remove the
+		// message: on a visibility-timeout queue, not deleting IS a requeue.
 		c.delete(ctx, ociMsg)
 	case types.Nack:
 		// Visibility timeout will expire and message becomes visible again.
-	case types.Ignore:
-		// Caller owns the ack decision.
 	}
 }
 

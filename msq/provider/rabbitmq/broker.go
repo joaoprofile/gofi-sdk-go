@@ -173,12 +173,13 @@ func (c *amqpConsumer) handle(ctx context.Context, d *amqp091.Delivery, handler 
 	result, err := handler.Handle(ctx, &msg)
 
 	switch result {
-	case types.Ack:
+	case types.Ack, types.Ignore:
+		// Ack = processed, Ignore = discarded on purpose. Both must ack: an
+		// unacked delivery holds a prefetch slot until the channel closes,
+		// then gets requeued.
 		d.Ack(false)
 	case types.Nack:
 		d.Nack(false, err != nil)
-	case types.Ignore:
-		// no ack
 	default:
 		d.Ack(false)
 	}

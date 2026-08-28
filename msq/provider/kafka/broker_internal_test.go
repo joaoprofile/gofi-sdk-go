@@ -266,7 +266,7 @@ func TestGroupHandlerConsumeClaimAck(t *testing.T) {
 		}),
 	}
 	require.NoError(t, h.ConsumeClaim(session, claim))
-	assert.Equal(t, 1, session.markedCount) // MarkMessage called because !AutoCommit
+	assert.Equal(t, 1, session.markedCount)
 }
 
 func TestGroupHandlerConsumeClaimNack(t *testing.T) {
@@ -283,6 +283,49 @@ func TestGroupHandlerConsumeClaimNack(t *testing.T) {
 		}),
 	}
 	require.NoError(t, h.ConsumeClaim(session, claim))
+	// Kafka cannot redeliver a single record: the offset advances anyway.
+	assert.Equal(t, 1, session.markedCount)
+}
+
+// (Nack, nil) must retry: keying the retry loop on err would break on the
+// first attempt and commit the record unprocessed.
+func TestGroupHandlerConsumeClaimNackWithoutError(t *testing.T) {
+	ch := make(chan *sarama.ConsumerMessage, 1)
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
+	close(ch)
+
+	attempts := 0
+	session := &mockSession{}
+	h := &groupHandler{
+		cfg: types.ConsumeConfig{MaxRetries: 2, RetryBackoff: time.Nanosecond},
+		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
+			attempts++
+			return types.Nack, nil
+		}),
+	}
+	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
+	assert.Equal(t, 3, attempts) // initial attempt + MaxRetries
+	assert.Equal(t, 1, session.markedCount)
+}
+
+// Ignore stops the retry loop and commits — it is a deliberate discard.
+func TestGroupHandlerConsumeClaimIgnoreDoesNotRetry(t *testing.T) {
+	ch := make(chan *sarama.ConsumerMessage, 1)
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
+	close(ch)
+
+	attempts := 0
+	session := &mockSession{}
+	h := &groupHandler{
+		cfg: types.ConsumeConfig{MaxRetries: 3, RetryBackoff: time.Nanosecond},
+		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
+			attempts++
+			return types.Ignore, nil
+		}),
+	}
+	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
+	assert.Equal(t, 1, attempts)
+	assert.Equal(t, 1, session.markedCount)
 }
 
 func TestGroupHandlerConsumeClaimIgnore(t *testing.T) {
@@ -347,21 +390,24 @@ func TestGroupHandlerConsumeClaimWithRetry(t *testing.T) {
 	assert.Equal(t, 2, attempts)
 }
 
+// Marking is required in both modes: Sarama's auto-commit only flushes marked
+// offsets, so gating MarkMessage on AutoCommit meant never committing at all.
 func TestGroupHandlerConsumeClaimAutoCommit(t *testing.T) {
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-	close(ch)
+	for _, autoCommit := range []bool{true, false} {
+		ch := make(chan *sarama.ConsumerMessage, 1)
+		ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
+		close(ch)
 
-	session := &mockSession{}
-	claim := &mockClaim{messages: ch}
-	h := &groupHandler{
-		cfg: types.ConsumeConfig{AutoCommit: true}, // MarkMessage must NOT be called
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			return types.Ack, nil
-		}),
+		session := &mockSession{}
+		h := &groupHandler{
+			cfg: types.ConsumeConfig{AutoCommit: autoCommit},
+			handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
+				return types.Ack, nil
+			}),
+		}
+		require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
+		assert.Equal(t, 1, session.markedCount, "AutoCommit=%v", autoCommit)
 	}
-	require.NoError(t, h.ConsumeClaim(session, claim))
-	assert.Equal(t, 0, session.markedCount)
 }
 
 func TestGroupHandlerConsumeClaimDefaultRetryBackoff(t *testing.T) {

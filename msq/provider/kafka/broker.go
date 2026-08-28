@@ -379,6 +379,9 @@ func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			Headers:   fromRecordHeaders(sm.Headers),
 		}
 
+		// Nack is the only result that retries. Keying on err instead would
+		// let (Nack, nil) through on the first attempt.
+		var lastResult types.Result
 		var lastErr error
 		for attempt := 0; attempt <= h.cfg.MaxRetries; attempt++ {
 			if attempt > 0 {
@@ -388,23 +391,27 @@ func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 				}
 				time.Sleep(backoff)
 			}
-			result, err := h.handler.Handle(context.Background(), msg)
-			lastErr = err
-			if result == types.Ack || result == types.Ignore || err == nil {
-				lastErr = nil
+			lastResult, lastErr = h.handler.Handle(context.Background(), msg)
+			if lastResult != types.Nack {
 				break
 			}
 		}
 
-		if lastErr != nil && h.cfg.DeadLetterTopic != "" {
-			logging.Error("kafka consumer: exhausted retries, message lost (DLQ not yet wired)",
+		if lastResult == types.Nack {
+			// Kafka cannot redeliver one record without rewinding the whole
+			// partition, so the offset advances and the record is dropped.
+			// Always log it — a silent drop looks like a success.
+			logging.Error("kafka consumer: retries exhausted, record dropped",
 				slog.String("topic", h.cfg.Topic),
-				slog.String("dlq", h.cfg.DeadLetterTopic))
+				slog.Int("partition", int(sm.Partition)),
+				slog.Int64("offset", sm.Offset),
+				slog.String("dead_letter_topic", h.cfg.DeadLetterTopic),
+				slog.Any("error", lastErr))
 		}
 
-		if !h.cfg.AutoCommit {
-			session.MarkMessage(sm, "")
-		}
+		// Always mark: Sarama's auto-commit only flushes offsets that were
+		// marked, so skipping this means the group never commits at all.
+		session.MarkMessage(sm, "")
 	}
 	return nil
 }
