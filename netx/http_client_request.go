@@ -37,6 +37,7 @@ var (
 	ErrFailedToUnmarshalResponseBody = "failed to unmarshal response body: %w"
 	ErrUnexpectedStatusCode          = "unexpected status code: %d | body: %v"
 	ErrRequestExceededToStatus429    = "request exceeded retries due to status 429"
+	ErrRateLimitedRetryDisabled      = "request rate limited (retry on 429 disabled)"
 	ErrRateLimiting                  = "rate limiting error: %w"
 	ErrUnexpectedDuringRetries       = "unexpected error during retries"
 )
@@ -52,11 +53,15 @@ type Request[T any] struct {
 	Body       RequestBody
 	Retries    int
 	retrySleep time.Duration
-	signature  Signature
-	// ResponseHeaders carries the headers of the last successful response after
-	// Execute(). Lets the caller read transport metadata (a provider-returned
-	// rate limit, for instance) without the SDK knowing the semantics of any
-	// particular header. Nil until Execute() has run successfully.
+	// disableRetryOn429 surfaces the 429 to the caller instead of retrying it,
+	// so an external rate limiter stays in control of the pacing.
+	disableRetryOn429 bool
+	signature         Signature
+	// ResponseHeaders carries the headers of the last response Execute() saw —
+	// on success, and also on a 429 surfaced by DisableRetryOn429. Lets the caller
+	// read transport metadata (a provider-returned rate limit, for instance)
+	// without the SDK knowing the semantics of any particular header. Nil until
+	// Execute() has run.
 	ResponseHeaders http.Header
 }
 
@@ -69,6 +74,8 @@ func NewRequest[T any](ctx context.Context, client *HttpClient, method, path str
 		Headers:    make(map[string]string),
 		Retries:    int(client.Retries),
 		retrySleep: client.RetrySleep,
+
+		disableRetryOn429: client.DisableRetryOn429,
 	}
 }
 
@@ -220,6 +227,10 @@ func (r *Request[T]) executeWithRetries(bodyResult *RequestBodyResult) (*http.Re
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
+			if r.disableRetryOn429 {
+				r.ResponseHeaders = resp.Header
+				return nil, r.handleAPIError(resp, http.StatusTooManyRequests, ErrRateLimitedRetryDisabled)
+			}
 			if attempt == r.Retries {
 				return nil, r.handleAPIError(resp, http.StatusRequestTimeout, ErrRequestExceededToStatus429)
 			}
