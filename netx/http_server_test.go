@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -465,7 +466,168 @@ func TestNewServer_TraceMethodBlocked(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
+func TestNewServer_MaxBodyBytes_DefaultCapApplied(t *testing.T) {
+	cfg := &WSConfig{ServerPort: ":0"}
+	srv := NewServer(cfg)
+	ws := srv.(*httpServer)
+	ws.router.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", http.NoBody)
+	req.ContentLength = DefaultMaxBodyBytes + 1
+	rec := httptest.NewRecorder()
+	ws.router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
+func TestNewServer_MaxBodyBytes_ConfiguredCapApplied(t *testing.T) {
+	cfg := &WSConfig{ServerPort: ":0", MaxBodyBytes: 32 << 20}
+	srv := NewServer(cfg)
+	ws := srv.(*httpServer)
+	ws.router.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Above the SDK default, below the configured cap: must reach the handler.
+	req := httptest.NewRequest(http.MethodPost, "/upload", http.NoBody)
+	req.ContentLength = DefaultMaxBodyBytes + 1
+	rec := httptest.NewRecorder()
+	ws.router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestOrDefault(t *testing.T) {
+	assert.Equal(t, 5*time.Second, orDefault(5*time.Second, time.Minute))
+	assert.Equal(t, time.Minute, orDefault(0, time.Minute))
+	assert.Equal(t, time.Minute, orDefault(-time.Second, time.Minute))
+}
+
+// ── Per-route deadlines ───────────────────────────────────────────────────────
+
+func TestRouteTimeouts_ExtendServerReadTimeout(t *testing.T) {
+	routes := PublicRoutes("/api",
+		POST("/upload").To(readBodyHandler).Timeouts(10*time.Second, 10*time.Second),
+	)
+	baseURL := startSlowServer(t, routes)
+
+	resp, err := slowClient().Do(newSlowBodyRequest(t, baseURL+"/api/upload"))
+	require.NoError(t, err, "the route override must outlast the server read timeout")
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestRouteTimeouts_WithoutOverrideServerReadTimeoutApplies(t *testing.T) {
+	routes := PublicRoutes("/api",
+		POST("/upload").To(readBodyHandler),
+	)
+	baseURL := startSlowServer(t, routes)
+
+	// Control for the test above: the same slow body must fail without the
+	// override, otherwise that test would pass for the wrong reason. The
+	// timeout surfaces either as a transport error or as a non-200.
+	resp, err := slowClient().Do(newSlowBodyRequest(t, baseURL+"/api/upload"))
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	succeeded := err == nil && resp.StatusCode == http.StatusOK
+
+	assert.False(t, succeeded, "server read timeout should have cut the slow body short")
+}
+
+func TestRouteDeadlines_NoOpWhenWriterHasNoDeadlineSupport(t *testing.T) {
+	// httptest.ResponseRecorder exposes no deadline setter and no Unwrap chain
+	// reaching one: the override cannot apply and must not break the request.
+	called := false
+	routeDeadlines(time.Second, time.Second)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
+
+	assert.True(t, called, "an unsupported writer must degrade to the server-wide timeouts")
+}
+
+func TestRouteTimeouts_NotAppliedWhenUnset(t *testing.T) {
+	route := POST("/upload").To(readBodyHandler).Build()
+
+	assert.Zero(t, route.readTimeout)
+	assert.Zero(t, route.writeTimeout)
+}
+
 // --- helpers  ---
+
+// slowBodyChunks and slowBodyPause make a request body take roughly 1.2s to
+// arrive — comfortably past slowServerReadTimeout, comfortably under the
+// per-route override.
+const (
+	slowBodyChunks        = 8
+	slowBodyPause         = 150 * time.Millisecond
+	slowServerReadTimeout = 400 * time.Millisecond
+)
+
+// slowReader emits one byte per Read, pausing before each, so the request body
+// trickles in the way a real upload on a thin uplink does.
+type slowReader struct {
+	remaining int
+	pause     time.Duration
+}
+
+func (s *slowReader) Read(p []byte) (int, error) {
+	if s.remaining == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(s.pause)
+	s.remaining--
+	p[0] = 'x'
+	return 1, nil
+}
+
+func readBodyHandler(w http.ResponseWriter, r *http.Request) {
+	if _, err := io.ReadAll(r.Body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// startSlowServer serves the routes behind a deliberately short ReadTimeout so
+// a per-route override is the only way a slow body can complete.
+func startSlowServer(t *testing.T, routes []*Route) string {
+	t.Helper()
+
+	ws := NewServer(&WSConfig{ServerPort: ":0"}).(*httpServer)
+	ws.AddHandlers(&mockRouterHandler{routes: routes})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	server := &http.Server{Handler: ws.router, ReadTimeout: slowServerReadTimeout}
+	go func() { _ = server.Serve(ln) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	return "http://" + ln.Addr().String()
+}
+
+func newSlowBodyRequest(t *testing.T, url string) *http.Request {
+	t.Helper()
+
+	body := &slowReader{remaining: slowBodyChunks, pause: slowBodyPause}
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	require.NoError(t, err)
+	req.ContentLength = slowBodyChunks
+
+	return req
+}
+
+func slowClient() *http.Client {
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+}
 
 type mockRouterHandler struct {
 	routes []*Route

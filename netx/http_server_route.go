@@ -3,6 +3,7 @@ package netx
 import (
 	"net/http"
 	"strings"
+	"time"
 )
 
 type Middleware func(http.Handler) http.Handler
@@ -25,6 +26,8 @@ type Route struct {
 	authentication bool
 	corsConfig     *CorsConfig
 	prefix         string
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
 }
 
 type RouteBuilder struct {
@@ -34,6 +37,8 @@ type RouteBuilder struct {
 	handler        handlerFunc
 	authentication bool
 	corsConfig     *CorsConfig
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
 }
 
 type RouterHandler interface {
@@ -52,6 +57,31 @@ type WSConfig struct {
 	// is disabled. Build the Backend field with NewRedisBackend(client) at the
 	// composition root where the Redis client is available.
 	RateLimiter *RedisRateLimiterConfig
+
+	// MaxBodyBytes caps request bodies, in bytes. A value <= 0 falls back to
+	// DefaultMaxBodyBytes. Services accepting large uploads must raise this
+	// cap together with ReadTimeout and WriteTimeout: the body cap is useless
+	// while the transfer cannot fit in the read budget.
+	MaxBodyBytes int64
+
+	// ReadTimeout bounds reading the whole request, body included. A value
+	// <= 0 falls back to DefaultReadTimeout. ReadHeaderTimeout stays fixed at
+	// 5s regardless — it is what guards against Slowloris, so relaxing this
+	// field for slow uploads does not weaken that defense.
+	ReadTimeout time.Duration
+
+	// WriteTimeout bounds the response write. The deadline is armed right
+	// after the request headers are read, so it also covers the time spent
+	// receiving the body. A value <= 0 falls back to DefaultWriteTimeout.
+	WriteTimeout time.Duration
+
+	// IdleTimeout bounds keep-alive connections between requests. A value
+	// <= 0 falls back to DefaultIdleTimeout.
+	IdleTimeout time.Duration
+
+	// RequestTimeout bounds the per-request context passed to handlers. A
+	// value <= 0 falls back to DefaultRequestTimeout.
+	RequestTimeout time.Duration
 }
 
 func (rb *RouteBuilder) Build() *Route {
@@ -70,11 +100,28 @@ func (rb *RouteBuilder) Build() *Route {
 		authentication: rb.authentication,
 		corsConfig:     rb.corsConfig,
 		prefix:         rb.prefix,
+		readTimeout:    rb.readTimeout,
+		writeTimeout:   rb.writeTimeout,
 	}
 }
 
 func (rb *RouteBuilder) To(function handlerFunc) *RouteBuilder {
 	rb.handler = function
+	return rb
+}
+
+// Timeouts overrides the server-wide read and write deadlines for this route
+// alone, so a service can accept a long upload without relaxing ReadTimeout
+// for every other route. Either argument may be zero to keep the server-wide
+// value for that direction.
+//
+// Only the connection deadlines can be extended this way. WSConfig.RequestTimeout
+// is a context deadline: downstream code can shorten it, never lengthen it, so a
+// route that needs a long handler budget still requires a matching server-wide
+// RequestTimeout.
+func (rb *RouteBuilder) Timeouts(read, write time.Duration) *RouteBuilder {
+	rb.readTimeout = read
+	rb.writeTimeout = write
 	return rb
 }
 

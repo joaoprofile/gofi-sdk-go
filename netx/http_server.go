@@ -3,17 +3,42 @@ package netx
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/joaoprofile/gofi/obs/logging"
 )
+
+// Server timeouts applied when the matching WSConfig field is <= 0.
+const (
+	DefaultReadTimeout    = 10 * time.Second
+	DefaultWriteTimeout   = 15 * time.Second
+	DefaultIdleTimeout    = 60 * time.Second
+	DefaultRequestTimeout = 30 * time.Second
+
+	// readHeaderTimeout is not configurable: it is the Slowloris defense, and
+	// it must stay short even when a service relaxes ReadTimeout to accept
+	// large uploads.
+	readHeaderTimeout = 5 * time.Second
+)
+
+// orDefault returns fallback when d is not a positive duration.
+func orDefault(d, fallback time.Duration) time.Duration {
+	if d <= 0 {
+		return fallback
+	}
+	return d
+}
 
 type HttpServer interface {
 	Use(middleware ...Middleware)
@@ -64,12 +89,12 @@ func NewServer(config *WSConfig) HttpServer {
 	mux.Use(NewStressControlMiddleware(stressConfig))
 
 	// Global request timeout.
-	mux.Use(middleware.Timeout(30 * time.Second))
+	mux.Use(middleware.Timeout(orDefault(config.RequestTimeout, DefaultRequestTimeout)))
 
 	// Security hardening (headers, method blocking, body limit).
 	mux.Use(BlockUnsafeMethods)
 	mux.Use(SecurityHeaders)
-	mux.Use(LimitBody)
+	mux.Use(LimitBodyWithMax(config.MaxBodyBytes))
 
 	return &httpServer{
 		config: config,
@@ -103,6 +128,45 @@ func (ws *httpServer) AddHandlers(handlers ...RouterHandler) {
 	}
 }
 
+// routeDeadlines extends the connection read/write deadlines for a single
+// route, overriding Server.ReadTimeout and Server.WriteTimeout. Connection
+// deadlines are the only budget a route can lengthen: context deadlines
+// (RequestTimeout) can be tightened downstream but never relaxed.
+//
+// When the ResponseWriter exposes no deadline setter — directly or through an
+// Unwrap chain — the override cannot be applied and the route silently keeps
+// the server-wide timeouts. That is a permanent property of the writer, so it
+// is reported once instead of on every request.
+func routeDeadlines(read, write time.Duration) Middleware {
+	var warnOnce sync.Once
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rc := http.NewResponseController(w)
+			now := time.Now()
+
+			var err error
+			if read > 0 {
+				err = rc.SetReadDeadline(now.Add(read))
+			}
+			if write > 0 && err == nil {
+				err = rc.SetWriteDeadline(now.Add(write))
+			}
+
+			if err != nil {
+				warnOnce.Do(func() {
+					logging.FromContext(r.Context()).Warn("route deadlines not applied",
+						slog.String("path", r.URL.Path),
+						slog.Any("error", err),
+					)
+				})
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
 	var h http.Handler = http.HandlerFunc(route.handler)
 
@@ -118,6 +182,12 @@ func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
 		h = ws.auth(h)
 	}
 
+	// Per-route deadlines wrap outermost, so the extended budget is in place
+	// before auth or the handler touches the request body.
+	if route.readTimeout > 0 || route.writeTimeout > 0 {
+		h = routeDeadlines(route.readTimeout, route.writeTimeout)(h)
+	}
+
 	path := strings.TrimPrefix(route.path, route.prefix)
 	if path == "" {
 		path = "/"
@@ -130,10 +200,10 @@ func (ws *httpServer) ListenAndServe() {
 	server := &http.Server{
 		Addr:              ws.config.ServerPort,
 		Handler:           ws.router,
-		ReadTimeout:       10 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadTimeout:       orDefault(ws.config.ReadTimeout, DefaultReadTimeout),
+		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      orDefault(ws.config.WriteTimeout, DefaultWriteTimeout),
+		IdleTimeout:       orDefault(ws.config.IdleTimeout, DefaultIdleTimeout),
 		MaxHeaderBytes:    1 << 20,
 		ErrorLog:          log.New(os.Stderr, "http-server: ", log.LstdFlags),
 		BaseContext: func(_ net.Listener) context.Context {

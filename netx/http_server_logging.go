@@ -30,6 +30,13 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
+// walk down to the one holding the connection deadline setters. Without it,
+// per-route deadlines silently degrade to the server-wide timeouts.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // LoggingMiddleware logs only errors and security-relevant responses.
 // 2xx and 3xx responses are intentionally silent — logs are persisted and
 // request-level noise would dominate the cost and signal-to-noise ratio.

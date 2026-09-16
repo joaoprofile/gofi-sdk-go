@@ -47,14 +47,40 @@ func BlockUnsafeMethods(next http.Handler) http.Handler {
 	})
 }
 
-// LimitBody caps request bodies at 10 MB to prevent memory exhaustion attacks.
-func LimitBody(next http.Handler) http.Handler {
-	const maxBody = 10 << 20 // 10 MB
+// DefaultMaxBodyBytes is the request body cap applied when no explicit limit
+// is configured.
+const DefaultMaxBodyBytes int64 = 10 << 20 // 10 MB
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-		next.ServeHTTP(w, r)
-	})
+// LimitBody caps request bodies at DefaultMaxBodyBytes to prevent memory
+// exhaustion attacks. Kept for callers that do not need a custom cap.
+func LimitBody(next http.Handler) http.Handler {
+	return LimitBodyWithMax(DefaultMaxBodyBytes)(next)
+}
+
+// LimitBodyWithMax caps request bodies at maxBody bytes. A maxBody <= 0 falls
+// back to DefaultMaxBodyBytes, so a missing configuration never leaves the
+// server without a ceiling.
+//
+// Requests announcing an oversized Content-Length are rejected with 413 before
+// the handler runs, so the caller gets an honest error instead of a parse
+// failure surfacing deep inside the handler. Chunked requests carry no length
+// upfront: those stay capped by MaxBytesReader, which fails on read.
+func LimitBodyWithMax(maxBody int64) Middleware {
+	if maxBody <= 0 {
+		maxBody = DefaultMaxBodyBytes
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > maxBody {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+
+			r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ValidateRequest rejects requests that carry both Content-Length and

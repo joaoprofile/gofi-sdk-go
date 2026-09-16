@@ -116,10 +116,25 @@ func TestLimitBody_CallsNextForSmallBody(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestLimitBody_WrapsBodyWithMaxBytesReader(t *testing.T) {
-	const overLimit = (10 << 20) + 1
+func TestLimitBody_RejectsOversizedContentLengthBeforeHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("x"))
+	req.ContentLength = DefaultMaxBodyBytes + 1
+	rec := httptest.NewRecorder()
+
+	called := false
+	LimitBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})).ServeHTTP(rec, req)
+
+	assert.False(t, called, "handler must not run for an oversized body")
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
+func TestLimitBody_CapsChunkedBodyOnRead(t *testing.T) {
+	const overLimit = DefaultMaxBodyBytes + 1
 
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(make([]byte, overLimit)))
+	req.ContentLength = -1 // chunked: no length announced upfront
 	rec := httptest.NewRecorder()
 
 	var readErr error
@@ -128,6 +143,66 @@ func TestLimitBody_WrapsBodyWithMaxBytesReader(t *testing.T) {
 	})).ServeHTTP(rec, req)
 
 	require.Error(t, readErr, "reading past the limit must produce an error")
+}
+
+// ── LimitBodyWithMax ──────────────────────────────────────────────────────────
+
+func TestLimitBodyWithMax_HonorsConfiguredCap(t *testing.T) {
+	const cap1KB = 1 << 10
+
+	t.Run("body within the cap reaches the handler", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(make([]byte, cap1KB/2)))
+		rec := httptest.NewRecorder()
+
+		var readErr error
+		LimitBodyWithMax(cap1KB)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, readErr = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+		})).ServeHTTP(rec, req)
+
+		require.NoError(t, readErr)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("body above the cap is rejected with 413", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(make([]byte, cap1KB+1)))
+		rec := httptest.NewRecorder()
+
+		LimitBodyWithMax(cap1KB)(okHandler()).ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	})
+}
+
+func TestLimitBodyWithMax_AcceptsBodyAboveTheDefaultCap(t *testing.T) {
+	const cap32MB = 32 << 20
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("x"))
+	req.ContentLength = DefaultMaxBodyBytes + 1
+	rec := httptest.NewRecorder()
+
+	called := false
+	LimitBodyWithMax(cap32MB)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, req)
+
+	assert.True(t, called, "a cap above the default must let the body through")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestLimitBodyWithMax_FallsBackToDefaultWhenNonPositive(t *testing.T) {
+	for _, maxBody := range []int64{0, -1} {
+		t.Run("cap falls back to the default", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("x"))
+			req.ContentLength = DefaultMaxBodyBytes + 1
+			rec := httptest.NewRecorder()
+
+			LimitBodyWithMax(maxBody)(okHandler()).ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+		})
+	}
 }
 
 // ── ValidateRequest ───────────────────────────────────────────────────────────

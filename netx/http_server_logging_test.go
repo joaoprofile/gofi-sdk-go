@@ -264,3 +264,13 @@ func TestLogIPBlocked_WithXForwardedFor_DoesNotPanic(t *testing.T) {
 		LogIPBlocked(req, "blocked-client")
 	})
 }
+
+func TestResponseWriter_UnwrapExposesUnderlyingWriter(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	// http.ResponseController walks Unwrap() to reach the connection deadline
+	// setters; without it, per-route deadlines would never apply behind the
+	// logging middleware.
+	assert.Same(t, rec, rw.Unwrap())
+}
