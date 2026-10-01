@@ -36,7 +36,7 @@ updates:
       - "/sqln/rdsauth"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0 # version-update PRs off; security updates still open PRs
     groups:
       opentelemetry:
         patterns: ["go.opentelemetry.io/*"]
