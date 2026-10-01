@@ -1,3 +1,5 @@
-# Throwaway fixtures used by tests; they grant access to nothing.
-cc7c5a91292905d1c3586cdcf72ba6f6a1b1b454:base/bucket/oci/oci_test.go:private-key:15
-cc7c5a91292905d1c3586cdcf72ba6f6a1b1b454:base/secrets/ocivault/ocivault_test.go:generic-api-key:20
+# Throwaway fixtures used by tests; they grant access to nothing. These pin
+# the commits that still carry them in history (rewritten in 8783e51).
+8783e514be7dbf8a825de6ab0b974669a1dda74c:base/secrets/ocivault/ocivault_test.go:generic-api-key:20
+4e17555bc76075617070442843c5f19a1027861c:base/bucket/bucketenv/bucketenv_test.go:private-key:77
+4e17555bc76075617070442843c5f19a1027861c:base/bucket/oci/oci_test.go:private-key:14
