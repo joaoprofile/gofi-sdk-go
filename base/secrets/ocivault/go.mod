@@ -3,8 +3,8 @@ module github.com/gofi-labs/gofi-sdk-go/base/secrets/ocivault
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci v0.2.1
 	github.com/oracle/oci-go-sdk/v65 v65.112.0
 )
 

@@ -5,8 +5,8 @@ go 1.26.6
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.6
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/netx v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/netx v0.2.1
 )
 
 require (
@@ -33,8 +33,8 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-redis/redis_rate/v10 v10.0.1 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/obs v0.8.2 // indirect
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

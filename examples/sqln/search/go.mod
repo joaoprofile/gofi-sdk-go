@@ -3,8 +3,8 @@ module github.com/gofi-labs/gofi-sdk-go/examples/sqln/search
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/gofi v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/sqln v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/gofi v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/sqln v0.2.1
 )
 
 require (
@@ -16,8 +16,8 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/obs v0.8.2 // indirect
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1 // indirect
 	github.com/golang-migrate/migrate/v4 v4.19.1 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20220416144525-469b46aa5efa // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

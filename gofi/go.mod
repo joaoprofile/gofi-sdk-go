@@ -4,12 +4,12 @@ go 1.26.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/iam v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/msq v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/netx v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/obs v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/sqln v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/iam v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/netx v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/sqln v0.2.1
 	github.com/lib/pq v1.12.3
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.12.1

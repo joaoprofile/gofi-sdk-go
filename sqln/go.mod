@@ -4,8 +4,8 @@ go 1.26.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/obs v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0

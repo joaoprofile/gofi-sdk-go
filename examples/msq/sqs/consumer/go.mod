@@ -3,10 +3,10 @@ module github.com/gofi-labs/gofi-sdk-go/examples/msq/sqs/consumer
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/gofi v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/msq v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/msq/provider/sqs v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/obs v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/gofi v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/msq/provider/sqs v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
 )
 
 require (
@@ -32,8 +32,8 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.8.2 // indirect
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

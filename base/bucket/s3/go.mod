@@ -7,8 +7,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.10
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.4
 	github.com/aws/smithy-go v1.28.2
-	github.com/gofi-labs/gofi-sdk-go/base v0.8.2
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.8.2
+	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
+	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.2.1
 )
 
 require (
