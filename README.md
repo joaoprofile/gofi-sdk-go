@@ -302,7 +302,7 @@ Infrastructure utilities and services used by all other modules. Has no internal
 | `environment` | Configuration loader via environment variables (`.env` off in prod/stage)      |
 | `errs`        | `AppError` with `ErrorKind` classification, JSON-friendly                      |
 | `secrets`     | `secret://<provider>/<name>[#key]` resolution; `env`, `file` built in          |
-| `bucket`      | Object storage API; `mem`, `file` built in; `s3`, `oci` modules; `buckettest` contract |
+| `bucket`      | Object storage API, bucket `Manager`, folders (`ListDir`, `DeletePrefix`, `CreateFolder`); `mem`, `file` built in; `s3`, `oci` modules; `buckettest` contract |
 | `cloud`       | Cloud identity shared by the integrations; `aws`, `oci` modules                |
 | `mail`        | SMTP e-mail: HTML + text, attachments, templates, TLS/STARTTLS, retry, pooling |
 | `session`     | Session management with Redis support                                          |
@@ -597,6 +597,33 @@ Object storage: `base/bucket` defines the API; blank-import `base/bucket/s3`
 (AWS S3, MinIO, R2, …) or `base/bucket/oci` and call
 `bucket.Open(ctx, config.Bucket(env))`.
 
+To administer the buckets of the account, open a `Manager` (`s3`, `file` and
+`mem`; `BUCKET_NAME` is not needed). `Open` returns the `Store` of a bucket in
+its own region:
+
+```go
+m, err := bucket.OpenManager(ctx, config.Bucket(env))
+if err != nil {
+	return err
+}
+err = m.CreateBucket(ctx, "reports", bucket.CreateOptions{})
+if errors.Is(err, bucket.ErrBucketExists) {
+	// name already taken
+}
+store, err := m.Open(ctx, "reports")
+if err != nil {
+	return err
+}
+dir, err := bucket.ListDir(ctx, store, "2026/") // one level: dir.Folders, dir.Objects
+_, err = bucket.DeletePrefix(ctx, store, "2025/")
+err = bucket.CreateFolder(ctx, store, "2027")
+```
+
+Folders work on every `Store` (server-side where the provider supports it,
+through a listing otherwise). Errors are portable: test
+`errors.Is(err, bucket.ErrBucketNotFound)`, `ErrBucketNotEmpty`,
+`ErrAccessDenied`, ... instead of provider codes.
+
 ---
 
 ### `iam` — Identity and authentication
@@ -768,7 +795,7 @@ go tool cover -html=coverage.out
 
 `make size-check` builds some examples (HTTP + database, database job, Kafka producer), prints their stripped size and fails when one links a package it must not (gRPC in a service without observability, pgx without the database component, ...).
 
-Provider modules run shared contracts: `msq/msqtest` for brokers and `base/bucket/buckettest` for object stores, so behavior stays identical across backends.
+Provider modules run shared contracts: `msq/msqtest` for brokers and `base/bucket/buckettest` (`Run` for stores, `RunManager` for bucket managers) for object stores, so behavior stays identical across backends.
 
 ### Minimum required coverage
 
