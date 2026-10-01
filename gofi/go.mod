@@ -3,7 +3,7 @@ module github.com/gofi-labs/gofi-sdk-go/gofi
 go 1.26.6
 
 require (
-	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
 	github.com/gofi-labs/gofi-sdk-go/iam v0.2.1
 	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
