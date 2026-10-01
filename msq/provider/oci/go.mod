@@ -7,7 +7,7 @@ require (
 	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
 	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
 	github.com/google/uuid v1.6.0
-	github.com/oracle/oci-go-sdk/v65 v65.112.0
+	github.com/oracle/oci-go-sdk/v65 v65.126.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -22,7 +22,7 @@ require (
 	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
 	github.com/gofrs/flock v0.10.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/sony/gobreaker v0.5.0 // indirect
+	github.com/sony/gobreaker/v2 v2.4.0 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
