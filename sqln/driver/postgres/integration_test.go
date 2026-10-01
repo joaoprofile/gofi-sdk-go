@@ -16,8 +16,8 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/sqln/transaction"
 )
 
-// Set GOFI_IT_POSTGRES_DSN (e.g. host=localhost port=5432 user=postgres
-// password=pw dbname=it sslmode=disable) to run it.
+// Set GOFI_IT_POSTGRES_DSN to run it; Config.Password needs sslmode verify-ca
+// or verify-full, so eval "$(.github/scripts/it-postgres.sh)" starts one.
 func itConn(t *testing.T) *connection.Connection {
 	t.Helper()
 	dsn := os.Getenv("GOFI_IT_POSTGRES_DSN")

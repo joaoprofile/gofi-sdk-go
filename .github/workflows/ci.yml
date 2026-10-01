@@ -109,19 +109,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOWORK: "off"
-      GOFI_IT_POSTGRES_DSN: host=localhost port=5432 user=postgres password=pw dbname=it sslmode=disable
       GOFI_IT_AMQP_URL: amqp://guest:guest@localhost:5672/
       GOFI_IT_REDIS_ADDR: localhost:6379
       GOFI_IT_KAFKA_BROKERS: localhost:9092
       GOFI_IT_NATS_URL: nats://localhost:4222
     services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: pw
-          POSTGRES_DB: it
-        ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
       rabbitmq:
         image: rabbitmq:3.13-alpine
         ports: ["5672:5672"]
@@ -153,6 +145,8 @@ jobs:
           go-version: "1.26.x"
           check-latest: true
           cache-dependency-path: "**/go.sum"
+      - name: postgres
+        run: .github/scripts/it-postgres.sh  # TLS verify-full: services cannot mount the certificates
       - name: nats
         run: docker run -d -p 4222:4222 nats:2.10-alpine -js  # services cannot pass -js
       - name: contracts
