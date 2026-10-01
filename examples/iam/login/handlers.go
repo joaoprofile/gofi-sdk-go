@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/middleware"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/middleware"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 var (

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	_ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
 )
 
 func TestDatabase_Postgres(t *testing.T) {

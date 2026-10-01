@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 )
 
 func init() {

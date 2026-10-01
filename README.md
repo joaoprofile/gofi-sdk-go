@@ -29,10 +29,10 @@ package main
 import (
     "log"
 
-    "github.com/gofi-labs/gofi-sdk-go/gofi"
-    "github.com/gofi-labs/gofi-sdk-go/gofi/component/database"
-    "github.com/gofi-labs/gofi-sdk-go/gofi/component/httpserver"
-    _ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
+    "github.com/joaoprofile/gofi-sdk-go/gofi"
+    "github.com/joaoprofile/gofi-sdk-go/gofi/component/database"
+    "github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
+    _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
 )
 
 func main() {
@@ -60,7 +60,7 @@ A handler is any type that implements `netx.RouterHandler` — it declares its o
 import (
     "net/http"
 
-    "github.com/gofi-labs/gofi-sdk-go/netx"
+    "github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 type HelloHandler struct{}
@@ -85,8 +85,8 @@ Build the query with `criteria` and let the generic manager map rows through the
 import (
     "context"
 
-    "github.com/gofi-labs/gofi-sdk-go/sqln"
-    "github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+    "github.com/joaoprofile/gofi-sdk-go/sqln"
+    "github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 )
 
 type Product struct {
@@ -138,7 +138,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  Orchestrator — github.com/gofi-labs/gofi-sdk-go                         │
+│  Orchestrator — github.com/joaoprofile/gofi-sdk-go                         │
 │    gofi.New("svc").With(database.New(), httpserver.New(":8080")).Build() │
 │    component/{database,cache,session,messaging,observability,iam,        │
 │               httpserver}                                                │
@@ -228,7 +228,7 @@ examples/*                  → gofi modules via replace (each one its own modul
 
 ### `gofi` — Main orchestrator
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/gofi` (components under `.../gofi/component/<name>`)
+**Path:** `github.com/joaoprofile/gofi-sdk-go/gofi` (components under `.../gofi/component/<name>`)
 
 Entry point of the SDK. Exposes the `Builder` and `Service` interfaces, the `Component` contract and `New(serviceName)`. `With(...)` declares components; `Build()` loads the environment, sets up logging and starts them by stage (observability → database → cache → session → messaging → IAM → HTTP server), whatever the order of declaration.
 
@@ -271,7 +271,7 @@ A custom resource is a type with `Name()`, `Stage()` and `Start(ctx, *gofi.Runti
 
 #### `config` — Environment composition layer
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/gofi/config` (part of the `gofi` module)
+**Path:** `github.com/joaoprofile/gofi-sdk-go/gofi/config` (part of the `gofi` module)
 
 Maps `base/environment` into each library's typed `Config`. Every adapter takes an `*environment.Environment` explicitly, so it is testable without the process-wide singleton. Applications that don't use gofi's environment loader can ignore it and build each `Config` themselves. The mappings of the resources gofi starts live with their components, and the process-wide settings in `config/core` (imported by `Build` without the rest of `config`).
 
@@ -293,7 +293,7 @@ Maps `base/environment` into each library's typed `Config`. Every adapter takes 
 
 ### `base` — Foundation
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/base`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/base`
 
 Infrastructure utilities and services used by all other modules. Has no internal dependencies within gofi.
 
@@ -314,7 +314,7 @@ Infrastructure utilities and services used by all other modules. Has no internal
 | `debug`       | Diagnostic HTTP server (non-prod environments only)                            |
 
 ```go
-import "github.com/gofi-labs/gofi-sdk-go/base/environment"
+import "github.com/joaoprofile/gofi-sdk-go/base/environment"
 
 env := environment.Instance()
 fmt.Println(env.AppName, env.AppEnvironment)
@@ -324,7 +324,7 @@ fmt.Println(env.AppName, env.AppEnvironment)
 
 ### `obs` — Observability
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/obs`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/obs`
 
 Integration with OpenTelemetry: traces, metrics, and structured logs via `slog`. The package is split by weight: `obs/logging` (console `slog` logger) and `obs/metrics` (instrument helpers, database pool stats) link no exporter; `obs` itself holds `Init`, which exports traces, metrics **and logs** over one OTLP/gRPC connection, attaching the log exporter to the global logger with `logging.Attach`.
 
@@ -339,8 +339,8 @@ Integration with OpenTelemetry: traces, metrics, and structured logs via `slog`.
 
 ```go
 import (
-    "github.com/gofi-labs/gofi-sdk-go/obs"
-    "github.com/gofi-labs/gofi-sdk-go/obs/logging"
+    "github.com/joaoprofile/gofi-sdk-go/obs"
+    "github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 tele, err := obs.Init(ctx, obs.TeleConfig{
@@ -355,7 +355,7 @@ logging.Info("service started", slog.String("port", ":8080"))
 
 ### `sqln` — Database and cache
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/sqln`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/sqln`
 
 Data access layer for SQL with support for PostgreSQL (pgx/v5), MySQL, SQL Server, and Oracle. Includes pagination, allowlisted dynamic filters, query caching (Redis or in-memory), migrations, a read replica (`DATABASE_READ_HOST`), per-connection passwords for IAM tokens (`sqln/rdsauth`) and transaction retries on serialization conflicts.
 
@@ -374,7 +374,7 @@ Data access layer for SQL with support for PostgreSQL (pgx/v5), MySQL, SQL Serve
 | `migrate`     | Running migrations via filesystem                  |
 
 ```go
-import "github.com/gofi-labs/gofi-sdk-go/sqln"
+import "github.com/joaoprofile/gofi-sdk-go/sqln"
 
 type User struct {
     ID   int64  `db:"id"`
@@ -419,7 +419,7 @@ cfg.Password = rdsauth.Password(awsCfg, "db.xxxx.rds.amazonaws.com:5432", "app")
 
 ### `msq` — Messaging
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/msq`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/msq`
 
 Message broker abstraction with support for multiple providers. The `Broker` interface is uniform — switching from Kafka to RabbitMQ only requires changing the provider.
 
@@ -445,7 +445,7 @@ builder, blank-import it and set `MESSAGING_PROVIDER=<p>`; standalone, call
 | NATS JetStream     | `nats`                             |
 
 ```go
-import _ "github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka" // with gofi.New(...).With(messaging.New())
+import _ "github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka" // with gofi.New(...).With(messaging.New())
 ```
 
 Every consumer created through `msq.New` runs the same pipeline, whatever the
@@ -457,8 +457,8 @@ headers with `send`/`process` spans and `messaging.*` metrics.
 
 ```go
 import (
-    "github.com/gofi-labs/gofi-sdk-go/msq"
-    "github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka"
+    "github.com/joaoprofile/gofi-sdk-go/msq"
+    "github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka"
 )
 
 broker, _ := kafka.New(kafka.Config{Brokers: []string{"localhost:9092"}})
@@ -476,7 +476,7 @@ producer.SendMessage(ctx, msg)
 
 ### `netx` — HTTP
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/netx`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/netx`
 
 HTTP server and client based on `go-chi`. Includes ready-to-use middlewares, health probes and a pluggable request signer.
 
@@ -492,7 +492,7 @@ HTTP server and client based on `go-chi`. Includes ready-to-use middlewares, hea
 | `netx.SecurityHeaders`          | Security headers (CSP, HSTS, etc.)                   |
 
 ```go
-import "github.com/gofi-labs/gofi-sdk-go/netx"
+import "github.com/joaoprofile/gofi-sdk-go/netx"
 
 server := netx.NewServer(&netx.WSConfig{ServerPort: ":8080"})
 server.Use(netx.LoggingMiddleware(), netx.SecurityHeaders)
@@ -542,8 +542,8 @@ Pod Identity work without static keys. The signing name defaults to
 
 ```go
 import (
-    "github.com/gofi-labs/gofi-sdk-go/netx"
-    "github.com/gofi-labs/gofi-sdk-go/netx/awssign"
+    "github.com/joaoprofile/gofi-sdk-go/netx"
+    "github.com/joaoprofile/gofi-sdk-go/netx/awssign"
 )
 
 signer, err := awssign.New(ctx, awssign.Config{}) // default chain, execute-api
@@ -601,7 +601,7 @@ Object storage: `base/bucket` defines the API; blank-import `base/bucket/s3`
 
 ### `iam` — Identity and authentication
 
-**Path:** `github.com/gofi-labs/gofi-sdk-go/iam`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/iam`
 
 Identity, authentication, and authorization service. Supports JWT, session, RBAC, and multiple Identity Providers. Has no internal dependencies: environment mapping happens in the root `config.IAM(env)`.
 
@@ -623,7 +623,7 @@ Identity, authentication, and authorization service. Supports JWT, session, RBAC
 | `middleware`         | Authentication middleware for HTTP and gRPC                       |
 
 ```go
-import "github.com/gofi-labs/gofi-sdk-go/iam"
+import "github.com/joaoprofile/gofi-sdk-go/iam"
 
 // users implements port.UserPort and port.TenantPort over your storage.
 svc, err := iam.NewDefault(iam.DefaultConfig{
@@ -656,28 +656,28 @@ ports in `iam.Config`; see [examples/iam/login](examples/iam/login).
 ### Full usage via orchestrator
 
 ```bash
-go get github.com/gofi-labs/gofi-sdk-go/gofi
+go get github.com/joaoprofile/gofi-sdk-go/gofi
 ```
 
 ### Per-module usage (only what you need)
 
 ```bash
-go get github.com/gofi-labs/gofi-sdk-go/netx    # HTTP only
-go get github.com/gofi-labs/gofi-sdk-go/sqln    # database only
-go get github.com/gofi-labs/gofi-sdk-go/msq     # messaging only
-go get github.com/gofi-labs/gofi-sdk-go/obs     # observability only
-go get github.com/gofi-labs/gofi-sdk-go/iam     # authentication only
-go get github.com/gofi-labs/gofi-sdk-go/base    # base utilities only
+go get github.com/joaoprofile/gofi-sdk-go/netx    # HTTP only
+go get github.com/joaoprofile/gofi-sdk-go/sqln    # database only
+go get github.com/joaoprofile/gofi-sdk-go/msq     # messaging only
+go get github.com/joaoprofile/gofi-sdk-go/obs     # observability only
+go get github.com/joaoprofile/gofi-sdk-go/iam     # authentication only
+go get github.com/joaoprofile/gofi-sdk-go/base    # base utilities only
 
 # providers (only the ones you use)
-go get github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka     # or rabbitmq, sqs, oci, redis, nats
-go get github.com/gofi-labs/gofi-sdk-go/base/bucket/s3         # or base/bucket/oci
-go get github.com/gofi-labs/gofi-sdk-go/base/secrets/awssm     # or base/secrets/ocivault
-go get github.com/gofi-labs/gofi-sdk-go/netx/awssign           # AWS SigV4 signer
-go get github.com/gofi-labs/gofi-sdk-go/sqln/rdsauth           # RDS IAM auth
+go get github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka     # or rabbitmq, sqs, oci, redis, nats
+go get github.com/joaoprofile/gofi-sdk-go/base/bucket/s3         # or base/bucket/oci
+go get github.com/joaoprofile/gofi-sdk-go/base/secrets/awssm     # or base/secrets/ocivault
+go get github.com/joaoprofile/gofi-sdk-go/netx/awssign           # AWS SigV4 signer
+go get github.com/joaoprofile/gofi-sdk-go/sqln/rdsauth           # RDS IAM auth
 ```
 
-Each module is versioned with its own SemVer tag (`<module dir>/vX.Y.Z`, e.g. `gofi/v0.8.1`, `netx/awssign/v0.8.1`). The repository root is not a module: until v0.7.x the orchestrator was the root module (`github.com/gofi-labs/gofi-sdk-go`); from v0.8.1 it is `.../gofi`.
+Each module is versioned with its own SemVer tag (`<module dir>/vX.Y.Z`, e.g. `gofi/v0.8.1`, `netx/awssign/v0.8.1`). The repository root is not a module: until v0.7.x the orchestrator was the root module (`github.com/joaoprofile/gofi-sdk-go`); from v0.8.1 it is `.../gofi`.
 
 ---
 
@@ -759,7 +759,7 @@ The `go.work` file at the root lists all 22 modules in the workspace. Editors th
 go test $(go list -f '{{.Dir}}/...' -m)
 
 # specific module
-go test github.com/gofi-labs/gofi-sdk-go/netx/...
+go test github.com/joaoprofile/gofi-sdk-go/netx/...
 
 # with coverage
 go test -coverprofile=coverage.out ./...

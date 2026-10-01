@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/errs"
+	"github.com/joaoprofile/gofi-sdk-go/base/errs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

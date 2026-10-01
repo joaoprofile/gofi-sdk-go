@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/redact"
+	"github.com/joaoprofile/gofi-sdk-go/base/redact"
 )
 
 // Provider selects the object-storage backend a Config targets.

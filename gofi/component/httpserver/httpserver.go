@@ -7,10 +7,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 var errNotStarted = errors.New("http server: Run before Build started it")

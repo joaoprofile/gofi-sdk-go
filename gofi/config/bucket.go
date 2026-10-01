@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 // Bucket builds a bucket.Config from the BUCKET_* variables of the environment.

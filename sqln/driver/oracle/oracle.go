@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // Oracle driver. To enable it, blank-import this package:
 //
-//	import _ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/oracle"
+//	import _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/oracle"
 //
 // Requires godror or go-oci8 in go.mod.
 type Driver struct{}

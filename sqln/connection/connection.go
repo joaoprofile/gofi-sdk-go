@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
 const (

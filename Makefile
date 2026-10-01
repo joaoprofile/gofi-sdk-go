@@ -5,7 +5,7 @@
 #   make untag   VERSION=v0.8.1   # delete the local tags of that version (before push only)
 #   make size-check                 # stripped size of some examples; fails on forbidden deps
 
-MODULE  := github.com/gofi-labs/gofi-sdk-go
+MODULE  := github.com/joaoprofile/gofi-sdk-go
 MODULES := gofi base base/bucket/oci base/bucket/s3 base/cloud/aws base/cloud/oci \
            base/secrets/awssm base/secrets/ocivault iam msq msq/provider/kafka \
            msq/provider/nats msq/provider/oci msq/provider/rabbitmq msq/provider/redis \

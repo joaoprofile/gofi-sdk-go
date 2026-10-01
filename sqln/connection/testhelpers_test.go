@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // TestMain inicializa o logger antes de todos os testes do pacote.

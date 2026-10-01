@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 // Runtime is what Build hands to each Component.Start: the environment, the

@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const instrumentationName = "github.com/gofi-labs/gofi-sdk-go/msq"
+const instrumentationName = "github.com/joaoprofile/gofi-sdk-go/msq"
 
 // telemetry resolves the global providers lazily so obs.Init may run after
 // the service is created.

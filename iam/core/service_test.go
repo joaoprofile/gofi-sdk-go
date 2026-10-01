@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

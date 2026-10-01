@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/session"
+	"github.com/joaoprofile/gofi-sdk-go/base/session"
 )
 
 func TestRedisTokenLock_OnlyOwnerReleases(t *testing.T) {

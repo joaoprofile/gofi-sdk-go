@@ -8,8 +8,8 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 )
 
 func TestDialConfig(t *testing.T) {

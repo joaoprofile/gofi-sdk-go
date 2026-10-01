@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // Cookie helpers for the refresh token and the IDP login state, driven by

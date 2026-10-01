@@ -1,11 +1,11 @@
-module github.com/gofi-labs/gofi-sdk-go/msq/provider/oci
+module github.com/joaoprofile/gofi-sdk-go/msq/provider/oci
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/oci v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
 	github.com/google/uuid v1.6.0
 	github.com/oracle/oci-go-sdk/v65 v65.112.0
 	github.com/stretchr/testify v1.12.1
@@ -19,7 +19,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
 	github.com/gofrs/flock v0.10.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/sony/gobreaker v0.5.0 // indirect
@@ -35,8 +35,8 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../../../base
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci => ../../../base/cloud/oci
-	github.com/gofi-labs/gofi-sdk-go/msq => ../..
-	github.com/gofi-labs/gofi-sdk-go/obs => ../../../obs
+	github.com/joaoprofile/gofi-sdk-go/base => ../../../base
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/oci => ../../../base/cloud/oci
+	github.com/joaoprofile/gofi-sdk-go/msq => ../..
+	github.com/joaoprofile/gofi-sdk-go/obs => ../../../obs
 )

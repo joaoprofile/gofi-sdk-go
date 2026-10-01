@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/buckettest"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/mem"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/buckettest"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/mem"
 )
 
 func TestContract(t *testing.T) { buckettest.Run(t, mem.New("test")) }

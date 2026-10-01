@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/memory"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/memory"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

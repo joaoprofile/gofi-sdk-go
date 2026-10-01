@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // TestMain initialises the global logger singleton required by filterToPredicate error paths.

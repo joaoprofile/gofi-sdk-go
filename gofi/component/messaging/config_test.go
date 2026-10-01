@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 	"github.com/stretchr/testify/assert"
 )
 

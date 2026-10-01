@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/filter"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/filter"
 )
 
 // Dynamic filters run on PostgreSQL with base-query args and mapped names.

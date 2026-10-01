@@ -1,8 +1,8 @@
 package sqln
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/sqln/filter"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/pagination"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/filter"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/pagination"
 )
 
 type Sort = pagination.Sort

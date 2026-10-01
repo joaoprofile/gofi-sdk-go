@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // SQL Server driver. To enable it, blank-import this package:
 //
-//	import _ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/sqlserver"
+//	import _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/sqlserver"
 //
 // Requires github.com/denisenkom/go-mssqldb in go.mod:
 //

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 func TestSave_DoesNotStoreAccessToken(t *testing.T) {

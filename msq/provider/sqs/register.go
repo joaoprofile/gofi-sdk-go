@@ -3,7 +3,7 @@ package sqs
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 )
 
 // Identity, region and endpoint come from the AWS default chain: AWS_REGION,

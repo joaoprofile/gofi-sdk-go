@@ -3,7 +3,7 @@ package connection
 import (
 	"database/sql"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 type DriverName string

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
 	"github.com/stretchr/testify/assert"
 )
 

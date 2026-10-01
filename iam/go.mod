@@ -1,4 +1,4 @@
-module github.com/gofi-labs/gofi-sdk-go/iam
+module github.com/joaoprofile/gofi-sdk-go/iam
 
 go 1.26.6
 

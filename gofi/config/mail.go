@@ -3,8 +3,8 @@ package config
 import (
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/base/mail"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/mail"
 )
 
 // defaultMailMaxRetries is the convenience default applied to bulk sends when

@@ -9,10 +9,10 @@ import (
 	"os"
 	"testing"
 
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
-	"github.com/gofi-labs/gofi-sdk-go/msq/provider/oci"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/msq/provider/oci"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

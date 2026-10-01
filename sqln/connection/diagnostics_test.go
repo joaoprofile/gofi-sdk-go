@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 )
 

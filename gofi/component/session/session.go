@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	basesession "github.com/gofi-labs/gofi-sdk-go/base/session"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/cache"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	basesession "github.com/joaoprofile/gofi-sdk-go/base/session"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/cache"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
 )
 
 // Component installs session.Instance(). Distributed locking comes with the

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
 )
 
 func init() {

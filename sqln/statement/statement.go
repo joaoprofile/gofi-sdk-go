@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 )
 
 // Statement runs write statements and single-row queries on the global

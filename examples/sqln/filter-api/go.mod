@@ -1,11 +1,11 @@
-module github.com/gofi-labs/gofi-sdk-go/examples/sqln/filter-api
+module github.com/joaoprofile/gofi-sdk-go/examples/sqln/filter-api
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/gofi v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/netx v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/sqln v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/netx v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/sqln v0.2.1
 )
 
 require (
@@ -20,8 +20,8 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-redis/redis_rate/v10 v10.0.1 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
-	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1 // indirect
 	github.com/golang-migrate/migrate/v4 v4.19.1 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20220416144525-469b46aa5efa // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -45,11 +45,11 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../../../base
-	github.com/gofi-labs/gofi-sdk-go/gofi => ../../../gofi
-	github.com/gofi-labs/gofi-sdk-go/iam => ../../../iam
-	github.com/gofi-labs/gofi-sdk-go/msq => ../../../msq
-	github.com/gofi-labs/gofi-sdk-go/netx => ../../../netx
-	github.com/gofi-labs/gofi-sdk-go/obs => ../../../obs
-	github.com/gofi-labs/gofi-sdk-go/sqln => ../../../sqln
+	github.com/joaoprofile/gofi-sdk-go/base => ../../../base
+	github.com/joaoprofile/gofi-sdk-go/gofi => ../../../gofi
+	github.com/joaoprofile/gofi-sdk-go/iam => ../../../iam
+	github.com/joaoprofile/gofi-sdk-go/msq => ../../../msq
+	github.com/joaoprofile/gofi-sdk-go/netx => ../../../netx
+	github.com/joaoprofile/gofi-sdk-go/obs => ../../../obs
+	github.com/joaoprofile/gofi-sdk-go/sqln => ../../../sqln
 )

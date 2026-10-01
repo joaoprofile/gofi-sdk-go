@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // The wrappers delegate to config/core, where the behavior is tested.

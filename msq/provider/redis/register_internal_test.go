@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 	goredis "github.com/redis/go-redis/v9"
 )
 

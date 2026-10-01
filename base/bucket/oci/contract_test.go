@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/buckettest"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/buckettest"
 )
 
 // fakeOCI serves the Object Storage calls the Store makes: objects, paged

@@ -1,12 +1,12 @@
-module github.com/gofi-labs/gofi-sdk-go/examples/msq/rabbitmq/consumer
+module github.com/joaoprofile/gofi-sdk-go/examples/msq/rabbitmq/consumer
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/gofi v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/msq/provider/rabbitmq v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq/provider/rabbitmq v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
 )
 
 require (
@@ -17,7 +17,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
@@ -32,12 +32,12 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../../../../base
-	github.com/gofi-labs/gofi-sdk-go/gofi => ../../../../gofi
-	github.com/gofi-labs/gofi-sdk-go/iam => ../../../../iam
-	github.com/gofi-labs/gofi-sdk-go/msq => ../../../../msq
-	github.com/gofi-labs/gofi-sdk-go/msq/provider/rabbitmq => ../../../../msq/provider/rabbitmq
-	github.com/gofi-labs/gofi-sdk-go/netx => ../../../../netx
-	github.com/gofi-labs/gofi-sdk-go/obs => ../../../../obs
-	github.com/gofi-labs/gofi-sdk-go/sqln => ../../../../sqln
+	github.com/joaoprofile/gofi-sdk-go/base => ../../../../base
+	github.com/joaoprofile/gofi-sdk-go/gofi => ../../../../gofi
+	github.com/joaoprofile/gofi-sdk-go/iam => ../../../../iam
+	github.com/joaoprofile/gofi-sdk-go/msq => ../../../../msq
+	github.com/joaoprofile/gofi-sdk-go/msq/provider/rabbitmq => ../../../../msq/provider/rabbitmq
+	github.com/joaoprofile/gofi-sdk-go/netx => ../../../../netx
+	github.com/joaoprofile/gofi-sdk-go/obs => ../../../../obs
+	github.com/joaoprofile/gofi-sdk-go/sqln => ../../../../sqln
 )

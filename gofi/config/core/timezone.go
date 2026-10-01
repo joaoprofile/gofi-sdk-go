@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/base/timezone"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/timezone"
 )
 
 // Timezone builds a timezone.Config from the TIMEZONE variable of the given

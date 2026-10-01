@@ -1,6 +1,6 @@
 package port
 
-import "github.com/gofi-labs/gofi-sdk-go/iam/types"
+import "github.com/joaoprofile/gofi-sdk-go/iam/types"
 
 // RBACPort abstracts the role-based authorization engine.
 // May be replaced by ABAC, OPA, Cedar, or any other policy engine.

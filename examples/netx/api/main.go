@@ -6,11 +6,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/netx/api/handler"
-	"github.com/gofi-labs/gofi-sdk-go/examples/netx/api/middleware"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/httpserver"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/examples/netx/api/handler"
+	"github.com/joaoprofile/gofi-sdk-go/examples/netx/api/middleware"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 func main() {

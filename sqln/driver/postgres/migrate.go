@@ -3,9 +3,9 @@ package postgres
 import (
 	"database/sql"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
 	"github.com/golang-migrate/migrate/v4/database"
 	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
 type MigrateDriver struct{}

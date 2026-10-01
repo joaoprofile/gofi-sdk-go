@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	basesession "github.com/gofi-labs/gofi-sdk-go/base/session"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
-	sqlncache "github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	basesession "github.com/joaoprofile/gofi-sdk-go/base/session"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
+	sqlncache "github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

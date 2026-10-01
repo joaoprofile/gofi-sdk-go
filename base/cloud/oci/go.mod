@@ -1,4 +1,4 @@
-module github.com/gofi-labs/gofi-sdk-go/base/cloud/oci
+module github.com/joaoprofile/gofi-sdk-go/base/cloud/oci
 
 go 1.26.6
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // ErrInvalidFilter is wrapped by Build for every rejected filter or sort.

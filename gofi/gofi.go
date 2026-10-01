@@ -3,8 +3,8 @@ package gofi
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
 )
 
 // Builder declares the components of a GOFI service. Call Build to start them

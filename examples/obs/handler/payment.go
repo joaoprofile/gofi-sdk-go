@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/obs/telemetry"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/examples/obs/telemetry"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"

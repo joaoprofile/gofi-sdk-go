@@ -1,8 +1,8 @@
 package sqln
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/pagination"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/pagination"
 )
 
 // SortDirection re-exported from pagination for backward compatibility.

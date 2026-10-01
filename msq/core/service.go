@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 )
 
 // BrokerService is the central facade of the msq package, obtained via msq.New.

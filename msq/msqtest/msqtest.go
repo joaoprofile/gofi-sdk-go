@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 )
 
 // Capabilities describes provider semantics the contract adapts to.

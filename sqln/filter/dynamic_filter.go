@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 const timeLayout = time.RFC3339

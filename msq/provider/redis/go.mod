@@ -1,11 +1,11 @@
-module github.com/gofi-labs/gofi-sdk-go/msq/provider/redis
+module github.com/joaoprofile/gofi-sdk-go/msq/provider/redis
 
 go 1.26.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/gofi-labs/gofi-sdk-go/msq v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.12.1
@@ -20,7 +20,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -35,7 +35,7 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../../../base
-	github.com/gofi-labs/gofi-sdk-go/msq => ../..
-	github.com/gofi-labs/gofi-sdk-go/obs => ../../../obs
+	github.com/joaoprofile/gofi-sdk-go/base => ../../../base
+	github.com/joaoprofile/gofi-sdk-go/msq => ../..
+	github.com/joaoprofile/gofi-sdk-go/obs => ../../../obs
 )

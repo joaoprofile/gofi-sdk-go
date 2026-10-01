@@ -35,6 +35,6 @@ err = producer.SendMessage(ctx, msg)
 svc.Shutdown(ctx) // no HTTP server: close the broker and flush logs explicitly
 ```
 
-- `_ "github.com/gofi-labs/gofi-sdk-go/msq/provider/sqs"` links the provider and enables `MESSAGING_PROVIDER=sqs`.
+- `_ "github.com/joaoprofile/gofi-sdk-go/msq/provider/sqs"` links the provider and enables `MESSAGING_PROVIDER=sqs`.
 - Sends to the `orders` queue (resolved by name once, then cached).
 - Every 5th order has `amount: 0`, to show the consumer's retry and dead-letter path.

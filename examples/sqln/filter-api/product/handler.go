@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/gofi-labs/gofi-sdk-go/netx"
-	"github.com/gofi-labs/gofi-sdk-go/sqln"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/sqln"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 )
 
 // Handler exposes the dynamic search over HTTP.

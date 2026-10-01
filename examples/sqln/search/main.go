@@ -9,12 +9,12 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/database"
-	"github.com/gofi-labs/gofi-sdk-go/sqln"
-	_ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/database"
+	"github.com/joaoprofile/gofi-sdk-go/sqln"
+	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/sqln/search/product"
+	"github.com/joaoprofile/gofi-sdk-go/examples/sqln/search/product"
 )
 
 func main() {

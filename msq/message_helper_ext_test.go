@@ -1,7 +1,7 @@
 package msq_test
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 )
 
 // testMessage builds a message for tests; payloads here always encode.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 )
 
 func TestOrderBy_DirectionIsRestricted(t *testing.T) {

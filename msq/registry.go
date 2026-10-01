@@ -106,7 +106,7 @@ func Open(ctx context.Context, cfg ProviderConfig) (Broker, error) {
 	o, ok := openers[cfg.Type]
 	openersMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("msq: provider %q is not registered; import _ \"github.com/gofi-labs/gofi-sdk-go/msq/provider/%s\"", cfg.Type, cfg.Type)
+		return nil, fmt.Errorf("msq: provider %q is not registered; import _ \"github.com/joaoprofile/gofi-sdk-go/msq/provider/%s\"", cfg.Type, cfg.Type)
 	}
 	return o(ctx, cfg)
 }

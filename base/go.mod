@@ -1,4 +1,4 @@
-module github.com/gofi-labs/gofi-sdk-go/base
+module github.com/joaoprofile/gofi-sdk-go/base
 
 go 1.26.6
 

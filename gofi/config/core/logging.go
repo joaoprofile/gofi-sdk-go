@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Logging builds a logging.Config from the environment for the given service.

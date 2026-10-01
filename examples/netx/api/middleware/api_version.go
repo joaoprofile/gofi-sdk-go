@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 // APIVersion is a global middleware (registered with server.Use): it runs for

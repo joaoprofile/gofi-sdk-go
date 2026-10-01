@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/buckettest"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/file"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/buckettest"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/file"
 )
 
 func newStore(t *testing.T) (*file.Store, string) {

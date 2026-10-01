@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/validator"
+	"github.com/joaoprofile/gofi-sdk-go/base/validator"
 )
 
 func ParseStructName(s any) (string, error) {

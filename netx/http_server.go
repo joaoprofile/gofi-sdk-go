@@ -18,7 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Server timeouts applied when the matching WSConfig field is <= 0.

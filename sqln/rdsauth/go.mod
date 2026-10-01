@@ -1,4 +1,4 @@
-module github.com/gofi-labs/gofi-sdk-go/sqln/rdsauth
+module github.com/joaoprofile/gofi-sdk-go/sqln/rdsauth
 
 go 1.26.6
 

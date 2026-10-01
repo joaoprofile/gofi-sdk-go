@@ -5,9 +5,9 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/password"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/password"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // The single tenant and module of this example. A multi-tenant app lists

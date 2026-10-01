@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // IDPAuthPort extends the authentication flow for external providers using OAuth2 and OpenID Connect.

@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/provider/rabbitmq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/msq/provider/rabbitmq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

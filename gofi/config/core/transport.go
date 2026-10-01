@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Resource names accepted by GOFI_ALLOW_INSECURE_TRANSPORT.

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/session"
+	"github.com/joaoprofile/gofi-sdk-go/base/session"
 )
 
 // ---------------------------------------------------------------------------

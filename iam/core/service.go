@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // IAMService is the central facade of the iam package.

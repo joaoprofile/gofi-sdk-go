@@ -7,8 +7,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/obs/telemetry"
-	"github.com/gofi-labs/gofi-sdk-go/obs/metrics"
+	"github.com/joaoprofile/gofi-sdk-go/examples/obs/telemetry"
+	"github.com/joaoprofile/gofi-sdk-go/obs/metrics"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

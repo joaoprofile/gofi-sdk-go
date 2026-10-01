@@ -1,8 +1,8 @@
 package cache
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 )
 
 // Configure wires the sqln Redis cache from CACHE_* and namespaces keys

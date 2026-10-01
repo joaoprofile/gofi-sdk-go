@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/common"
+	"github.com/joaoprofile/gofi-sdk-go/base/common"
 	"go.opentelemetry.io/otel/trace"
 )
 

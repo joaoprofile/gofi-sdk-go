@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	goredis "github.com/redis/go-redis/v9"
 )
 

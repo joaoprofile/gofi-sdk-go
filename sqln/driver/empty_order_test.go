@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/mysql"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/oracle"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/sqlserver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/mysql"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/oracle"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/sqlserver"
 )
 
 func TestBuildPagination_EmptyOrderIsValidSQL(t *testing.T) {

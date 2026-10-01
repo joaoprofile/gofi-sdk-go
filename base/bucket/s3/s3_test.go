@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket/buckettest"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket/buckettest"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
 )
 
 // fakeS3 is a minimal path-style S3 endpoint backed by a map.

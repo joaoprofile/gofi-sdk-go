@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
 )
 
 // ThrottleConfig configures a LoginThrottler. Zero values use the defaults.

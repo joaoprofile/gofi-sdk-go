@@ -13,8 +13,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
-	"github.com/gofi-labs/gofi-sdk-go/base/secrets"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/base/secrets"
 )
 
 const secretID = "ocid1.vaultsecret.oc1.sa-saopaulo-1.aaaa"

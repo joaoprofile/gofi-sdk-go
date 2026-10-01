@@ -1,6 +1,6 @@
 package sqln
 
-import "github.com/gofi-labs/gofi-sdk-go/sqln/query"
+import "github.com/joaoprofile/gofi-sdk-go/sqln/query"
 
 type Query = query.Query
 

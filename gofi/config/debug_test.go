@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 func TestStartDebug_Disabled(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/observer"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/observer"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/redis/go-redis/v9"
 )
 

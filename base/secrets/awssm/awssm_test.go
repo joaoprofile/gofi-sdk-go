@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
-	"github.com/gofi-labs/gofi-sdk-go/base/secrets"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/base/secrets"
 )
 
 // fakeSM answers GetSecretValue like the Secrets Manager JSON API.

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 	"github.com/jackc/pgx/v5"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

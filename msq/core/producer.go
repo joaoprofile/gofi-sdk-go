@@ -5,8 +5,8 @@ import (
 	"maps"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"

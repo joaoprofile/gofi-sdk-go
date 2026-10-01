@@ -7,11 +7,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/obs"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/obs"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Component starts OpenTelemetry for the service.

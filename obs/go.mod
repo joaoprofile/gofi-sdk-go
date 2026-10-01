@@ -1,9 +1,9 @@
-module github.com/gofi-labs/gofi-sdk-go/obs
+module github.com/joaoprofile/gofi-sdk-go/obs
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.71.0
@@ -45,4 +45,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/gofi-labs/gofi-sdk-go/base => ../base
+replace github.com/joaoprofile/gofi-sdk-go/base => ../base

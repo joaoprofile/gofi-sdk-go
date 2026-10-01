@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // DefaultHealthGrace is how long a consumer may be down (restarting) before

@@ -22,10 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	gojwt "github.com/golang-jwt/jwt/v5"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // Config configures the generic OIDC provider.

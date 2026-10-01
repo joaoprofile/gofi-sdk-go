@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
 )
 
 // testMessage builds a message for tests; payloads here always encode.

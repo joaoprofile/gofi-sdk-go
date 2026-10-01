@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/msqtest"
-	"github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/msqtest"
+	"github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka"
 )
 
 // Set GOFI_IT_KAFKA_BROKERS (comma separated) to run it.

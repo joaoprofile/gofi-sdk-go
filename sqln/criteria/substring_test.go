@@ -3,8 +3,8 @@ package criteria_test
 import (
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/sqlserver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/sqlserver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

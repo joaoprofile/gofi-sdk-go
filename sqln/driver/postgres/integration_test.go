@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	_ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/mapping"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/transaction"
 	"github.com/jackc/pgx/v5"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/mapping"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/transaction"
 )
 
 // Set GOFI_IT_POSTGRES_DSN (e.g. host=localhost port=5432 user=postgres

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
 )
 
 type status string

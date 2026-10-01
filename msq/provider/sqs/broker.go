@@ -16,12 +16,12 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/google/uuid"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 const (

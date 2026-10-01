@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/core"
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/core"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

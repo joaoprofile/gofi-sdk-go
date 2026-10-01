@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
 )
 
 // Config configures the store. With an empty AWS config the default

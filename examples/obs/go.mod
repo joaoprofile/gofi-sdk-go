@@ -1,11 +1,11 @@
-module github.com/gofi-labs/gofi-sdk-go/examples/obs
+module github.com/joaoprofile/gofi-sdk-go/examples/obs
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/gofi v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/netx v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/netx v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
@@ -24,7 +24,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-redis/redis_rate/v10 v10.0.1 // indirect
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
@@ -56,11 +56,11 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../../base
-	github.com/gofi-labs/gofi-sdk-go/gofi => ../../gofi
-	github.com/gofi-labs/gofi-sdk-go/iam => ../../iam
-	github.com/gofi-labs/gofi-sdk-go/msq => ../../msq
-	github.com/gofi-labs/gofi-sdk-go/netx => ../../netx
-	github.com/gofi-labs/gofi-sdk-go/obs => ../../obs
-	github.com/gofi-labs/gofi-sdk-go/sqln => ../../sqln
+	github.com/joaoprofile/gofi-sdk-go/base => ../../base
+	github.com/joaoprofile/gofi-sdk-go/gofi => ../../gofi
+	github.com/joaoprofile/gofi-sdk-go/iam => ../../iam
+	github.com/joaoprofile/gofi-sdk-go/msq => ../../msq
+	github.com/joaoprofile/gofi-sdk-go/netx => ../../netx
+	github.com/joaoprofile/gofi-sdk-go/obs => ../../obs
+	github.com/joaoprofile/gofi-sdk-go/sqln => ../../sqln
 )

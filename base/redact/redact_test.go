@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/redact"
+	"github.com/joaoprofile/gofi-sdk-go/base/redact"
 )
 
 type inner struct {

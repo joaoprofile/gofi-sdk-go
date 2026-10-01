@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/metrics"
+	"github.com/joaoprofile/gofi-sdk-go/obs/metrics"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -17,7 +17,7 @@ import (
 )
 
 // scope identifies this code as the instrumentation source of its spans.
-const scope = "github.com/gofi-labs/gofi-sdk-go/examples/obs"
+const scope = "github.com/joaoprofile/gofi-sdk-go/examples/obs"
 
 // Tracer returns the service tracer from the global provider set by obs.Init.
 func Tracer() trace.Tracer { return otel.Tracer(scope) }

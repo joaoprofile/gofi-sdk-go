@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
 )
 
 // minRSABits is the NIST minimum modulus for RSA signatures.

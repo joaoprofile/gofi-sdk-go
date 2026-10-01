@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/errs"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/base/errs"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 var (

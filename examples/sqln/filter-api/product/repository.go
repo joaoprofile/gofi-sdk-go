@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln"
+	"github.com/joaoprofile/gofi-sdk-go/sqln"
 )
 
 type Product struct {

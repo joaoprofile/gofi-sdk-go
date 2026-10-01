@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/rabbitmq/amqp091-go"
 )
 

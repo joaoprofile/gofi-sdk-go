@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/gofi-labs/gofi-sdk-go/msq/msqtest"
-	redisprovider "github.com/gofi-labs/gofi-sdk-go/msq/provider/redis"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/msq/msqtest"
+	redisprovider "github.com/joaoprofile/gofi-sdk-go/msq/provider/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
 

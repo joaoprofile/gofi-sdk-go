@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 )
 
 func init() {

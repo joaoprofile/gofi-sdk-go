@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"time"
 
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/google/uuid"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/msq/worker"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/oracle/oci-go-sdk/v65/queue"
 )
 

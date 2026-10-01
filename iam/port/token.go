@@ -1,6 +1,6 @@
 package port
 
-import "github.com/gofi-labs/gofi-sdk-go/iam/types"
+import "github.com/joaoprofile/gofi-sdk-go/iam/types"
 
 // TokenPort abstracts token generation and parsing.
 // JWT is only one implementation of this interface and may be replaced

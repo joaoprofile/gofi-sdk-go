@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/base/debug"
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/debug"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 // Debug builds a debug.Config from the SERVICE_DEBUG_* variables.

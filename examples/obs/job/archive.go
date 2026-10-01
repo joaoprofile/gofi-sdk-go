@@ -8,9 +8,9 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/obs/store"
-	"github.com/gofi-labs/gofi-sdk-go/examples/obs/telemetry"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/examples/obs/store"
+	"github.com/joaoprofile/gofi-sdk-go/examples/obs/telemetry"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"

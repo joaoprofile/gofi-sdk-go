@@ -12,7 +12,7 @@ import (
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // RateLimiterBackend abstracts the rate-limiting backend, decoupling the

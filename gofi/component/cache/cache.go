@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	sqlncache "github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	sqlncache "github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 	"github.com/redis/go-redis/v9"
 )
 

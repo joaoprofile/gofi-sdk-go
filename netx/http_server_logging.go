@@ -10,7 +10,7 @@ import (
 
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 type contextKey string

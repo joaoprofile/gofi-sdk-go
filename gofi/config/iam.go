@@ -3,8 +3,8 @@ package config
 import (
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
 )
 
 // IAM builds iam's DefaultConfig from the environment, bridging gofi's env

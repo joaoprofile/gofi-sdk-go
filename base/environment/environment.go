@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/common"
-	"github.com/gofi-labs/gofi-sdk-go/base/redact"
-	"github.com/gofi-labs/gofi-sdk-go/base/secrets"
+	"github.com/joaoprofile/gofi-sdk-go/base/common"
+	"github.com/joaoprofile/gofi-sdk-go/base/redact"
+	"github.com/joaoprofile/gofi-sdk-go/base/secrets"
 	"github.com/joho/godotenv"
 )
 

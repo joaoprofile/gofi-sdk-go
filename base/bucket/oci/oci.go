@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage/transfer"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // sessionIssuer opens sessions; shared by the local and IDP logins and by refresh.

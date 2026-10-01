@@ -15,7 +15,7 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
 )
 
 // ServiceExecuteAPI is the signing name of API Gateway.

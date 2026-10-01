@@ -147,7 +147,7 @@ func (r *Resolver) fetch(ctx context.Context, ref Ref) (string, error) {
 		open, found := openers[ref.Provider]
 		mu.RUnlock()
 		if !found {
-			return "", fmt.Errorf("%w: provider %q is not registered; import _ \"github.com/gofi-labs/gofi-sdk-go/base/secrets/%s\"",
+			return "", fmt.Errorf("%w: provider %q is not registered; import _ \"github.com/joaoprofile/gofi-sdk-go/base/secrets/%s\"",
 				ErrInvalidRef, ref.Provider, ref.Provider)
 		}
 		var err error

@@ -3,7 +3,7 @@ package obs
 import (
 	"database/sql"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/metrics"
+	"github.com/joaoprofile/gofi-sdk-go/obs/metrics"
 	"go.opentelemetry.io/otel/metric"
 )
 

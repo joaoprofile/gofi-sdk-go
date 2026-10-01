@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/base/bucket"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

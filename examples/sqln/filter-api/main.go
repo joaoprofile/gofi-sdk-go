@@ -5,13 +5,13 @@ package main
 import (
 	"log"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/database"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/httpserver"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
-	_ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/database"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
+	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
 
-	"github.com/gofi-labs/gofi-sdk-go/examples/sqln/filter-api/product"
+	"github.com/joaoprofile/gofi-sdk-go/examples/sqln/filter-api/product"
 )
 
 func main() {

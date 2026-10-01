@@ -16,8 +16,8 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
-	"github.com/gofi-labs/gofi-sdk-go/netx"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
 var _ netx.Signature = (*Signer)(nil)

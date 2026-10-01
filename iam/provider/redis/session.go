@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 	goredis "github.com/redis/go-redis/v9"
 )
 

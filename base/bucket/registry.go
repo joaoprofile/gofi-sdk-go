@@ -32,7 +32,7 @@ func Open(ctx context.Context, cfg Config) (Store, error) {
 	o, ok := openers[cfg.Provider]
 	openersMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("%w: provider %q is not registered; import _ \"github.com/gofi-labs/gofi-sdk-go/base/bucket/%s\"",
+		return nil, fmt.Errorf("%w: provider %q is not registered; import _ \"github.com/joaoprofile/gofi-sdk-go/base/bucket/%s\"",
 			ErrInvalidConfig, cfg.Provider, packageFor(cfg.Provider))
 	}
 	return o(ctx, cfg)

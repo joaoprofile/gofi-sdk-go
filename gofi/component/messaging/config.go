@@ -5,8 +5,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 )
 
 // ServiceDefaultsFromEnv fills the msq.Config consumer defaults left at zero

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/oidc"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/oidc"
 )
 
 const (

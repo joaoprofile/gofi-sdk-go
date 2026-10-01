@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/messaging"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	_ "github.com/gofi-labs/gofi-sdk-go/msq/provider/sqs" // enables MESSAGING_PROVIDER=sqs
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/messaging"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	_ "github.com/joaoprofile/gofi-sdk-go/msq/provider/sqs" // enables MESSAGING_PROVIDER=sqs
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 const topic = "orders"

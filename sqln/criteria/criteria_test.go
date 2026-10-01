@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

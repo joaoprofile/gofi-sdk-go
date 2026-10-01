@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
-	"github.com/gofi-labs/gofi-sdk-go/base/secrets"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/base/secrets"
 	"github.com/oracle/oci-go-sdk/v65/common"
 	ocisecrets "github.com/oracle/oci-go-sdk/v65/secrets"
 )

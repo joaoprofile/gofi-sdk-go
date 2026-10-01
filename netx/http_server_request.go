@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/validator"
+	"github.com/joaoprofile/gofi-sdk-go/base/validator"
 )
 
 const ErrMsgOnQueryParameter = "error on parsing query parameters %w"

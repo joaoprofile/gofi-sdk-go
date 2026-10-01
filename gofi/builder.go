@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // gofiInstance is the private struct that implements both Builder and Service.

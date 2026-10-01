@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // IDPServiceConfig holds the parameters for building an IDPService.

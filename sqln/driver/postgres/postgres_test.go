@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

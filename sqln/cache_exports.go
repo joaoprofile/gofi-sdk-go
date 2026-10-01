@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 	"github.com/redis/go-redis/v9"
 )
 

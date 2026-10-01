@@ -1,12 +1,12 @@
-module github.com/gofi-labs/gofi-sdk-go/base/secrets/awssm
+module github.com/joaoprofile/gofi-sdk-go/base/secrets/awssm
 
 go 1.26.6
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.1
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/aws v0.2.1
 )
 
 require (
@@ -26,6 +26,6 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../..
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/aws => ../../cloud/aws
+	github.com/joaoprofile/gofi-sdk-go/base => ../..
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/aws => ../../cloud/aws
 )

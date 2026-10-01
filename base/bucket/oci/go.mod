@@ -1,10 +1,10 @@
-module github.com/gofi-labs/gofi-sdk-go/base/bucket/oci
+module github.com/joaoprofile/gofi-sdk-go/base/bucket/oci
 
 go 1.26.6
 
 require (
-	github.com/gofi-labs/gofi-sdk-go/base v0.2.1
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/oci v0.2.1
 	github.com/oracle/oci-go-sdk/v65 v65.112.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -21,6 +21,6 @@ require (
 )
 
 replace (
-	github.com/gofi-labs/gofi-sdk-go/base => ../..
-	github.com/gofi-labs/gofi-sdk-go/base/cloud/oci => ../../cloud/oci
+	github.com/joaoprofile/gofi-sdk-go/base => ../..
+	github.com/joaoprofile/gofi-sdk-go/base/cloud/oci => ../../cloud/oci
 )

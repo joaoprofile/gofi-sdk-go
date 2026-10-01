@@ -1,8 +1,8 @@
 package sqln
 
 import (
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // BuildClause compiles a predicate slice into a SQL WHERE fragment and its bound parameters.

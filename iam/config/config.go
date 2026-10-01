@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // Config is the full IAMService configuration with complete control over providers.

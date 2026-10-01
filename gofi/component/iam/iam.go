@@ -6,16 +6,16 @@ package iam
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config"
-	configcore "github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	iamsdk "github.com/gofi-labs/gofi-sdk-go/iam"
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config"
+	configcore "github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	iamsdk "github.com/joaoprofile/gofi-sdk-go/iam"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Config holds what the environment cannot provide. Every field is optional:

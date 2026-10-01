@@ -11,13 +11,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/httpserver"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/iam"
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/rbac/roles"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/iam"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/rbac/roles"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 func main() {

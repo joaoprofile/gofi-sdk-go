@@ -11,17 +11,17 @@ import (
 	"fmt"
 	"time"
 
-	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/google"
-	jwtprovider "github.com/gofi-labs/gofi-sdk-go/iam/provider/jwt"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/memory"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/microsoft"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/oidc"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/password"
-	redisprovider "github.com/gofi-labs/gofi-sdk-go/iam/provider/redis"
-	"github.com/gofi-labs/gofi-sdk-go/iam/types"
+	iamconfig "github.com/joaoprofile/gofi-sdk-go/iam/config"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/google"
+	jwtprovider "github.com/joaoprofile/gofi-sdk-go/iam/provider/jwt"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/memory"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/microsoft"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/oidc"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/password"
+	redisprovider "github.com/joaoprofile/gofi-sdk-go/iam/provider/redis"
+	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
 // Re-exports so callers do not need to import sub-packages in simple use cases.

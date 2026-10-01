@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/obs"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/obs"
 )
 
 // ConfigFromEnv builds obs.TeleConfig from the environment: the service

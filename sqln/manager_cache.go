@@ -20,7 +20,7 @@ import (
 	"time"
 	"weak"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 	"golang.org/x/sync/singleflight"
 )
 

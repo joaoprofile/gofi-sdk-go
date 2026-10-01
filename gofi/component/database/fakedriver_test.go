@@ -6,8 +6,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqlndriver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqlndriver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // fakeDriverName is a sqln driver backed by a database/sql driver whose

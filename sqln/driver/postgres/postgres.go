@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // ErrPasswordFuncNeedsVerifiedTLS is returned by Open when Config.Password

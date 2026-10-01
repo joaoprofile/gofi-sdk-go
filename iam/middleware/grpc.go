@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/core"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"

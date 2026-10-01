@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // Predicate represents a single WHERE/HAVING condition or a logical connector (AND/OR).

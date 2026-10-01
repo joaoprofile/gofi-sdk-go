@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/messaging"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	_ "github.com/gofi-labs/gofi-sdk-go/msq/provider/rabbitmq" // enables MESSAGING_PROVIDER=rabbitmq
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/messaging"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	_ "github.com/joaoprofile/gofi-sdk-go/msq/provider/rabbitmq" // enables MESSAGING_PROVIDER=rabbitmq
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 const (

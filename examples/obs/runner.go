@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
 )
 
 // runner adapts a background loop (queue consumer, scheduled job) to

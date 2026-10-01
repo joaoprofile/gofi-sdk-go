@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 func TestApplyTLS(t *testing.T) {

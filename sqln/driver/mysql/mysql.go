@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 // MySQL driver. To enable it, blank-import this package:
 //
-//	import _ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/mysql"
+//	import _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/mysql"
 //
 // Requires the go-sql-driver/mysql driver in go.mod:
 //

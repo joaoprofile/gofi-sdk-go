@@ -8,7 +8,7 @@ versioned together (`<module>/vX.Y.Z` tags), so upgrade every gofi module to the
 ## Reporting a vulnerability
 
 Do **not** open a public issue. Report privately through
-[GitHub private vulnerability reporting](https://github.com/gofi-labs/gofi-sdk-go/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/joaoprofile/gofi-sdk-go/security/advisories/new).
 
 Include the affected module and version, a description of the impact and, when possible,
 a minimal reproduction. We acknowledge reports within 3 business days and aim to ship a fix

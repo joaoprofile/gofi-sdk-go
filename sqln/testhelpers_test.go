@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
 const testDriverName = "sqln-manager-testdriver"

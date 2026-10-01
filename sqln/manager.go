@@ -7,11 +7,11 @@ import (
 	"iter"
 	"slices"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/mapping"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/pagination"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/cache"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/mapping"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/pagination"
 )
 
 // Manager defines a read-only query interface that can be mocked in tests.

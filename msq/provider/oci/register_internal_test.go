@@ -3,8 +3,8 @@ package oci
 import (
 	"testing"
 
-	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	cloudoci "github.com/joaoprofile/gofi-sdk-go/base/cloud/oci"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 )
 
 func TestConfigFrom(t *testing.T) {

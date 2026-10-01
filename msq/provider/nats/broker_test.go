@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/msqtest"
-	natsprovider "github.com/gofi-labs/gofi-sdk-go/msq/provider/nats"
-	"github.com/gofi-labs/gofi-sdk-go/msq/types"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/google/uuid"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/msqtest"
+	natsprovider "github.com/joaoprofile/gofi-sdk-go/msq/provider/nats"
+	"github.com/joaoprofile/gofi-sdk-go/msq/types"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"github.com/nats-io/nats-server/v2/server"
 )
 

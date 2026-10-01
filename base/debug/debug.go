@@ -10,7 +10,7 @@ import (
 	"net/http/pprof"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/redact"
+	"github.com/joaoprofile/gofi-sdk-go/base/redact"
 )
 
 // DefaultAddr is used when Config.Addr is empty; loopback only.

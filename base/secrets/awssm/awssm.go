@@ -11,8 +11,8 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
-	cloudaws "github.com/gofi-labs/gofi-sdk-go/base/cloud/aws"
-	"github.com/gofi-labs/gofi-sdk-go/base/secrets"
+	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
+	"github.com/joaoprofile/gofi-sdk-go/base/secrets"
 )
 
 // Provider is the reference provider name.

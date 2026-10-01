@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/gofi-labs/gofi-sdk-go/iam/port"
-	"github.com/gofi-labs/gofi-sdk-go/iam/provider/password"
+	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/password"
 )
 
 // defaultDummyHash is an Argon2id hash with password.DefaultParams, the

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // ── Security headers ─────────────────────────────────────────────────────────

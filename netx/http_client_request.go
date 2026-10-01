@@ -18,7 +18,7 @@ import (
 
 	"errors"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/common"
+	"github.com/joaoprofile/gofi-sdk-go/base/common"
 )
 
 type RequestBodyResult struct {

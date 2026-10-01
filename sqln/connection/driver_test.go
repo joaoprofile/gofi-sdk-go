@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	sqln_driver "github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 	"github.com/stretchr/testify/assert"
 )
 

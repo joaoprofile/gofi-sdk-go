@@ -3,7 +3,7 @@
 // It links no SQL driver: blank-import the driver package for DATABASE_DRIVER
 // (postgres by default) in main, or Build fails naming the missing import:
 //
-//	import _ "github.com/gofi-labs/gofi-sdk-go/sqln/driver/postgres"
+//	import _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
 package database
 
 import (
@@ -11,13 +11,13 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/component/cache"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/obs/metrics"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/component/cache"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/obs/metrics"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
 // migrationsPath is where DATABASE_MIGRATION=true reads the migrations from.

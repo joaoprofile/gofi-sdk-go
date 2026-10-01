@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +12,7 @@ import (
 func TestOpen_UnregisteredTypeNamesImport(t *testing.T) {
 	_, err := msq.Open(context.Background(), msq.ProviderConfig{Type: "not_a_real_broker"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `import _ "github.com/gofi-labs/gofi-sdk-go/msq/provider/not_a_real_broker"`)
+	assert.Contains(t, err.Error(), `import _ "github.com/joaoprofile/gofi-sdk-go/msq/provider/not_a_real_broker"`)
 }
 
 func TestOpen_RequiresType(t *testing.T) {

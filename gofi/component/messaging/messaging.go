@@ -9,12 +9,12 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
-	"github.com/gofi-labs/gofi-sdk-go/gofi"
-	"github.com/gofi-labs/gofi-sdk-go/gofi/config/core"
-	"github.com/gofi-labs/gofi-sdk-go/msq"
-	"github.com/gofi-labs/gofi-sdk-go/msq/port"
-	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/gofi"
+	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
+	"github.com/joaoprofile/gofi-sdk-go/msq"
+	"github.com/joaoprofile/gofi-sdk-go/msq/port"
+	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 )
 
 // Component opens the broker and wraps it in the msq pipeline.
@@ -40,7 +40,7 @@ type Component struct {
 // Patterns 1 and 2 need the provider package imported, which keeps unused
 // broker SDKs out of the binary:
 //
-//	import _ "github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka"
+//	import _ "github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka"
 //
 // If the broker implements port.BrokerSetup, Setup is called during Build so
 // that exchanges, topics or queues are declared before the first producer or

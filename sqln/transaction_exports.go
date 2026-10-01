@@ -3,7 +3,7 @@ package sqln
 import (
 	"database/sql"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln/transaction"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/transaction"
 )
 
 type Transaction = transaction.Transaction

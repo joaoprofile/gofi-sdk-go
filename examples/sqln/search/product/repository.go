@@ -5,8 +5,8 @@ import (
 	"context"
 	"iter"
 
-	"github.com/gofi-labs/gofi-sdk-go/sqln"
-	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 )
 
 // Product is filled by the db tags; the column order in Select does not matter.

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gofi-labs/gofi-sdk-go/base/environment"
+	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 )
 
 // ApplyTLS applies TLS_INSECURE_SKIP_VERIFY to http.DefaultTransport; it is a no-op by default.
