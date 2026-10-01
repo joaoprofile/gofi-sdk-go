@@ -1,0 +1,3 @@
+# Throwaway fixtures used by tests; they grant access to nothing.
+cc7c5a91292905d1c3586cdcf72ba6f6a1b1b454:base/bucket/oci/oci_test.go:private-key:15
+cc7c5a91292905d1c3586cdcf72ba6f6a1b1b454:base/secrets/ocivault/ocivault_test.go:generic-api-key:20

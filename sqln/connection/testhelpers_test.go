@@ -8,10 +8,11 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 // TestMain inicializa o logger antes de todos os testes do pacote.
@@ -47,11 +48,14 @@ func (d *fakeSQLDriver) Open(name string) (driver.Conn, error) {
 	}
 }
 
+// connCloses counts closed driver connections, to detect leaked pools.
+var connCloses atomic.Int32
+
 // fakeConn — a connection that always succeeds
 type fakeConn struct{}
 
 func (c *fakeConn) Prepare(query string) (driver.Stmt, error) { return &fakeStmt{}, nil }
-func (c *fakeConn) Close() error                              { return nil }
+func (c *fakeConn) Close() error                              { connCloses.Add(1); return nil }
 func (c *fakeConn) Begin() (driver.Tx, error)                 { return &fakeTx{}, nil }
 
 // failPingConn — a connection that implements Pinger and returns an error

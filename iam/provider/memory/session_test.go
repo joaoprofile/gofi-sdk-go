@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -230,13 +230,13 @@ func TestTestProvider_ConcurrentSaveAndGet(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_ = p.Save(context.Background(), newSession("concurrent-s", "u1", time.Hour))
 		}
 		close(done)
 	}()
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, _ = p.Get(context.Background(), "concurrent-s")
 	}
 	<-done

@@ -9,9 +9,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/joaoprofile/gofi/msq/provider/oci"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
+	"github.com/gofi-labs/gofi-sdk-go/msq/provider/oci"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,12 +40,13 @@ func generatePrivateKey(t *testing.T) string {
 func validConfig(t *testing.T) oci.Config {
 	t.Helper()
 	return oci.Config{
-		TenancyID:   "ocid1.tenancy.oc1..aaaaaaaatest",
-		UserID:      "ocid1.user.oc1..aaaaaaaatest",
-		Region:      "sa-saopaulo-1",
-		FingerPrint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
-		PrivateKey:  generatePrivateKey(t),
-		QueueURL:    "https://cell-1.queue.messaging.sa-saopaulo-1.oci.oraclecloud.com",
+		Credentials: cloudoci.Config{
+			TenancyID:   "ocid1.tenancy.oc1..aaaaaaaatest",
+			UserID:      "ocid1.user.oc1..aaaaaaaatest",
+			Region:      "sa-saopaulo-1",
+			Fingerprint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+			PrivateKey:  generatePrivateKey(t),
+		},
 	}
 }
 
@@ -52,29 +54,28 @@ func validConfig(t *testing.T) oci.Config {
 
 func TestNewMissingTenancyID(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.TenancyID = ""
+	cfg.Credentials.TenancyID = ""
 	_, err := oci.New(cfg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required credentials")
+	assert.ErrorIs(t, err, cloudoci.ErrInvalidConfig)
 }
 
 func TestNewMissingUserID(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.UserID = ""
+	cfg.Credentials.UserID = ""
 	_, err := oci.New(cfg)
 	assert.Error(t, err)
 }
 
 func TestNewMissingRegion(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Region = ""
+	cfg.Credentials.Region = ""
 	_, err := oci.New(cfg)
 	assert.Error(t, err)
 }
 
 func TestNewMissingFingerPrint(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.FingerPrint = ""
+	cfg.Credentials.Fingerprint = ""
 	_, err := oci.New(cfg)
 	assert.Error(t, err)
 }
@@ -115,7 +116,7 @@ func TestNewConsumer(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
 
-	c := broker.NewConsumer(types.ConsumeConfig{QueueID: "ocid1.queue.oc1..test", Concurrency: 2})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{QueueID: "ocid1.queue.oc1..test", Concurrency: 2})
 	assert.NotNil(t, c)
 }
 
@@ -123,7 +124,7 @@ func TestNewConsumerDefaultsConcurrency(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
 
-	c := broker.NewConsumer(types.ConsumeConfig{QueueID: "q", Concurrency: 0})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{QueueID: "q", Concurrency: 0})
 	assert.NotNil(t, c)
 }
 
@@ -153,19 +154,25 @@ func TestProducerClose(t *testing.T) {
 func TestConsumerClose(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	assert.NoError(t, broker.NewConsumer(types.ConsumeConfig{QueueID: "q"}).Close())
+	c, err := broker.NewConsumer(types.ConsumeConfig{QueueID: "q"})
+	require.NoError(t, err)
+	assert.NoError(t, c.Close())
 }
 
 func TestConsumerPause(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	assert.NoError(t, broker.NewConsumer(types.ConsumeConfig{QueueID: "q"}).Pause())
+	c, err := broker.NewConsumer(types.ConsumeConfig{QueueID: "q"})
+	require.NoError(t, err)
+	assert.NoError(t, c.Pause())
 }
 
 func TestConsumerResume(t *testing.T) {
 	broker, err := oci.New(validConfig(t))
 	require.NoError(t, err)
-	assert.NoError(t, broker.NewConsumer(types.ConsumeConfig{QueueID: "q"}).Resume())
+	c, err := broker.NewConsumer(types.ConsumeConfig{QueueID: "q"})
+	require.NoError(t, err)
+	assert.NoError(t, c.Resume())
 }
 
 // Producer batch: topic validation
@@ -179,7 +186,7 @@ func TestProducerSendMessagesBatchPartialEmptyTopic(t *testing.T) {
 	// batch where second message has a real OCID (the network will fail but
 	// first msg triggers json.Marshal path in the loop)
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("ocid1.queue.oc1..validqueue", "data"),
+		testMessageWithTopic("ocid1.queue.oc1..validqueue", "data"),
 	}
 	// The call will fail at PutMessages (network), but must not panic.
 	_ = p.SendMessagesBatch(context.Background(), msgs)

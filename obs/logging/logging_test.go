@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -35,12 +33,8 @@ func (m *mockHandler) WithGroup(_ string) slog.Handler      { return m }
 // resetSingleton isolates each test from the package-level singleton.
 func resetSingleton(t *testing.T) {
 	t.Helper()
-	instance = nil
-	once = sync.Once{}
-	t.Cleanup(func() {
-		instance = nil
-		once = sync.Once{}
-	})
+	ResetForTesting()
+	t.Cleanup(ResetForTesting)
 }
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -61,9 +55,14 @@ func devCfg(name string) Config {
 	return Config{ServiceName: name, Environment: EnvDevelopment}
 }
 
-func TestInstance_PanicsWhenNotInitialized(t *testing.T) {
+func TestInstance_FallsBackWhenNotInitialized(t *testing.T) {
 	resetSingleton(t)
-	assert.PanicsWithValue(t, LOG_START_ERROR, func() { Instance() })
+	assert.NotPanics(t, func() {
+		Instance().Info("before init")
+		Error("shortcut before init")
+		FromContext(context.Background()).Warn("ctx before init")
+	})
+	assert.NoError(t, Shutdown(context.Background()))
 }
 
 func TestInitGlobal_Idempotent(t *testing.T) {
@@ -72,11 +71,11 @@ func TestInitGlobal_Idempotent(t *testing.T) {
 
 	err := InitGlobal(ctx, devCfg("first"))
 	require.NoError(t, err)
-	assert.NotNil(t, instance)
+	assert.NotNil(t, instance.Load())
 
-	first := instance
+	first := instance.Load()
 	_ = InitGlobal(ctx, devCfg("second"))
-	assert.Same(t, first, instance, "InitGlobal must not replace an existing instance")
+	assert.Same(t, first, instance.Load(), "InitGlobal must not replace an existing instance")
 }
 
 func TestShutdown_WhenInstanceIsNil(t *testing.T) {
@@ -250,89 +249,73 @@ func TestTeeHandler_WithGroup_PreservesAllHandlers(t *testing.T) {
 	assert.Len(t, newTee.handlers, 2)
 }
 
-func TestPrintStruct(t *testing.T) {
-	type sample struct{ Name string }
-	out := captureStdout(t, func() {
-		PrintStruct(sample{Name: "world"})
-	})
-	assert.Contains(t, out, "world")
+// --- Attach ---
+
+func TestAttach_BeforeInitGlobal(t *testing.T) {
+	resetSingleton(t)
+	err := Attach(&mockHandler{enabled: true}, nil)
+	assert.ErrorIs(t, err, ErrNotInitialized)
 }
 
-func TestPrintStructToJson(t *testing.T) {
-	out := captureStdout(t, func() {
-		PrintStructToJson(map[string]string{"hello": "world"})
-	})
-	assert.Contains(t, out, `"hello"`)
-	assert.Contains(t, out, `"world"`)
-	assert.True(t, strings.Contains(out, "\n"), "output must be pretty-printed")
+func TestAttach_TeesRecordsAndKeepsService(t *testing.T) {
+	resetSingleton(t)
+	require.NoError(t, InitGlobal(context.Background(), devCfg("svc")))
+
+	h := &mockHandler{enabled: true}
+	require.NoError(t, Attach(h, nil))
+
+	captureStdout(t, func() { Info("hello") })
+	require.Len(t, h.records, 1)
+	assert.Equal(t, "hello", h.records[0].Message)
+	assert.Same(t, Instance().Logger, slog.Default(), "Attach must update slog's default")
 }
 
-// --- OTLP path in New ---
+func TestAttach_HonorsConfiguredLevel(t *testing.T) {
+	resetSingleton(t)
+	require.NoError(t, InitGlobal(context.Background(), devCfg("svc"))) // Info
 
-func TestNew_WithOTLPCollectorAddr_Dev(t *testing.T) {
-	// Covers the CollectorAddr != "" branch: resource, exporter, LoggerProvider, TeeHandler
-	l, err := New(context.Background(), Config{
-		ServiceName:   "svc-otlp",
-		Environment:   EnvDevelopment,
-		CollectorAddr: "localhost:4317",
+	h := &mockHandler{enabled: true}
+	require.NoError(t, Attach(h, nil))
+
+	captureStdout(t, func() {
+		Debug("dropped")
+		Instance().With("k", "v").Debug("dropped too") // derived loggers keep the level
+		Info("kept")
 	})
-	require.NoError(t, err)
-	require.NotNil(t, l)
-
-	// Exercise all log levels so the OTLP handler is exercised
-	l.Info("info", "k", "v")
-	l.Debug("debug")
-	l.Warn("warn")
-	l.Error("error")
-
-	// Covers the `if l.lp != nil { return l.lp.Shutdown(ctx) }` branch
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	_ = l.Shutdown(shutdownCtx)
+	require.Len(t, h.records, 1, "an attached handler must not receive records the console drops")
+	assert.Equal(t, "kept", h.records[0].Message)
 }
 
-func TestNew_WithOTLPCollectorAddr_Prod(t *testing.T) {
-	// JSON handler (non-dev) + OTLP branch
-	l, err := New(context.Background(), Config{
-		ServiceName:   "svc-otlp",
-		Environment:   EnvProduction,
-		CollectorAddr: "localhost:4317",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, l)
+func TestAttach_DebugLevelReachesHandler(t *testing.T) {
+	resetSingleton(t)
+	cfg := devCfg("svc")
+	cfg.Level = slog.LevelDebug
+	require.NoError(t, InitGlobal(context.Background(), cfg))
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	_ = l.Shutdown(shutdownCtx)
+	h := &mockHandler{enabled: true}
+	require.NoError(t, Attach(h, nil))
+
+	captureStdout(t, func() { Debug("debug") })
+	require.Len(t, h.records, 1)
 }
 
-func TestNew_WithOTLPCollectorAddr_EmptyServiceName(t *testing.T) {
-	// Covers the `if cfg.ServiceName != ""` false branch in the OTLP path
-	l, err := New(context.Background(), Config{
-		Environment:   EnvDevelopment,
-		CollectorAddr: "localhost:4317",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, l)
+func TestAttach_ShutdownRunsClosersInReverse(t *testing.T) {
+	resetSingleton(t)
+	require.NoError(t, InitGlobal(context.Background(), devCfg("svc")))
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	_ = l.Shutdown(shutdownCtx)
-}
+	var order []string
+	require.NoError(t, Attach(&mockHandler{}, func(context.Context) error {
+		order = append(order, "first")
+		return nil
+	}))
+	require.NoError(t, Attach(&mockHandler{}, nil)) // no closer
+	require.NoError(t, Attach(&mockHandler{}, func(context.Context) error {
+		order = append(order, "second")
+		return errors.New("flush failed")
+	}))
 
-func TestNew_WithOTLPCollectorAddr_EnableDebug(t *testing.T) {
-	l, err := New(context.Background(), Config{
-		ServiceName:   "svc-debug",
-		Environment:   EnvDevelopment,
-		EnableDebug:   true,
-		CollectorAddr: "localhost:4317",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, l)
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	_ = l.Shutdown(shutdownCtx)
+	assert.ErrorContains(t, Shutdown(context.Background()), "flush failed")
+	assert.Equal(t, []string{"second", "first"}, order)
 }
 
 // --- ResetForTesting exported function ---
@@ -340,11 +323,11 @@ func TestNew_WithOTLPCollectorAddr_EnableDebug(t *testing.T) {
 func TestResetForTesting_ResetsState(t *testing.T) {
 	resetSingleton(t)
 	require.NoError(t, InitGlobal(context.Background(), devCfg("svc")))
-	require.NotNil(t, instance)
+	require.NotNil(t, instance.Load())
 
 	ResetForTesting()
 
-	assert.Nil(t, instance)
+	assert.Nil(t, instance.Load())
 	// resetSingleton t.Cleanup will restore zero state
 }
 
@@ -355,7 +338,7 @@ func TestNewLogger_InitializesGlobalInstance(t *testing.T) {
 	// NewLogger initialises the global logger with built-in defaults (no env).
 	err := NewLogger("my-service")
 	require.NoError(t, err)
-	assert.NotNil(t, instance)
+	assert.NotNil(t, instance.Load())
 }
 
 // --- Fatal (subprocess pattern to avoid killing the test process) ---

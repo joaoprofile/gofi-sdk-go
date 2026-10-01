@@ -18,11 +18,13 @@ type fakeServer struct {
 	requireAuth bool
 	startTLS    *tls.Config // when set, advertise + honor STARTTLS
 	badRcpt     map[string]bool
+	dataDelay   time.Duration // simulates a slow server per message
 
 	mu           sync.Mutex
 	received     []recvMsg
 	sawAuth      bool
 	failMailOnce bool
+	conns, quits int
 }
 
 type recvMsg struct {
@@ -57,91 +59,143 @@ func (fs *fakeServer) authed() bool {
 	return fs.sawAuth
 }
 
+// sessions returns how many connections were accepted and how many ended
+// with QUIT.
+func (fs *fakeServer) sessions() (conns, quits int) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.conns, fs.quits
+}
+
 func (fs *fakeServer) serve() {
 	for {
 		conn, err := fs.ln.Accept()
 		if err != nil {
 			return
 		}
+		fs.mu.Lock()
+		fs.conns++
+		fs.mu.Unlock()
 		go fs.handle(conn)
 	}
 }
 
-func (fs *fakeServer) handle(conn net.Conn) {
-	defer conn.Close()
-	tp := textproto.NewConn(conn)
-	_ = tp.PrintfLine("220 fake ESMTP")
+// fakeSession is one client connection to the fake server.
+type fakeSession struct {
+	fs   *fakeServer
+	conn net.Conn
+	tp   *textproto.Conn
+	from string
+	to   []string
+}
 
-	var from string
-	var to []string
+func (fs *fakeServer) handle(conn net.Conn) {
+	s := &fakeSession{fs: fs, conn: conn, tp: textproto.NewConn(conn)}
+	defer func() { _ = s.conn.Close() }()
+	_ = s.tp.PrintfLine("220 fake ESMTP")
 	for {
-		line, err := tp.ReadLine()
-		if err != nil {
+		line, err := s.tp.ReadLine()
+		if err != nil || !s.command(line) {
 			return
-		}
-		up := strings.ToUpper(line)
-		switch {
-		case strings.HasPrefix(up, "EHLO"), strings.HasPrefix(up, "HELO"):
-			_ = tp.PrintfLine("250-fake")
-			if fs.startTLS != nil {
-				_ = tp.PrintfLine("250-STARTTLS")
-			}
-			if fs.requireAuth {
-				_ = tp.PrintfLine("250-AUTH PLAIN LOGIN")
-			}
-			_ = tp.PrintfLine("250 OK")
-		case strings.HasPrefix(up, "STARTTLS"):
-			_ = tp.PrintfLine("220 Ready to start TLS")
-			tlsConn := tls.Server(conn, fs.startTLS)
-			if err := tlsConn.Handshake(); err != nil {
-				return
-			}
-			conn = tlsConn
-			tp = textproto.NewConn(conn)
-		case strings.HasPrefix(up, "AUTH PLAIN"):
-			fs.mark()
-			_ = tp.PrintfLine("235 2.7.0 Authentication successful")
-		case strings.HasPrefix(up, "AUTH LOGIN"):
-			_ = tp.PrintfLine("334 VXNlcm5hbWU6") // "Username:"
-			_, _ = tp.ReadLine()
-			_ = tp.PrintfLine("334 UGFzc3dvcmQ6") // "Password:"
-			_, _ = tp.ReadLine()
-			fs.mark()
-			_ = tp.PrintfLine("235 2.7.0 Authentication successful")
-		case strings.HasPrefix(up, "MAIL FROM"):
-			if fs.takeFailMail() {
-				_ = tp.PrintfLine("451 4.3.0 Try again later")
-				continue
-			}
-			from = extractAddr(line)
-			_ = tp.PrintfLine("250 OK")
-		case strings.HasPrefix(up, "RCPT TO"):
-			addr := extractAddr(line)
-			if fs.badRcpt[addr] {
-				_ = tp.PrintfLine("550 5.1.1 No such user")
-				continue
-			}
-			to = append(to, addr)
-			_ = tp.PrintfLine("250 OK")
-		case strings.HasPrefix(up, "DATA"):
-			_ = tp.PrintfLine("354 End data with <CR><LF>.<CR><LF>")
-			data, derr := tp.ReadDotBytes()
-			if derr != nil {
-				return
-			}
-			fs.record(from, to, string(data))
-			from, to = "", nil
-			_ = tp.PrintfLine("250 2.0.0 OK")
-		case strings.HasPrefix(up, "RSET"):
-			from, to = "", nil
-			_ = tp.PrintfLine("250 OK")
-		case strings.HasPrefix(up, "QUIT"):
-			_ = tp.PrintfLine("221 Bye")
-			return
-		default:
-			_ = tp.PrintfLine("250 OK")
 		}
 	}
+}
+
+// command answers one SMTP command; false ends the session.
+func (s *fakeSession) command(line string) bool {
+	up := strings.ToUpper(line)
+	switch {
+	case strings.HasPrefix(up, "EHLO"), strings.HasPrefix(up, "HELO"):
+		s.ehlo()
+	case strings.HasPrefix(up, "STARTTLS"):
+		return s.startTLS()
+	case strings.HasPrefix(up, "AUTH PLAIN"):
+		s.fs.mark()
+		_ = s.tp.PrintfLine("235 2.7.0 Authentication successful")
+	case strings.HasPrefix(up, "AUTH LOGIN"):
+		s.authLogin()
+	case strings.HasPrefix(up, "MAIL FROM"):
+		s.mailFrom(line)
+	case strings.HasPrefix(up, "RCPT TO"):
+		s.rcptTo(line)
+	case strings.HasPrefix(up, "DATA"):
+		return s.data()
+	case strings.HasPrefix(up, "RSET"):
+		s.from, s.to = "", nil
+		_ = s.tp.PrintfLine("250 OK")
+	case strings.HasPrefix(up, "QUIT"):
+		s.fs.mu.Lock()
+		s.fs.quits++
+		s.fs.mu.Unlock()
+		_ = s.tp.PrintfLine("221 Bye")
+		return false
+	default:
+		_ = s.tp.PrintfLine("250 OK")
+	}
+	return true
+}
+
+func (s *fakeSession) ehlo() {
+	_ = s.tp.PrintfLine("250-fake")
+	if s.fs.startTLS != nil {
+		_ = s.tp.PrintfLine("250-STARTTLS")
+	}
+	if s.fs.requireAuth {
+		_ = s.tp.PrintfLine("250-AUTH PLAIN LOGIN")
+	}
+	_ = s.tp.PrintfLine("250 OK")
+}
+
+func (s *fakeSession) startTLS() bool {
+	_ = s.tp.PrintfLine("220 Ready to start TLS")
+	tlsConn := tls.Server(s.conn, s.fs.startTLS)
+	if err := tlsConn.Handshake(); err != nil {
+		return false
+	}
+	s.conn = tlsConn
+	s.tp = textproto.NewConn(tlsConn)
+	return true
+}
+
+func (s *fakeSession) authLogin() {
+	_ = s.tp.PrintfLine("334 VXNlcm5hbWU6") // "Username:"
+	_, _ = s.tp.ReadLine()
+	_ = s.tp.PrintfLine("334 UGFzc3dvcmQ6") // "Password:"
+	_, _ = s.tp.ReadLine()
+	s.fs.mark()
+	_ = s.tp.PrintfLine("235 2.7.0 Authentication successful")
+}
+
+func (s *fakeSession) mailFrom(line string) {
+	if s.fs.takeFailMail() {
+		_ = s.tp.PrintfLine("451 4.3.0 Try again later")
+		return
+	}
+	s.from = extractAddr(line)
+	_ = s.tp.PrintfLine("250 OK")
+}
+
+func (s *fakeSession) rcptTo(line string) {
+	addr := extractAddr(line)
+	if s.fs.badRcpt[addr] {
+		_ = s.tp.PrintfLine("550 5.1.1 No such user")
+		return
+	}
+	s.to = append(s.to, addr)
+	_ = s.tp.PrintfLine("250 OK")
+}
+
+func (s *fakeSession) data() bool {
+	_ = s.tp.PrintfLine("354 End data with <CR><LF>.<CR><LF>")
+	data, err := s.tp.ReadDotBytes()
+	if err != nil {
+		return false
+	}
+	s.fs.record(s.from, s.to, string(data))
+	s.from, s.to = "", nil
+	time.Sleep(s.fs.dataDelay)
+	_ = s.tp.PrintfLine("250 2.0.0 OK")
+	return true
 }
 
 func (fs *fakeServer) mark() { fs.mu.Lock(); fs.sawAuth = true; fs.mu.Unlock() }
@@ -168,8 +222,8 @@ func extractAddr(line string) string {
 			return line[i+1 : i+j]
 		}
 	}
-	if k := strings.IndexByte(line, ':'); k >= 0 {
-		return strings.TrimSpace(line[k+1:])
+	if _, after, ok := strings.Cut(line, ":"); ok {
+		return strings.TrimSpace(after)
 	}
 	return line
 }
@@ -291,5 +345,27 @@ func TestSMTP_SendBulk_Empty(t *testing.T) {
 	res, err := m.SendBulk(context.Background(), nil)
 	if err != nil || res.Sent != 0 || res.HasFailures() {
 		t.Fatalf("empty bulk should be a no-op, got %+v err=%v", res, err)
+	}
+}
+
+// Regression: the deferred QUIT used to target the first connection, so the
+// last one opened by a reconnect was never closed.
+func TestSMTP_SendBulk_QuitsEveryConnection(t *testing.T) {
+	fs := newFakeServer(t)
+	m, err := New(Config{
+		Host: "localhost", Port: fs.port(),
+		From:       Address{Email: "f@x.com"},
+		Encryption: EncryptionNone, Auth: AuthNone,
+		PoolSize: 1, Timeout: 3 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := m.SendBulk(context.Background(), []*Message{sampleMsg("a@x.com"), sampleMsg("b@x.com"), sampleMsg("c@x.com")})
+	if err != nil || res.Sent != 3 {
+		t.Fatalf("SendBulk=%+v,%v", res, err)
+	}
+	if conns, quits := fs.sessions(); conns != 3 || quits != 3 {
+		t.Errorf("conns=%d quits=%d; want 3 and 3", conns, quits)
 	}
 }

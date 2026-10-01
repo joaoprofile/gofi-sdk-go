@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 )
 
 type SQLQuery struct {
@@ -25,29 +25,23 @@ func NewQuery() Query {
 	return &queryImpl{}
 }
 
+// FetchRows wraps driver errors in *connection.Error (generic message; the
+// driver error stays reachable with errors.As).
 func (q *queryImpl) FetchRows(ctx context.Context, dbConn *sql.DB, query string, args ...any) (*sql.Rows, error) {
 	if err := q.validate(dbConn, query); err != nil {
 		return nil, err
 	}
 
-	if tx := ctx.Value(connection.SqlTxContextKey); tx != nil {
-		return tx.(*sql.Tx).QueryContext(ctx, query, args...)
-	}
-	return dbConn.QueryContext(ctx, query, args...)
+	rows, err := connection.QuerierFrom(ctx, dbConn).QueryContext(ctx, query, args...)
+	return rows, connection.WrapError("query", err)
 }
 
 func (q *queryImpl) FetchRow(ctx context.Context, dbConn *sql.DB, query string, args ...any) *sql.Row {
-	if tx := ctx.Value(connection.SqlTxContextKey); tx != nil {
-		return tx.(*sql.Tx).QueryRowContext(ctx, query, args...)
-	}
-	return dbConn.QueryRowContext(ctx, query, args...)
+	return connection.QuerierFrom(ctx, dbConn).QueryRowContext(ctx, query, args...)
 }
 
 func (q *queryImpl) Execute(ctx context.Context, dbConn *sql.DB, query string, args ...any) *sql.Row {
-	if tx := ctx.Value(connection.SqlTxContextKey); tx != nil {
-		return tx.(*sql.Tx).QueryRowContext(ctx, query, args...)
-	}
-	return dbConn.QueryRowContext(ctx, query, args...)
+	return connection.QuerierFrom(ctx, dbConn).QueryRowContext(ctx, query, args...)
 }
 
 func (q *queryImpl) validate(db *sql.DB, query string) error {

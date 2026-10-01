@@ -1,57 +1,57 @@
 package obs
 
 import (
-	"go.opentelemetry.io/otel"
+	"database/sql"
+
+	"github.com/gofi-labs/gofi-sdk-go/obs/metrics"
 	"go.opentelemetry.io/otel/metric"
 )
 
-const meterName = "gofi_otel"
+// The metric helpers live in obs/metrics, which links no exporter; these
+// wrappers keep the obs API. New code should import obs/metrics, since
+// importing obs links the OTLP/gRPC exporters.
 
-func Meter() metric.Meter {
-	return otel.Meter(meterName)
-}
+// Meter returns the gofi meter.
+//
+// Deprecated: use metrics.Meter.
+func Meter() metric.Meter { return metrics.Meter() }
 
+// Deprecated: use metrics.NewFloat64Histogram.
 func NewFloat64Histogram(name, description, unit string) (metric.Float64Histogram, error) {
-	return Meter().Float64Histogram(name,
-		metric.WithDescription(description),
-		metric.WithUnit(unit),
-	)
+	return metrics.NewFloat64Histogram(name, description, unit)
 }
 
+// Deprecated: use metrics.NewInt64Counter.
 func NewInt64Counter(name, description string) (metric.Int64Counter, error) {
-	return Meter().Int64Counter(name,
-		metric.WithDescription(description),
-	)
+	return metrics.NewInt64Counter(name, description)
 }
 
+// Deprecated: use metrics.NewFloat64Counter.
 func NewFloat64Counter(name, description string) (metric.Float64Counter, error) {
-	return Meter().Float64Counter(name,
-		metric.WithDescription(description),
-	)
+	return metrics.NewFloat64Counter(name, description)
 }
 
+// Deprecated: use metrics.NewInt64UpDownCounter.
 func NewInt64UpDownCounter(name, description string) (metric.Int64UpDownCounter, error) {
-	return Meter().Int64UpDownCounter(name,
-		metric.WithDescription(description),
-	)
+	return metrics.NewInt64UpDownCounter(name, description)
 }
 
+// Deprecated: use metrics.NewFloat64UpDownCounter.
 func NewFloat64UpDownCounter(name, description string) (metric.Float64UpDownCounter, error) {
-	return Meter().Float64UpDownCounter(name,
-		metric.WithDescription(description),
-	)
+	return metrics.NewFloat64UpDownCounter(name, description)
 }
 
+// Deprecated: use metrics.NewFloat64Gauge.
 func NewFloat64Gauge(name, description, unit string) (metric.Float64Gauge, error) {
-	return Meter().Float64Gauge(name,
-		metric.WithDescription(description),
-		metric.WithUnit(unit),
-	)
+	return metrics.NewFloat64Gauge(name, description, unit)
 }
 
+// Deprecated: use metrics.NewInt64Gauge.
 func NewInt64Gauge(name, description, unit string) (metric.Int64Gauge, error) {
-	return Meter().Int64Gauge(name,
-		metric.WithDescription(description),
-		metric.WithUnit(unit),
-	)
+	return metrics.NewInt64Gauge(name, description, unit)
 }
+
+// ObserveDBStats registers the sql.DB pool gauges.
+//
+// Deprecated: use metrics.ObserveDBStats.
+func ObserveDBStats(pool string, db *sql.DB) error { return metrics.ObserveDBStats(pool, db) }

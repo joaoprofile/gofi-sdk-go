@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -110,11 +110,8 @@ func TestSave_PreservesExtra(t *testing.T) {
 	p, _ := newTestProvider(t)
 	ctx := context.Background()
 	sess := newTestSession("s-extra", "u1", time.Hour)
-	sess.Extra = map[string]string{
-		"managerId":  "mgr-42",
-		"role":       "ADMIN",
-		"gumgaToken": "org-scoped-xyz",
-	}
+	sess.ClaimsExtra = map[string]string{"managerId": "mgr-42", "role": "ADMIN"}
+	sess.SessionExtra = map[string]string{"gumgaToken": "org-scoped-xyz"}
 
 	if err := p.Save(ctx, sess); err != nil {
 		t.Fatalf("Save() unexpected error: %v", err)
@@ -124,14 +121,28 @@ func TestSave_PreservesExtra(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() unexpected error: %v", err)
 	}
-	if got.Extra["managerId"] != "mgr-42" {
-		t.Errorf("Extra[managerId]=%q, want mgr-42", got.Extra["managerId"])
+	if got.ClaimsExtra["managerId"] != "mgr-42" || got.ClaimsExtra["role"] != "ADMIN" {
+		t.Errorf("ClaimsExtra=%v", got.ClaimsExtra)
 	}
-	if got.Extra["role"] != "ADMIN" {
-		t.Errorf("Extra[role]=%q, want ADMIN", got.Extra["role"])
+	if got.SessionExtra["gumgaToken"] != "org-scoped-xyz" {
+		t.Errorf("SessionExtra=%v", got.SessionExtra)
 	}
-	if got.Extra["gumgaToken"] != "org-scoped-xyz" {
-		t.Errorf("Extra[gumgaToken]=%q, want org-scoped-xyz", got.Extra["gumgaToken"])
+}
+
+// Sessions saved before the split stored every extra under "extra": they
+// keep their token claims.
+func TestGet_LegacyExtraBecomesClaimsExtra(t *testing.T) {
+	p, mr := newTestProvider(t)
+	blob := `{"ID":"old","UserID":"u1","ExpiresAt":"` + time.Now().Add(time.Hour).Format(time.RFC3339Nano) + `","extra":{"role":"ADMIN"}}`
+	if err := mr.Set("test:old", blob); err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.Get(context.Background(), "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClaimsExtra["role"] != "ADMIN" || got.SessionExtra != nil {
+		t.Errorf("legacy extra: claims=%v session=%v", got.ClaimsExtra, got.SessionExtra)
 	}
 }
 

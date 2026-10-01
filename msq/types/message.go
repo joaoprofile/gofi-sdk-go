@@ -3,23 +3,11 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
-
-// Encoder encodes a payload to bytes for broker transmission.
-// Used by byte-oriented brokers such as Kafka.
-type Encoder interface {
-	Encode() ([]byte, error)
-	Length() int
-}
-
-// ByteEncoder implements Encoder for raw byte payloads.
-type ByteEncoder []byte
-
-func (b ByteEncoder) Encode() ([]byte, error) { return b, nil }
-func (b ByteEncoder) Length() int             { return len(b) }
 
 // Message is the universal envelope for all broker messages.
 //
@@ -30,29 +18,43 @@ func (b ByteEncoder) Length() int             { return len(b) }
 type Message struct {
 	Id        uuid.UUID         `json:"id"`
 	Topic     string            `json:"topic,omitempty"`
+	Type      string            `json:"type,omitempty"`   // CloudEvents type, e.g. "order.created"
+	Source    string            `json:"source,omitempty"` // CloudEvents source; defaults to /topics/<topic>
 	Key       string            `json:"key,omitempty"`
 	Value     json.RawMessage   `json:"value"`
 	Timestamp time.Time         `json:"timestamp"`
 	Headers   map[string]string `json:"headers,omitempty"`
+
+	// DeliveryCount is how many times the broker has delivered this message,
+	// this delivery included (1 = first). It is set by the consumer from the
+	// broker's own counter and is 0 when the broker does not track it. It
+	// never travels on the wire.
+	DeliveryCount int `json:"-"`
 }
 
 // NewMessage creates a Message with the payload serialized as JSON.
 // Set Topic via WithTopic or directly before sending.
-func NewMessage(value interface{}) *Message {
-	v, _ := json.Marshal(value)
+func NewMessage(value any) (*Message, error) {
+	v, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("msq: encode message value: %w", err)
+	}
 	return &Message{
 		Id:        uuid.New(),
 		Timestamp: time.Now(),
 		Value:     json.RawMessage(v),
 		Headers:   make(map[string]string),
-	}
+	}, nil
 }
 
 // NewMessageWithTopic creates a Message with topic and payload already set.
-func NewMessageWithTopic(topic string, value interface{}) *Message {
-	msg := NewMessage(value)
+func NewMessageWithTopic(topic string, value any) (*Message, error) {
+	msg, err := NewMessage(value)
+	if err != nil {
+		return nil, err
+	}
 	msg.Topic = topic
-	return msg
+	return msg, nil
 }
 
 // WithTopic sets the routing topic and returns the message for chaining.
@@ -83,7 +85,7 @@ func (m *Message) String() string {
 }
 
 // DecodeMessage decodes Value into the given model pointer.
-func (m *Message) DecodeMessage(model interface{}) error {
+func (m *Message) DecodeMessage(model any) error {
 	return json.NewDecoder(bytes.NewReader(m.Value)).Decode(model)
 }
 

@@ -1,10 +1,10 @@
 package postgres
 
 import (
-	"database/sql"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/migrate"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,13 +20,13 @@ func TestMigrateDriver_RegisteredInMigrateRegistry(t *testing.T) {
 }
 
 // Instance — exercises the method body with a DB that has no live server.
-// postgres.WithInstance may return an error; we just verify the call path is exercised.
+// WithInstance may return an error; we just verify the call path is exercised.
 func TestMigrateDriver_Instance_ExercisesMethodBody(t *testing.T) {
-	db, err := sql.Open("postgres", "host=127.0.0.1 port=1 dbname=test sslmode=disable")
+	db, err := Driver{}.Open(connection.Config{DSN: "host=127.0.0.1 port=1 dbname=test sslmode=disable connect_timeout=1"})
 	require.NoError(t, err)
 	defer db.Close()
 
-	// The call may fail when postgres.WithInstance tries to contact the server;
+	// The call may fail when WithInstance tries to contact the server;
 	// what matters is that the Instance method body is executed (coverage).
 	_, _ = MigrateDriver{}.Instance(db)
 }

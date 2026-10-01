@@ -5,77 +5,80 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 )
 
+// Statement runs write statements and single-row queries on the global
+// connection, joining the transaction carried by ctx when there is one.
 type Statement interface {
-	Execute(ctx context.Context, query string, args ...any) error
+	// Execute runs query directly (no server-side prepare, PgBouncer-safe) and
+	// returns the result, e.g. for RowsAffected in optimistic locking.
+	Execute(ctx context.Context, query string, args ...any) (sql.Result, error)
 	Prepare(ctx context.Context, query string) (*sql.Stmt, error)
-	QueryRow(ctx context.Context, query string, args ...any) *sql.Row
+	// QueryRow returns an error instead of panicking when the connection is
+	// missing or the query is empty.
+	QueryRow(ctx context.Context, query string, args ...any) (*sql.Row, error)
 }
 
-type statement struct{}
+type statement struct {
+	conn *connection.Connection // nil uses the global connection
+}
 
+// NewStatement runs on the global connection.
 func NewStatement() Statement {
 	return &statement{}
 }
 
-func (s *statement) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	db, err := connection.DB()
-	if err != nil {
-		// Return a row that will surface the error when Scan is called.
-		// MustDB would panic; instead we degrade gracefully here.
-		panic(connection.ErrDatabaseNotInitialized)
-	}
-
-	if query == "" {
-		return db.QueryRowContext(ctx, "SELECT '"+connection.ErrQueryIsEmpty+"'")
-	}
-
-	if tx := ctx.Value(connection.SqlTxContextKey); tx != nil {
-		return tx.(*sql.Tx).QueryRowContext(ctx, query, args...)
-	}
-	return db.QueryRowContext(ctx, query, args...)
+// NewWithConnection runs on conn, for services with more than one database.
+func NewWithConnection(conn *connection.Connection) Statement {
+	return &statement{conn: conn}
 }
 
-func (s *statement) Execute(ctx context.Context, query string, args ...any) error {
-	if err := s.validate(query); err != nil {
-		return err
-	}
-
-	stmt, err := s.prepare(ctx, query)
+// QueryRow is not bounded by the connection's QueryTimeout (the row is read
+// after it returns) and its Scan returns the driver error as is.
+func (s *statement) QueryRow(ctx context.Context, query string, args ...any) (*sql.Row, error) {
+	conn, err := s.validate(query)
 	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	_, err = stmt.ExecContext(ctx, args...)
-	return err
-}
-
-func (s *statement) Prepare(ctx context.Context, query string) (*sql.Stmt, error) {
-	if err := s.validate(query); err != nil {
 		return nil, err
 	}
-	return s.prepare(ctx, query)
+	return connection.QuerierFrom(ctx, conn.DB()).QueryRowContext(ctx, query, args...), nil
 }
 
-func (s *statement) prepare(ctx context.Context, query string) (*sql.Stmt, error) {
-	db := connection.MustDB()
-
-	if tx := ctx.Value(connection.SqlTxContextKey); tx != nil {
-		return tx.(*sql.Tx).PrepareContext(ctx, query)
+// Execute is bounded by the connection's QueryTimeout when ctx has no
+// deadline; driver errors are wrapped in *connection.Error.
+func (s *statement) Execute(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	conn, err := s.validate(query)
+	if err != nil {
+		return nil, err
 	}
-
-	return db.PrepareContext(ctx, query)
+	ctx, cancel := conn.WithQueryTimeout(ctx)
+	defer cancel()
+	res, err := connection.QuerierFrom(ctx, conn.DB()).ExecContext(ctx, query, args...)
+	return res, connection.WrapError("exec", err)
 }
 
-func (s *statement) validate(query string) error {
-	if _, err := connection.DB(); err != nil {
-		return errors.New(connection.ErrDatabaseNotInitialized)
+// Prepare bounds only the prepare round trip by QueryTimeout.
+func (s *statement) Prepare(ctx context.Context, query string) (*sql.Stmt, error) {
+	conn, err := s.validate(query)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := conn.WithQueryTimeout(ctx)
+	defer cancel()
+	stmt, err := connection.QuerierFrom(ctx, conn.DB()).PrepareContext(ctx, query)
+	return stmt, connection.WrapError("prepare", err)
+}
+
+func (s *statement) validate(query string) (*connection.Connection, error) {
+	conn := s.conn
+	if conn == nil {
+		var err error
+		if conn, err = connection.Global(); err != nil {
+			return nil, errors.New(connection.ErrDatabaseNotInitialized)
+		}
 	}
 	if query == "" {
-		return errors.New(connection.ErrQueryIsEmpty)
+		return nil, errors.New(connection.ErrQueryIsEmpty)
 	}
-	return nil
+	return conn, nil
 }

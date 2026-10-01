@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/joaoprofile/gofi/netx"
+	"github.com/gofi-labs/gofi-sdk-go/netx"
 )
 
 type Order struct {

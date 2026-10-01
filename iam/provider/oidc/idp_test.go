@@ -7,25 +7,28 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
 	gojwt "github.com/golang-jwt/jwt/v5"
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/port"
 )
 
 // ---- helpers ----
 
 func buildDiscoveryServer(t *testing.T, jwksPath string) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{
 			"issuer": "%s",
@@ -33,7 +36,7 @@ func buildDiscoveryServer(t *testing.T, jwksPath string) *httptest.Server {
 			"token_endpoint": "%s/token",
 			"userinfo_endpoint": "%s/userinfo",
 			"jwks_uri": "%s%s"
-		}`, "placeholder", "placeholder", "placeholder", "placeholder", "placeholder", jwksPath)
+		}`, ts.URL, ts.URL, ts.URL, ts.URL, ts.URL, jwksPath)
 	}))
 	return ts
 }
@@ -84,31 +87,7 @@ func generateECKey(t *testing.T) (*ecdsa.PrivateKey, string) {
 	return priv, jwks
 }
 
-// buildFullServer returns a test HTTP server that answers discovery, JWKS, and token endpoints.
-func buildFullServer(t *testing.T, privKey *rsa.PrivateKey, jwksJSON string, idToken string) *httptest.Server {
-	t.Helper()
-	var ts *httptest.Server
-	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/.well-known/openid-configuration":
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/auth",
-				"token_endpoint": "%s/token",
-				"userinfo_endpoint": "%s/userinfo",
-				"jwks_uri": "%s/jwks"
-			}`, ts.URL, ts.URL, ts.URL, ts.URL, ts.URL)
-		case "/jwks":
-			w.Write([]byte(jwksJSON))
-		case "/token":
-			fmt.Fprintf(w, `{"access_token":"at","id_token":"%s","token_type":"Bearer","expires_in":3600}`, idToken)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	return ts
-}
+const testNonce = "nonce456"
 
 func signRSAToken(t *testing.T, key *rsa.PrivateKey, issuer, audience, kid string) string {
 	t.Helper()
@@ -120,6 +99,7 @@ func signRSAToken(t *testing.T, key *rsa.PrivateKey, issuer, audience, kid strin
 		"email_verified": true,
 		"name":           "Test User",
 		"picture":        "https://example.com/pic.jpg",
+		"nonce":          testNonce,
 		"iat":            time.Now().Unix(),
 		"exp":            time.Now().Add(time.Hour).Unix(),
 	})
@@ -462,6 +442,79 @@ func TestGetDiscovery_CachedAfterFirstCall(t *testing.T) {
 	}
 }
 
+func TestGetDiscovery_Non200IsError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	if _, err := buildProvider(t, ts.URL, ts.Client()).getDiscovery(context.Background()); err == nil {
+		t.Fatal("expected error for non-200 discovery response")
+	}
+}
+
+func TestGetDiscovery_IssuerMismatchIsError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"issuer":"https://evil.example","authorization_endpoint":"x","token_endpoint":"x","jwks_uri":"x"}`))
+	}))
+	defer ts.Close()
+
+	if _, err := buildProvider(t, ts.URL, ts.Client()).getDiscovery(context.Background()); err == nil {
+		t.Fatal("expected error when discovery issuer differs from IssuerURL")
+	}
+}
+
+func TestGetDiscovery_ConcurrentAfterFailureNeverReturnsNil(t *testing.T) {
+	var calls atomic.Int32
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":"a","token_endpoint":"t","jwks_uri":"j"}`, ts.URL)
+	}))
+	defer ts.Close()
+
+	p := buildProvider(t, ts.URL, ts.Client())
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			doc, err := p.getDiscovery(context.Background())
+			if err == nil && doc == nil {
+				t.Error("nil discovery without error")
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func TestGetDiscovery_StaleServedWhenRefreshFails(t *testing.T) {
+	var fail atomic.Bool
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":"a","token_endpoint":"t","jwks_uri":"j"}`, ts.URL)
+	}))
+	defer ts.Close()
+
+	p := buildProvider(t, ts.URL, ts.Client())
+	if _, err := p.getDiscovery(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fail.Store(true)
+	p.discFetchedAt = time.Now().Add(-2 * discoveryTTL)
+
+	doc, err := p.getDiscovery(context.Background())
+	if err != nil || doc == nil {
+		t.Fatalf("expected stale document, got doc=%v err=%v", doc, err)
+	}
+}
+
 // ---- AuthorizationURL ----
 
 func TestAuthorizationURL_Success(t *testing.T) {
@@ -493,6 +546,27 @@ func TestAuthorizationURL_Success(t *testing.T) {
 	}
 	if result.State != "state123" {
 		t.Errorf("State=%q, want state123", result.State)
+	}
+}
+
+func TestAuthorizationURL_AuthParamsDoNotOverrideStandard(t *testing.T) {
+	ts := buildDiscoveryServer(t, "/jwks")
+	defer ts.Close()
+
+	p := New("test", Config{
+		IssuerURL:  ts.URL,
+		ClientID:   "client1",
+		AuthParams: map[string]string{"prompt": "login", "state": "forged", "client_id": "other"},
+		HTTPClient: ts.Client(),
+	})
+	res, err := p.AuthorizationURL(context.Background(), port.IDPAuthInput{State: "s1", Nonce: "n1"})
+	if err != nil {
+		t.Fatalf("AuthorizationURL() error: %v", err)
+	}
+	u, _ := url.Parse(res.URL)
+	q := u.Query()
+	if q.Get("prompt") != "login" || q.Get("state") != "s1" || q.Get("client_id") != "client1" {
+		t.Errorf("unexpected query: %v", q)
 	}
 }
 
@@ -540,13 +614,37 @@ func TestHandleCallback_StateMismatch(t *testing.T) {
 	}
 }
 
+// Attack: login CSRF by sending an empty state with no state cookie; the IdP must never be contacted.
+func TestHandleCallback_EmptyStateOrVerifierRejected(t *testing.T) {
+	var hits int
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer ts.Close()
+	p := buildProvider(t, ts.URL, ts.Client())
+
+	for _, in := range []port.IDPCallbackInput{
+		{Code: "attacker-code"},
+		{Code: "c", State: "", ExpectedState: "", CodeVerifier: "v"},
+		{Code: "c", State: "s", ExpectedState: "s"},
+		{Code: "c", State: "s", ExpectedState: "", CodeVerifier: "v"},
+		{Code: "c", State: "", ExpectedState: "s", CodeVerifier: "v"},
+	} {
+		if _, err := p.HandleCallback(context.Background(), in); !errors.Is(err, core.ErrInvalidIDPState) {
+			t.Errorf("%+v: expected ErrInvalidIDPState, got %v", in, err)
+		}
+	}
+	if hits != 0 {
+		t.Errorf("IdP contacted %d times for a rejected callback", hits)
+	}
+}
+
 func TestHandleCallback_DiscoveryError(t *testing.T) {
 	p := buildProvider(t, "http://127.0.0.1:1", nil)
 	_, err := p.HandleCallback(context.Background(), port.IDPCallbackInput{
 		State:         "s",
 		ExpectedState: "s",
+		CodeVerifier:  "v",
 	})
-	if err == nil {
+	if err == nil || errors.Is(err, core.ErrInvalidIDPState) {
 		t.Fatal("expected error when discovery fails")
 	}
 }
@@ -571,8 +669,9 @@ func TestHandleCallback_TokenExchangeError(t *testing.T) {
 		State:         "s",
 		ExpectedState: "s",
 		Code:          "code123",
+		CodeVerifier:  "v",
 	})
-	if err == nil {
+	if err == nil || errors.Is(err, core.ErrInvalidIDPState) {
 		t.Fatal("expected token exchange error")
 	}
 }
@@ -605,6 +704,7 @@ func TestHandleCallback_FullFlow_RSA(t *testing.T) {
 	result, err := p.HandleCallback(context.Background(), port.IDPCallbackInput{
 		State:         "s",
 		ExpectedState: "s",
+		ExpectedNonce: testNonce,
 		Code:          "code123",
 		RedirectURI:   "http://localhost/callback",
 		CodeVerifier:  "verifier",
@@ -731,7 +831,7 @@ func TestExchangeCode_InvalidJSON(t *testing.T) {
 
 func TestValidateIDToken_InvalidJWT(t *testing.T) {
 	p := buildProvider(t, "https://example.com", nil)
-	_, err := p.validateIDToken(context.Background(), &discoveryDoc{}, "not.a.jwt")
+	_, err := p.validateIDToken(context.Background(), &discoveryDoc{}, "not.a.jwt", testNonce)
 	if err == nil {
 		t.Fatal("expected error for invalid JWT")
 	}
@@ -753,11 +853,12 @@ func TestValidateIDToken_ES256(t *testing.T) {
 
 	// Sign with ES256.
 	token := gojwt.NewWithClaims(gojwt.SigningMethodES256, gojwt.MapClaims{
-		"iss": ts.URL,
-		"aud": "client1",
-		"sub": "ecuser",
-		"exp": time.Now().Add(time.Hour).Unix(),
-		"iat": time.Now().Unix(),
+		"iss":   ts.URL,
+		"aud":   "client1",
+		"sub":   "ecuser",
+		"nonce": testNonce,
+		"exp":   time.Now().Add(time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
 	})
 	token.Header["kid"] = "eckey1"
 	signed, err := token.SignedString(ecKey)
@@ -773,7 +874,7 @@ func TestValidateIDToken_ES256(t *testing.T) {
 	})
 	disc := &discoveryDoc{JWKSURI: ts.URL + "/jwks"}
 
-	result, err := p.validateIDToken(context.Background(), disc, idToken)
+	result, err := p.validateIDToken(context.Background(), disc, idToken, testNonce)
 	if err != nil {
 		t.Fatalf("validateIDToken() error: %v", err)
 	}
@@ -782,8 +883,69 @@ func TestValidateIDToken_ES256(t *testing.T) {
 	}
 }
 
-// serialises JWKS and returns the JSON bytes
-func marshalJWKS(keys []map[string]any) []byte {
-	b, _ := json.Marshal(map[string]any{"keys": keys})
-	return b
+func TestHandleCallback_Nonce(t *testing.T) {
+	tests := []struct {
+		name          string
+		tokenNonce    string
+		expectedNonce string
+		wantErr       bool
+	}{
+		{"matching nonce", "n-1", "n-1", false},
+		{"replayed token with other nonce", "n-1", "n-2", true},
+		{"token without nonce", "", "n-1", true},
+		{"nonce derived from state", core.NonceForState("s"), "", false},
+		{"no expected nonce and foreign token nonce", "n-1", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, jwksJSON := generateRSAKey(t)
+			var ts *httptest.Server
+			var idToken string
+			ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/.well-known/openid-configuration":
+					fmt.Fprintf(w, `{"issuer":"%s","authorization_endpoint":"%s/auth","token_endpoint":"%s/token","jwks_uri":"%s/jwks"}`,
+						ts.URL, ts.URL, ts.URL, ts.URL)
+				case "/jwks":
+					w.Write([]byte(jwksJSON))
+				case "/token":
+					fmt.Fprintf(w, `{"access_token":"at","id_token":"%s","token_type":"Bearer"}`, idToken)
+				}
+			}))
+			defer ts.Close()
+
+			claims := gojwt.MapClaims{"iss": ts.URL, "aud": "client1", "sub": "u1", "exp": time.Now().Add(time.Hour).Unix()}
+			if tt.tokenNonce != "" {
+				claims["nonce"] = tt.tokenNonce
+			}
+			tok := gojwt.NewWithClaims(gojwt.SigningMethodRS256, claims)
+			tok.Header["kid"] = "key1"
+			idToken, _ = tok.SignedString(key)
+
+			p := buildProvider(t, ts.URL, ts.Client())
+			_, err := p.HandleCallback(context.Background(), port.IDPCallbackInput{
+				State: "s", ExpectedState: "s", ExpectedNonce: tt.expectedNonce, Code: "c", CodeVerifier: "v",
+			})
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("err=%v, wantErr=%v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, core.ErrInvalidIDPNonce) {
+				t.Fatalf("err=%v, want ErrInvalidIDPNonce", err)
+			}
+		})
+	}
+}
+
+func TestAuthorizationURL_ReturnsNonce(t *testing.T) {
+	ts := buildDiscoveryServer(t, "/jwks")
+	defer ts.Close()
+
+	p := buildProvider(t, ts.URL, ts.Client())
+	res, err := p.AuthorizationURL(context.Background(), port.IDPAuthInput{State: "s1", Nonce: "n1"})
+	if err != nil {
+		t.Fatalf("AuthorizationURL() error: %v", err)
+	}
+	if res.Nonce != "n1" {
+		t.Errorf("Nonce=%q, want n1", res.Nonce)
+	}
 }

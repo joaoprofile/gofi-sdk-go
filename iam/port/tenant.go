@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // TenantPort abstracts the tenant repository and multi-tenant access control.

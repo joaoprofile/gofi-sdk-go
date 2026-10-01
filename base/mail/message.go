@@ -6,9 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/textproto"
+	"slices"
 	"strings"
 	"time"
 )
@@ -21,67 +24,69 @@ import (
 //   - Text only          → text/plain
 func encodeMessage(m *Message) ([]byte, error) {
 	var buf bytes.Buffer
-
-	writeHeader(&buf, "From", m.From.String())
-	writeHeader(&buf, "To", addressList(m.To))
-	if len(m.Cc) > 0 {
-		writeHeader(&buf, "Cc", addressList(m.Cc))
+	if err := writeMessage(&buf, m); err != nil {
+		return nil, err
 	}
-	writeHeader(&buf, "Subject", mime.QEncoding.Encode("utf-8", m.Subject))
-	writeHeader(&buf, "Date", time.Now().Format(time.RFC1123Z))
-	writeHeader(&buf, "Message-ID", messageID(m.From.Email))
-	writeHeader(&buf, "MIME-Version", "1.0")
-	for k, v := range m.Headers {
-		writeHeader(&buf, k, v)
+	return buf.Bytes(), nil
+}
+
+// writeMessage streams the message into w (the SMTP DATA writer), so
+// attachments are encoded without holding extra copies in memory.
+func writeMessage(w io.Writer, m *Message) error {
+	writeHeader(w, "From", m.From.String())
+	writeHeader(w, "To", addressList(m.To))
+	if len(m.Cc) > 0 {
+		writeHeader(w, "Cc", addressList(m.Cc))
+	}
+	writeHeader(w, "Subject", mime.QEncoding.Encode("utf-8", m.Subject))
+	writeHeader(w, "Date", time.Now().Format(time.RFC1123Z))
+	writeHeader(w, "Message-ID", messageID(m.From.Email))
+	writeHeader(w, "MIME-Version", "1.0")
+	for _, k := range slices.Sorted(maps.Keys(m.Headers)) {
+		writeHeader(w, k, m.Headers[k])
 	}
 
 	hasAlt := strings.TrimSpace(m.HTML) != "" && strings.TrimSpace(m.Text) != ""
 
 	switch {
 	case len(m.Attachments) > 0:
-		mw := multipart.NewWriter(&buf)
-		writeHeader(&buf, "Content-Type", "multipart/mixed; boundary=\""+mw.Boundary()+"\"")
-		buf.WriteString("\r\n")
+		mw := multipart.NewWriter(w)
+		writeHeader(w, "Content-Type", "multipart/mixed; boundary=\""+mw.Boundary()+"\"")
+		io.WriteString(w, "\r\n")
 		if err := writeBody(mw, m, hasAlt); err != nil {
-			return nil, err
+			return err
 		}
 		for _, att := range m.Attachments {
 			if err := writeAttachment(mw, att); err != nil {
-				return nil, err
+				return err
 			}
 		}
-		if err := mw.Close(); err != nil {
-			return nil, err
-		}
+		return mw.Close()
 
 	case hasAlt:
-		mw := multipart.NewWriter(&buf)
-		writeHeader(&buf, "Content-Type", "multipart/alternative; boundary=\""+mw.Boundary()+"\"")
-		buf.WriteString("\r\n")
+		mw := multipart.NewWriter(w)
+		writeHeader(w, "Content-Type", "multipart/alternative; boundary=\""+mw.Boundary()+"\"")
+		io.WriteString(w, "\r\n")
 		if err := writeTextPart(mw, "text/plain", m.Text); err != nil {
-			return nil, err
+			return err
 		}
 		if err := writeTextPart(mw, "text/html", m.HTML); err != nil {
-			return nil, err
+			return err
 		}
-		if err := mw.Close(); err != nil {
-			return nil, err
-		}
+		return mw.Close()
 
 	case strings.TrimSpace(m.HTML) != "":
-		writeHeader(&buf, "Content-Type", "text/html; charset=\"UTF-8\"")
-		writeHeader(&buf, "Content-Transfer-Encoding", "base64")
-		buf.WriteString("\r\n")
-		buf.WriteString(base64Wrap(m.HTML))
+		writeHeader(w, "Content-Type", "text/html; charset=\"UTF-8\"")
+		writeHeader(w, "Content-Transfer-Encoding", "base64")
+		io.WriteString(w, "\r\n")
+		return writeBase64(w, []byte(m.HTML))
 
 	default:
-		writeHeader(&buf, "Content-Type", "text/plain; charset=\"UTF-8\"")
-		writeHeader(&buf, "Content-Transfer-Encoding", "base64")
-		buf.WriteString("\r\n")
-		buf.WriteString(base64Wrap(m.Text))
+		writeHeader(w, "Content-Type", "text/plain; charset=\"UTF-8\"")
+		writeHeader(w, "Content-Transfer-Encoding", "base64")
+		io.WriteString(w, "\r\n")
+		return writeBase64(w, []byte(m.Text))
 	}
-
-	return buf.Bytes(), nil
 }
 
 // writeBody writes the message body inside a multipart/mixed: either a nested
@@ -121,8 +126,7 @@ func writeTextPart(mw *multipart.Writer, contentType, body string) error {
 	if err != nil {
 		return err
 	}
-	_, err = part.Write([]byte(base64Wrap(body)))
-	return err
+	return writeBase64(part, []byte(body))
 }
 
 func writeAttachment(mw *multipart.Writer, att Attachment) error {
@@ -138,15 +142,15 @@ func writeAttachment(mw *multipart.Writer, att Attachment) error {
 	if err != nil {
 		return err
 	}
-	_, err = part.Write([]byte(base64Wrap(string(att.Content))))
-	return err
+	return writeBase64(part, att.Content)
 }
 
-func writeHeader(buf *bytes.Buffer, key, value string) {
-	buf.WriteString(key)
-	buf.WriteString(": ")
-	buf.WriteString(value)
-	buf.WriteString("\r\n")
+// writeHeader ignores write errors: the writer's next body write reports them.
+func writeHeader(w io.Writer, key, value string) {
+	io.WriteString(w, key)
+	io.WriteString(w, ": ")
+	io.WriteString(w, value)
+	io.WriteString(w, "\r\n")
 }
 
 func addressList(addrs []Address) string {
@@ -157,18 +161,45 @@ func addressList(addrs []Address) string {
 	return strings.Join(parts, ", ")
 }
 
-// base64Wrap base64-encodes s and folds it into 76-char lines (RFC 2045).
-func base64Wrap(s string) string {
-	encoded := base64.StdEncoding.EncodeToString([]byte(s))
-	const lineLen = 76
-	var b strings.Builder
-	for len(encoded) > lineLen {
-		b.WriteString(encoded[:lineLen])
-		b.WriteString("\r\n")
-		encoded = encoded[lineLen:]
+// base64LineLen is the RFC 2045 line limit for base64 bodies.
+const base64LineLen = 76
+
+var crlf = []byte("\r\n")
+
+// writeBase64 streams data as base64 folded into 76-char CRLF lines.
+func writeBase64(w io.Writer, data []byte) error {
+	enc := base64.NewEncoder(base64.StdEncoding, &foldWriter{w: w})
+	if _, err := enc.Write(data); err != nil {
+		return err
 	}
-	b.WriteString(encoded)
-	return b.String()
+	return enc.Close()
+}
+
+// foldWriter inserts CRLF every base64LineLen bytes, never after the last line.
+type foldWriter struct {
+	w   io.Writer
+	col int
+}
+
+func (f *foldWriter) Write(p []byte) (int, error) {
+	n := 0
+	for len(p) > 0 {
+		if f.col == base64LineLen {
+			if _, err := f.w.Write(crlf); err != nil {
+				return n, err
+			}
+			f.col = 0
+		}
+		chunk := min(len(p), base64LineLen-f.col)
+		m, err := f.w.Write(p[:chunk])
+		n += m
+		f.col += m
+		if err != nil {
+			return n, err
+		}
+		p = p[chunk:]
+	}
+	return n, nil
 }
 
 func randomBoundary() string {

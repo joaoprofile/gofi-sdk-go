@@ -1,35 +1,12 @@
 package observer
 
-import (
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-)
+import "sync"
 
-func SetupShutdown(lc *Registry, timeout time.Duration) {
-	go func() {
-		waitForSignal()
-		log.Print("signal received, initiating shutdown...")
+var shutdownOnce sync.Once
 
-		if err := lc.CloseWithTimeout(timeout); err != nil {
-			log.Fatalf("error closing resources: %v", err)
-		}
-
-		log.Print("shutdown completed")
-		os.Exit(0)
-	}()
-}
-
-func waitForSignal() {
-	ch := make(chan os.Signal, 1)
-
-	signal.Notify(
-		ch,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	)
-
-	<-ch
+// Shutdown closes every attached observer in reverse (LIFO) order, once.
+// The observer no longer listens to OS signals: gofi's Service.Run (or the
+// application, via signal.NotifyContext) decides when to call it.
+func Shutdown() {
+	shutdownOnce.Do(func() { Instance().notify() })
 }

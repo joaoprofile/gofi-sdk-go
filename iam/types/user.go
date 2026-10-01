@@ -20,5 +20,8 @@ type ExternalIdentity struct {
 	Provider   string // "google", "github", "microsoft"
 	ExternalID string // the user's ID at the external provider
 	Email      string // email returned by the provider
-	LinkedAt   time.Time
+	// EmailVerified reports whether the provider asserted ownership of Email;
+	// never link to an existing account by an unverified email.
+	EmailVerified bool
+	LinkedAt      time.Time
 }

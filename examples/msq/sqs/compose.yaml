@@ -1,0 +1,10 @@
+services:
+  localstack:
+    image: localstack/localstack:4
+    environment:
+      SERVICES: sqs
+    ports:
+      - "4566:4566"
+    volumes:
+      # Creates the queues once LocalStack is ready (SQS never creates them on use).
+      - ./localstack/create-queues.sh:/etc/localstack/init/ready.d/create-queues.sh

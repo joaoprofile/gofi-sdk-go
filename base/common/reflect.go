@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -8,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaoprofile/gofi/base/validator"
+	"github.com/gofi-labs/gofi-sdk-go/base/validator"
 )
 
-func ParseStructName(s interface{}) (string, error) {
+func ParseStructName(s any) (string, error) {
 	if err := validator.IsStruct(s); err != nil {
 		return "", err
 	}
@@ -21,28 +22,34 @@ func ParseStructName(s interface{}) (string, error) {
 	return CamelToSnake(structName), nil
 }
 
-func ParseStructColumns(s interface{}) (string, error) {
+func ParseStructColumns(s any) (string, error) {
 	if err := validator.IsStruct(s); err != nil {
 		return "", err
 	}
 
 	queryType := reflect.TypeOf(s)
 	var columns []string
-	for i := 0; i < queryType.NumField(); i++ {
-		field := queryType.Field(i)
+	for field := range queryType.Fields() {
 		columnTag := field.Tag.Get("column")
 		columns = append(columns, columnTag)
 	}
 
-	return fmt.Sprintf("%s", strings.Join(columns, ", ")), nil
+	return strings.Join(columns, ", "), nil
 }
 
-var durationType = reflect.TypeOf(time.Duration(0))
+var durationType = reflect.TypeFor[time.Duration]()
 
 func ParseStructAnnotation(cfg any, annotation string) error {
+	return ParseStructAnnotationFunc(cfg, annotation, os.Getenv)
+}
+
+// ParseStructAnnotationFunc fills cfg from lookup(tag) and returns every
+// conversion error joined, so all invalid variables are reported at once.
+func ParseStructAnnotationFunc(cfg any, annotation string, lookup func(string) string) error {
 	if err := validator.IsStructP(cfg); err != nil {
 		return err
 	}
+	var errs []error
 
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
@@ -56,7 +63,7 @@ func ParseStructAnnotation(cfg any, annotation string) error {
 			continue
 		}
 
-		envValue := os.Getenv(envName)
+		envValue := lookup(envName)
 		if envValue == "" {
 			continue
 		}
@@ -75,7 +82,8 @@ func ParseStructAnnotation(cfg any, annotation string) error {
 		if ft == durationType {
 			val, err := time.ParseDuration(envValue)
 			if err != nil {
-				return fmt.Errorf("error parsing duration for %s: %v", envName, err)
+				errs = append(errs, parseError(envName, "duration", err))
+				continue
 			}
 			field.SetInt(int64(val))
 			continue
@@ -88,35 +96,48 @@ func ParseStructAnnotation(cfg any, annotation string) error {
 		case reflect.Bool:
 			val, err := strconv.ParseBool(envValue)
 			if err != nil {
-				return fmt.Errorf("error parsing bool for %s: %v", envName, err)
+				errs = append(errs, parseError(envName, "bool", err))
+				continue
 			}
 			field.SetBool(val)
 
 		case reflect.Int:
 			val, err := strconv.Atoi(envValue)
 			if err != nil {
-				return fmt.Errorf("error parsing int for %s: %v", envName, err)
+				errs = append(errs, parseError(envName, "int", err))
+				continue
 			}
 			field.SetInt(int64(val))
 
 		case reflect.Int64:
 			val, err := strconv.ParseInt(envValue, 10, 64)
 			if err != nil {
-				return fmt.Errorf("error parsing int64 for %s: %v", envName, err)
+				errs = append(errs, parseError(envName, "int64", err))
+				continue
 			}
 			field.SetInt(val)
 
 		case reflect.Float64:
 			val, err := strconv.ParseFloat(envValue, 64)
 			if err != nil {
-				return fmt.Errorf("error parsing float64 for %s: %v", envName, err)
+				errs = append(errs, parseError(envName, "float64", err))
+				continue
 			}
 			field.SetFloat(val)
 
 		default:
-			return fmt.Errorf("unsupported field type %s (%s)", field.Kind(), fieldType.Name)
+			errs = append(errs, fmt.Errorf("unsupported field type %s (%s)", field.Kind(), fieldType.Name))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
+}
+
+// parseError names the variable and the expected type but never the raw value,
+// which may be a secret: strconv and time errors quote their input.
+func parseError(name, typ string, err error) error {
+	if ne, ok := errors.AsType[*strconv.NumError](err); ok {
+		return fmt.Errorf("error parsing %s for %s: %w", typ, name, ne.Err)
+	}
+	return fmt.Errorf("error parsing %s for %s: invalid value", typ, name)
 }

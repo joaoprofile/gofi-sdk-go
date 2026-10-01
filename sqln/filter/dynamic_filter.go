@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	"github.com/joaoprofile/gofi/sqln/criteria"
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 const timeLayout = time.RFC3339
@@ -25,12 +25,12 @@ const (
 type FilterDialect = driver.FilterDialect
 
 // activeDialect returns the dialect of the active global database connection.
-// Panics if no connection has been established — call connection.SetGlobal before using
-// NewQueryBuild, or use NewQueryBuildWithDialect with an explicit dialect.
+// Panics if no connection has been established — call connection.SetGlobal
+// before Build, or pass an explicit dialect.
 func activeDialect() FilterDialect {
 	d := connection.Dialect()
 	if d == nil {
-		panic("sqln/filter: no active database connection — call connection.SetGlobal before using NewQueryBuild, or use NewQueryBuildWithDialect with an explicit dialect")
+		panic("sqln/filter: no active database connection — call connection.SetGlobal before Build, or pass an explicit dialect")
 	}
 	return d
 }
@@ -99,6 +99,7 @@ const (
 	errMsgUnsupportedTypeField = "unsupported value type for field"
 	errMsgActionNotAllowed     = "action not allowed, invalid value for a filter: %s"
 	errMsgInvalidSortingField  = "invalid sorting field: %s"
+	errMsgInvalidSortDirection = "invalid sort direction: %s"
 	errMsgBetweenRequiresPair  = "BETWEEN requires exactly 2 values for field: %s"
 	errMsgConsecutiveLogicalOp = "consecutive logical operators are not allowed"
 	errMsgLeadingLogicalOp     = "filter list cannot start with a logical operator"
@@ -157,36 +158,6 @@ type QueryParam struct {
 	Params []any
 }
 
-// Query Builder
-
-func NewQueryBuild(query string, filter *Filters) *QueryParam {
-	return filter.queryBuild(query, activeDialect())
-}
-
-func NewQueryBuildWithDialect(query string, filter *Filters, dialect FilterDialect) *QueryParam {
-	if dialect == nil {
-		dialect = activeDialect()
-	}
-	return filter.queryBuild(query, dialect)
-}
-
-func (filters *Filters) queryBuild(query string, d FilterDialect) *QueryParam {
-	predicates := make([]criteria.Predicate, 0, len(filters.Filters))
-	for _, f := range filters.Filters {
-		if p, ok := filterToPredicate(f); ok {
-			predicates = append(predicates, p)
-		}
-	}
-	if len(predicates) == 0 {
-		return &QueryParam{Query: query}
-	}
-	clause, params := criteria.BuildClause(predicates, d)
-	return &QueryParam{
-		Query:  fmt.Sprintf("%s AND ( %s )", query, clause),
-		Params: params,
-	}
-}
-
 // Predicate Conversion
 
 // filterToPredicate converts a single *Filter into a criteria.Predicate.
@@ -204,6 +175,12 @@ func filterToPredicate(f *Filter) (criteria.Predicate, bool) {
 			logging.Error(errMsgInvalidLogicalOp, slog.String("op", f.LogicalOperator))
 			return criteria.Predicate{}, false
 		}
+	}
+
+	// Field names come from user input and are written into the SQL text.
+	if !driver.IsIdentifier(f.Field) {
+		logging.Error(errMsgInvalidField, slog.String("field", f.Field))
+		return criteria.Predicate{}, false
 	}
 
 	// Explicit null-check operators (no value required)
@@ -247,66 +224,77 @@ func buildSlicePredicate(f *Filter) (criteria.Predicate, bool) {
 	if !ok || len(slice) == 0 {
 		return criteria.Predicate{}, false
 	}
-
-	// Single-element slice → treat as scalar.
-	// IN/NOT IN have no scalar form; collapse to =/!= so the predicate is preserved
-	// instead of being silently dropped by scalarConditionPredicate.
 	if len(slice) == 1 {
-		cond := f.Condition
-		switch cond {
-		case In:
-			cond = Eq
-		case NotIn:
-			cond = NotEqual
-		}
-		return buildScalarPredicate(&Filter{Field: f.Field, Condition: cond, Value: slice[0]})
-	}
-
-	// BETWEEN with a []any containing time.Time values
-	if f.Condition == Between {
-		if times, ok := toTimeSlice(slice); ok && len(times) == 2 {
-			return criteria.Between(f.Field, times[0], times[1]), true
-		}
-		logging.Error(errMsgBetweenRequiresPair, slog.String("field", f.Field))
-		return criteria.Predicate{}, false
+		return buildSingleElementPredicate(f, slice[0])
 	}
 
 	switch f.Condition {
+	case Between:
+		return buildBetweenPredicate(f, slice)
 	case In, Eq:
 		return criteria.In(f.Field, slice), true
 	case NotIn, NotEqual:
 		return criteria.NotIn(f.Field, slice), true
 	default:
-		// Generic OR expansion: (field op $1 OR field op $2)
-		parts := make([]criteria.Predicate, 0, len(slice)*2-1)
-		for i, v := range slice {
-			if i > 0 {
-				parts = append(parts, criteria.Or())
-			}
-			p, ok := scalarConditionPredicate(f.Field, f.Condition, v)
-			if !ok {
-				return criteria.Predicate{}, false
-			}
-			parts = append(parts, p)
-		}
-		return criteria.Group(parts...), true
+		return buildOrExpansion(f, slice)
 	}
 }
 
+// buildSingleElementPredicate treats a single-element slice as a scalar.
+// IN/NOT IN have no scalar form; they collapse to =/!= so the predicate is
+// preserved instead of being silently dropped by scalarConditionPredicate.
+func buildSingleElementPredicate(f *Filter, value any) (criteria.Predicate, bool) {
+	cond := f.Condition
+	switch cond {
+	case In:
+		cond = Eq
+	case NotIn:
+		cond = NotEqual
+	}
+	return buildScalarPredicate(&Filter{Field: f.Field, Condition: cond, Value: value})
+}
+
+// buildBetweenPredicate requires a []any holding exactly two time.Time values.
+func buildBetweenPredicate(f *Filter, slice []any) (criteria.Predicate, bool) {
+	if times, ok := toTimeSlice(slice); ok && len(times) == 2 {
+		return criteria.Between(f.Field, times[0], times[1]), true
+	}
+	logging.Error(errMsgBetweenRequiresPair, slog.String("field", f.Field))
+	return criteria.Predicate{}, false
+}
+
+// buildOrExpansion produces (field op $1 OR field op $2 ...).
+func buildOrExpansion(f *Filter, slice []any) (criteria.Predicate, bool) {
+	parts := make([]criteria.Predicate, 0, len(slice)*2-1)
+	for i, v := range slice {
+		if i > 0 {
+			parts = append(parts, criteria.Or())
+		}
+		p, ok := scalarConditionPredicate(f.Field, f.Condition, v)
+		if !ok {
+			return criteria.Predicate{}, false
+		}
+		parts = append(parts, p)
+	}
+	return criteria.Group(parts...), true
+}
+
 // buildScalarPredicate builds a Predicate for a filter with a single scalar value.
-// String values are normalized through resolveValueType; LIKE patterns receive %…% wrapping.
+// String values are normalized through resolveValueType; LIKE values match
+// as literal substrings (criteria.Predicate.Substring).
 func buildScalarPredicate(f *Filter) (criteria.Predicate, bool) {
 	switch v := resolveValueType(f.Value).(type) {
 	case StringValue:
+		// The value is literal text: its % and _ are escaped, not wildcards.
 		switch f.Condition {
 		case Contains:
-			return criteria.Contains(f.Field, fmt.Sprintf("%%%s%%", v)), true
+			return criteria.Contains(f.Field, string(v)).Substring(), true
 		case NotContains:
-			return criteria.NotContains(f.Field, fmt.Sprintf("%%%s%%", v)), true
+			return criteria.NotContains(f.Field, string(v)).Substring(), true
 		case Like:
-			return criteria.Like(f.Field, fmt.Sprintf("%%%s%%", v)), true
+			return criteria.Like(f.Field, string(v)).Substring(), true
 		case NotLike:
-			return criteria.NotLike(f.Field, fmt.Sprintf("%%%s%%", v)), true
+			return criteria.NotLike(f.Field, string(v)).Substring(), true
 		default:
 			return scalarConditionPredicate(f.Field, f.Condition, v)
 		}

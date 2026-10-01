@@ -29,6 +29,10 @@ type Session struct {
 
 	AuthProvider string // "local", "google", "github", etc.
 
+	// AuthTime is the original login; kept across refresh rotations to
+	// enforce SecurityConfig.SessionMaxLifetime.
+	AuthTime time.Time
+
 	ExpiresAt  time.Time
 	CreatedAt  time.Time
 	LastUsedAt time.Time
@@ -42,8 +46,12 @@ type Session struct {
 	UserAgent string
 	DeviceID  string
 
-	// Extra carries project-specific session attributes that the SDK schema does not
-	// model (e.g. external provider tokens, domain role labels). Persisted by the
-	// SessionPort as part of the session blob — round-tripped on Save/Get.
-	Extra map[string]string `json:"extra,omitempty"`
+	// ClaimsExtra is re-issued as the "ext" claim of every access token of the
+	// session, readable by any bearer: never secrets. Stored under the legacy
+	// "extra" key so sessions saved before the split keep their claims.
+	ClaimsExtra map[string]string `json:"extra,omitempty"`
+
+	// SessionExtra carries server-side attributes (e.g. external provider
+	// tokens). Persisted with the session, never put in a token.
+	SessionExtra map[string]string `json:"session_extra,omitempty"`
 }

@@ -264,15 +264,15 @@ func TestGetMappedCols_SliceField_UsesPqArray(t *testing.T) {
 }
 
 func TestGetMappedCols_ByteSlice_NotWrappedInPqArray(t *testing.T) {
-	plan := getTypePlan(reflect.TypeOf(byteSliceModel{}))
+	plan := getTypePlan(reflect.TypeFor[byteSliceModel]())
 	require.Len(t, plan.fields, 3)
 	assert.False(t, plan.fields[0].isSlice, "id is scalar")
-	assert.False(t, plan.fields[1].isSlice, "[]byte must scan as scalar, not pq.Array")
-	assert.False(t, plan.fields[2].isSlice, "json.RawMessage must scan as scalar, not pq.Array")
+	assert.False(t, plan.fields[1].isSlice, "[]byte must scan as scalar, not an array")
+	assert.False(t, plan.fields[2].isSlice, "json.RawMessage must scan as scalar, not an array")
 }
 
 func TestGetMappedCols_StringSlice_StillUsesPqArray(t *testing.T) {
-	plan := getTypePlan(reflect.TypeOf(sliceModel{}))
+	plan := getTypePlan(reflect.TypeFor[sliceModel]())
 	require.Len(t, plan.fields, 1)
 	assert.True(t, plan.fields[0].isSlice, "[]string is a Postgres array")
 }
@@ -520,13 +520,13 @@ type modelWithSliceAndVO struct {
 func TestGetMappedCols_MixedSliceAndVO(t *testing.T) {
 	m := &modelWithSliceAndVO{}
 	cols := GetMappedCols(m)
-	require.Len(t, cols, 3) // id + tags (pq.Array) + price.price
+	require.Len(t, cols, 3) // id + tags (array) + price.price
 }
 
 // Plan cache
 
 func TestTypePlan_CachedAcrossCalls(t *testing.T) {
-	tp := reflect.TypeOf(productWithVO{})
+	tp := reflect.TypeFor[productWithVO]()
 	p1 := getTypePlan(tp)
 	p2 := getTypePlan(tp)
 	assert.Same(t, p1, p2, "second call should reuse cached plan pointer")
@@ -537,13 +537,13 @@ func TestTypePlan_ConcurrentSafe(t *testing.T) {
 		A int `db:"a"`
 		B int `db:"b"`
 	}
-	tp := reflect.TypeOf(concurrentModel{})
+	tp := reflect.TypeFor[concurrentModel]()
 
 	const workers = 32
 	seen := make([]*typePlan, workers)
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		go func(idx int) {
 			defer wg.Done()
 			seen[idx] = getTypePlan(tp)
@@ -557,7 +557,7 @@ func TestTypePlan_ConcurrentSafe(t *testing.T) {
 }
 
 func TestTypePlan_SimpleType(t *testing.T) {
-	p := getTypePlan(reflect.TypeOf(42))
+	p := getTypePlan(reflect.TypeFor[int]())
 	assert.True(t, p.simple)
 	assert.Empty(t, p.fields)
 }

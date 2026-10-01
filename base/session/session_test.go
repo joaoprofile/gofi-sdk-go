@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/joaoprofile/gofi/base/session"
+	"github.com/gofi-labs/gofi-sdk-go/base/session"
 )
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ func TestCreateOrGet_ReturnsExistingNonExpired(t *testing.T) {
 }
 
 func TestCreateOrGet_ReplacesExpiredEntry(t *testing.T) {
-	s, _ := setup(t)
+	setup(t)
 	key := session.NewKey("test", "user", "3")
 
 	// force an already-expired entry into the driver
@@ -196,7 +196,7 @@ func TestCreateOrGet_ReplacesExpiredEntry(t *testing.T) {
 
 	session.ResetSingleton()
 	t.Cleanup(session.ResetSingleton)
-	s = session.New(d, &session.Config{Prefix: "test", TTL: 10 * time.Minute})
+	s := session.New(d, &session.Config{Prefix: "test", TTL: 10 * time.Minute})
 
 	fresh, err := s.CreateOrGet(context.Background(), key, data())
 	require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestCreateOrGet_ConcurrentSameKey(t *testing.T) {
 	ids := make(chan string, n)
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
 			e, err := s.CreateOrGet(context.Background(), key, data())
@@ -380,14 +380,14 @@ func TestCleanExpired_RemovesExpiredKeepsValid(t *testing.T) {
 
 func TestTryLock_EmptyKey(t *testing.T) {
 	s, _ := setup(t)
-	ok, err := s.TryLock(context.Background(), "")
+	_, ok, err := s.TryLock(context.Background(), "")
 	assert.ErrorIs(t, err, session.ErrInvalidKey)
 	assert.False(t, ok)
 }
 
 func TestUnlock_EmptyKey(t *testing.T) {
 	s, _ := setup(t)
-	assert.ErrorIs(t, s.Unlock(context.Background(), ""), session.ErrInvalidKey)
+	assert.ErrorIs(t, s.Unlock(context.Background(), "", "tok"), session.ErrInvalidKey)
 }
 
 func TestIsLocked_EmptyKey(t *testing.T) {
@@ -402,18 +402,19 @@ func TestTryLockUnlock_Cycle(t *testing.T) {
 	ctx := context.Background()
 	key := session.NewKey("lock", "resource", "42")
 
-	ok, err := s.TryLock(ctx, key)
+	tok, ok, err := s.TryLock(ctx, key)
 	require.NoError(t, err)
 	assert.True(t, ok)
+	assert.Empty(t, tok, "drivers without TokenLocker have no owner token")
 
 	// already locked
-	ok, err = s.TryLock(ctx, key)
+	_, ok, err = s.TryLock(ctx, key)
 	require.NoError(t, err)
 	assert.False(t, ok)
 
-	require.NoError(t, s.Unlock(ctx, key))
+	require.NoError(t, s.Unlock(ctx, key, tok))
 
-	ok, err = s.TryLock(ctx, key)
+	_, ok, err = s.TryLock(ctx, key)
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
@@ -427,7 +428,7 @@ func TestIsLocked_ReflectsState(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, locked)
 
-	_, _ = s.TryLock(ctx, key)
+	_, _, _ = s.TryLock(ctx, key)
 
 	locked, err = s.IsLocked(ctx, key)
 	require.NoError(t, err)
@@ -455,7 +456,7 @@ func TestWithLock_SkipsCallbackIfAlreadyLocked(t *testing.T) {
 	ctx := context.Background()
 	key := session.NewKey("lock", "withlock", "2")
 
-	_, _ = s.TryLock(ctx, key)
+	_, _, _ = s.TryLock(ctx, key)
 
 	called := false
 	ok, err := s.WithLock(ctx, key, func() error {

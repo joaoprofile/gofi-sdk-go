@@ -44,15 +44,12 @@ func TestToFixed(t *testing.T) {
 
 func TestPtr(t *testing.T) {
 	s := "hello"
-	ptr := Ptr(s)
-	if ptr == nil {
-		t.Fatal("Ptr returned nil")
-	}
+	ptr := new(s)
 	if *ptr != s {
 		t.Errorf("Expected *ptr = %q, got %q", s, *ptr)
 	}
 
-	empty := Ptr("")
+	empty := new("")
 	if empty == nil || *empty != "" {
 		t.Errorf("Expected Ptr(\"\") to return pointer to empty string")
 	}

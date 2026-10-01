@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/joaoprofile/gofi/msq/port"
-	redisprovider "github.com/joaoprofile/gofi/msq/provider/redis"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	redisprovider "github.com/gofi-labs/gofi-sdk-go/msq/provider/redis"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,14 +64,14 @@ func TestNewProducerNotNil(t *testing.T) {
 
 func TestNewConsumerNotNil(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	c := broker.NewConsumer(types.ConsumeConfig{Topic: "ch", Concurrency: 1})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "ch", Concurrency: 1})
 	assert.NotNil(t, c)
 }
 
 func TestNewConsumerDefaultsConcurrency(t *testing.T) {
 	// concurrency=0 must not panic during construction.
 	broker, _ := newTestBroker(t)
-	c := broker.NewConsumer(types.ConsumeConfig{Topic: "ch", Concurrency: 0})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "ch", Concurrency: 0})
 	assert.NotNil(t, c)
 }
 
@@ -83,13 +83,16 @@ func TestProducerSendMessage(t *testing.T) {
 	require.NoError(t, err)
 	defer producer.Close()
 
-	msg := types.NewMessageWithTopic("events", map[string]string{"action": "signup"})
+	msg := testMessageWithTopic("events", map[string]string{"action": "signup"})
 
 	// Subscribe before publishing so the message is received.
 	sub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer sub.Close()
 	pubsub := sub.Subscribe(context.Background(), "events")
 	defer pubsub.Close()
+	// Pub/Sub drops what is published before the subscription is confirmed.
+	_, err = pubsub.Receive(context.Background())
+	require.NoError(t, err)
 
 	require.NoError(t, producer.SendMessage(context.Background(), msg))
 
@@ -125,11 +128,14 @@ func TestProducerSendMessagesBatch(t *testing.T) {
 	defer sub.Close()
 	pubsub := sub.Subscribe(context.Background(), "batch-ch")
 	defer pubsub.Close()
+	// Pub/Sub drops what is published before the subscription is confirmed.
+	_, err = pubsub.Receive(context.Background())
+	require.NoError(t, err)
 
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("batch-ch", "a"),
-		types.NewMessageWithTopic("batch-ch", "b"),
-		types.NewMessageWithTopic("batch-ch", "c"),
+		testMessageWithTopic("batch-ch", "a"),
+		testMessageWithTopic("batch-ch", "b"),
+		testMessageWithTopic("batch-ch", "c"),
 	}
 	require.NoError(t, producer.SendMessagesBatch(context.Background(), msgs))
 
@@ -154,7 +160,7 @@ func TestProducerSendMessagesBatchMissingTopic(t *testing.T) {
 	defer producer.Close()
 
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("ch", "ok"),
+		testMessageWithTopic("ch", "ok"),
 		{Topic: ""}, // missing topic
 	}
 	err = producer.SendMessagesBatch(context.Background(), msgs)
@@ -172,7 +178,7 @@ func TestProducerClose(t *testing.T) {
 
 func TestConsumerReceivesMessage(t *testing.T) {
 	broker, mr := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{
 		Topic:       "notifications",
 		Concurrency: 1,
 	})
@@ -200,7 +206,7 @@ func TestConsumerReceivesMessage(t *testing.T) {
 	pub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer pub.Close()
 
-	msg := types.NewMessageWithTopic("notifications", map[string]string{"event": "login"})
+	msg := testMessageWithTopic("notifications", map[string]string{"event": "login"})
 	payload, _ := json.Marshal(msg)
 	require.NoError(t, pub.Publish(context.Background(), "notifications", string(payload)).Err())
 
@@ -215,7 +221,7 @@ func TestConsumerReceivesMessage(t *testing.T) {
 func TestConsumerHandlesRawPayload(t *testing.T) {
 	// Non-JSON payload must be wrapped as raw bytes value without crashing.
 	broker, mr := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "raw-ch", Concurrency: 1})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "raw-ch", Concurrency: 1})
 	defer consumer.Close()
 
 	receivedCh := make(chan []byte, 1)
@@ -246,7 +252,7 @@ func TestConsumerHandlesRawPayload(t *testing.T) {
 func TestConsumerNackIsLogged(t *testing.T) {
 	// Nack must not crash; the consumer continues processing.
 	broker, mr := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "nack-ch", Concurrency: 1})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "nack-ch", Concurrency: 1})
 	defer consumer.Close()
 
 	called := make(chan struct{}, 1)
@@ -263,7 +269,7 @@ func TestConsumerNackIsLogged(t *testing.T) {
 
 	pub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer pub.Close()
-	msg := types.NewMessageWithTopic("nack-ch", "data")
+	msg := testMessageWithTopic("nack-ch", "data")
 	payload, _ := json.Marshal(msg)
 	pub.Publish(context.Background(), "nack-ch", string(payload))
 
@@ -276,7 +282,7 @@ func TestConsumerNackIsLogged(t *testing.T) {
 
 func TestConsumerIgnoreResult(t *testing.T) {
 	broker, mr := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "ignore-ch", Concurrency: 1})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "ignore-ch", Concurrency: 1})
 	defer consumer.Close()
 
 	called := make(chan struct{}, 1)
@@ -293,7 +299,7 @@ func TestConsumerIgnoreResult(t *testing.T) {
 
 	pub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer pub.Close()
-	msg := types.NewMessageWithTopic("ignore-ch", "x")
+	msg := testMessageWithTopic("ignore-ch", "x")
 	payload, _ := json.Marshal(msg)
 	pub.Publish(context.Background(), "ignore-ch", string(payload))
 
@@ -306,7 +312,7 @@ func TestConsumerIgnoreResult(t *testing.T) {
 
 func TestConsumerPauseAndResume(t *testing.T) {
 	broker, mr := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "pause-ch", Concurrency: 1})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "pause-ch", Concurrency: 1})
 	defer consumer.Close()
 
 	var handleCount atomic.Int32
@@ -327,7 +333,7 @@ func TestConsumerPauseAndResume(t *testing.T) {
 	pub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer pub.Close()
 
-	msg := types.NewMessageWithTopic("pause-ch", "during-pause")
+	msg := testMessageWithTopic("pause-ch", "during-pause")
 	payload, _ := json.Marshal(msg)
 	pub.Publish(context.Background(), "pause-ch", string(payload))
 
@@ -338,7 +344,7 @@ func TestConsumerPauseAndResume(t *testing.T) {
 	require.NoError(t, consumer.Resume())
 	time.Sleep(50 * time.Millisecond)
 
-	msg2 := types.NewMessageWithTopic("pause-ch", "after-resume")
+	msg2 := testMessageWithTopic("pause-ch", "after-resume")
 	payload2, _ := json.Marshal(msg2)
 	pub.Publish(context.Background(), "pause-ch", string(payload2))
 
@@ -349,7 +355,7 @@ func TestConsumerPauseAndResume(t *testing.T) {
 
 func TestConsumerCancelContextStops(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "cancel-ch", Concurrency: 1})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "cancel-ch", Concurrency: 1})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -374,7 +380,7 @@ func TestConsumerCancelContextStops(t *testing.T) {
 
 func TestConsumerClose(t *testing.T) {
 	broker, _ := newTestBroker(t)
-	consumer := broker.NewConsumer(types.ConsumeConfig{Topic: "ch"})
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "ch"})
 	assert.NoError(t, consumer.Close())
 }
 
@@ -391,7 +397,7 @@ func TestProducerSendMessagePublishError(t *testing.T) {
 
 	mr.Close()
 
-	msg := types.NewMessageWithTopic("events", "data")
+	msg := testMessageWithTopic("events", "data")
 	err = producer.SendMessage(context.Background(), msg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "publish")
@@ -409,8 +415,8 @@ func TestProducerSendMessagesBatchPipelineError(t *testing.T) {
 	mr.Close()
 
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("ch", "a"),
-		types.NewMessageWithTopic("ch", "b"),
+		testMessageWithTopic("ch", "a"),
+		testMessageWithTopic("ch", "b"),
 	}
 	err = producer.SendMessagesBatch(context.Background(), msgs)
 	assert.Error(t, err)

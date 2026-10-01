@@ -1,12 +1,36 @@
-go 1.26.5
+go 1.26.6
 
 use (
-	.
+	./gofi
 	./base
-	./examples
+	./base/bucket/oci
+	./base/bucket/s3
+	./base/cloud/aws
+	./base/cloud/oci
+	./base/secrets/awssm
+	./base/secrets/ocivault
+	./examples/iam/login
+	./examples/msq/kafka/consumer
+	./examples/msq/kafka/producer
+	./examples/msq/rabbitmq/consumer
+	./examples/msq/rabbitmq/producer
+	./examples/msq/sqs/consumer
+	./examples/msq/sqs/producer
+	./examples/netx/api
+	./examples/obs
+	./examples/sqln/filter-api
+	./examples/sqln/search
 	./iam
 	./msq
+	./msq/provider/kafka
+	./msq/provider/nats
+	./msq/provider/oci
+	./msq/provider/rabbitmq
+	./msq/provider/redis
+	./msq/provider/sqs
 	./netx
+	./netx/awssign
 	./obs
 	./sqln
+	./sqln/rdsauth
 )

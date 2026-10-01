@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,29 +21,47 @@ func TestNewStatement_ReturnsNonNil(t *testing.T) {
 func TestExecute_EmptyQuery_ReturnsError(t *testing.T) {
 	setupGlobal(t)
 	s := NewStatement()
-	err := s.Execute(context.Background(), "")
+	_, err := s.Execute(context.Background(), "")
 	assert.ErrorContains(t, err, connection.ErrQueryIsEmpty)
 }
 
 func TestExecute_DBNotInitialized_ReturnsError(t *testing.T) {
 	connection.ResetGlobalForTest()
 	s := NewStatement()
-	err := s.Execute(context.Background(), "SELECT 1")
+	_, err := s.Execute(context.Background(), "SELECT 1")
 	assert.ErrorContains(t, err, connection.ErrDatabaseNotInitialized)
 }
 
 func TestExecute_Success(t *testing.T) {
 	setupGlobal(t)
 	s := NewStatement()
-	err := s.Execute(context.Background(), "INSERT INTO t (id) VALUES (1)")
+	_, err := s.Execute(context.Background(), "INSERT INTO t (id) VALUES (1)")
 	assert.NoError(t, err)
 }
 
 func TestExecute_PrepareFails_ReturnsError(t *testing.T) {
 	setupGlobalWithDSN(t, "fail-prepare")
 	s := NewStatement()
-	err := s.Execute(context.Background(), "SELECT 1")
-	assert.ErrorContains(t, err, "prepare failed")
+	_, err := s.Execute(context.Background(), "SELECT 1")
+	assert.EqualError(t, err, "sqln: exec failed", "the driver message stays out of Error()")
+	assert.EqualError(t, connection.Cause(err), "prepare failed")
+}
+
+// Regression: statements without a context deadline could run forever.
+func TestExecute_AppliesQueryTimeout(t *testing.T) {
+	setupGlobalWithDSN(t, "record-deadline")
+	_, err := NewStatement().Execute(context.Background(), "UPDATE t SET v = 1")
+	require.NoError(t, err)
+	had, _ := lastExecDeadline.Load("had")
+	assert.Equal(t, true, had)
+}
+
+func TestPrepare_Fails_WrapsError(t *testing.T) {
+	setupGlobalWithDSN(t, "fail-prepare")
+	_, err := NewStatement().Prepare(context.Background(), "SELECT 1")
+	var dbErr *connection.Error
+	require.ErrorAs(t, err, &dbErr)
+	assert.Equal(t, "prepare", dbErr.Op)
 }
 
 func TestExecute_InTransaction(t *testing.T) {
@@ -53,7 +71,7 @@ func TestExecute_InTransaction(t *testing.T) {
 	defer tx.Rollback()
 
 	s := NewStatement()
-	err := s.Execute(ctx, "INSERT INTO t (id) VALUES (1)")
+	_, err := s.Execute(ctx, "INSERT INTO t (id) VALUES (1)")
 	assert.NoError(t, err)
 }
 
@@ -99,37 +117,45 @@ func TestPrepare_InTransaction(t *testing.T) {
 
 // QueryRow
 
-func TestQueryRow_DBNotInitialized_Panics(t *testing.T) {
+func TestQueryRow_DBNotInitialized_ReturnsError(t *testing.T) {
 	connection.ResetGlobalForTest()
-	s := NewStatement()
-	assert.Panics(t, func() {
-		s.QueryRow(context.Background(), "SELECT 1")
-	})
+	row, err := NewStatement().QueryRow(context.Background(), "SELECT 1")
+	assert.Nil(t, row)
+	assert.ErrorContains(t, err, connection.ErrDatabaseNotInitialized)
 }
 
-func TestQueryRow_EmptyQuery_ReturnsErrorRow(t *testing.T) {
+func TestQueryRow_EmptyQuery_ReturnsError(t *testing.T) {
 	setupGlobal(t)
-	s := NewStatement()
-	// empty query returns a row with the error message
-	row := s.QueryRow(context.Background(), "")
-	require.NotNil(t, row)
-	// The fake driver returns a row; we just verify it doesn't panic
+	row, err := NewStatement().QueryRow(context.Background(), "")
+	assert.Nil(t, row)
+	assert.ErrorContains(t, err, connection.ErrQueryIsEmpty)
 }
 
 func TestQueryRow_Success(t *testing.T) {
 	setupGlobal(t)
-	s := NewStatement()
-	row := s.QueryRow(context.Background(), "SELECT 1")
+	row, err := NewStatement().QueryRow(context.Background(), "SELECT 1")
+	require.NoError(t, err)
 	assert.NotNil(t, row)
 }
 
 func TestQueryRow_InTransaction(t *testing.T) {
 	setupGlobal(t)
-	db := mustOpenDB(t)
-	ctx, tx := txContext(t, db)
+	db := connection.MustDB()
+	tx, err := db.Begin()
+	require.NoError(t, err)
 	defer tx.Rollback()
+	ctx := context.WithValue(context.Background(), connection.SqlTxContextKey, tx)
 
-	s := NewStatement()
-	row := s.QueryRow(ctx, "SELECT 1")
+	row, err := NewStatement().QueryRow(ctx, "SELECT 1")
+	require.NoError(t, err)
 	assert.NotNil(t, row)
+}
+
+func TestExecute_ReturnsResult(t *testing.T) {
+	setupGlobal(t)
+	res, err := NewStatement().Execute(context.Background(), "UPDATE t SET v = 1")
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
 }

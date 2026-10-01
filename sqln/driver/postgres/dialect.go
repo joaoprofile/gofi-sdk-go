@@ -1,22 +1,37 @@
 package postgres
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 type PostgresDialect struct{}
 
 func (PostgresDialect) Param(index int) string {
-	return fmt.Sprintf("$%d", index)
+	return "$" + strconv.Itoa(index)
 }
 
 func (PostgresDialect) Like(field string, param string) string {
-	return fmt.Sprintf("%s ILIKE %s", field, param)
+	return field + " ILIKE " + param
 }
 
 func (PostgresDialect) NotLike(field string, param string) string {
-	return fmt.Sprintf("%s NOT ILIKE %s", field, param)
+	return field + " NOT ILIKE " + param
+}
+
+// ArrayMembership binds IN lists as one array: the SQL text is the same for
+// any list length. <> ALL keeps NOT IN's NULL semantics.
+func (PostgresDialect) ArrayMembership(field, param string, negate bool) string {
+	if negate {
+		return field + " <> ALL(" + param + ")"
+	}
+	return field + " = ANY(" + param + ")"
 }
 
 func (PostgresDialect) BuildPagination(query string, order string, limit uint16, offset uint64) string {
+	if order == "" {
+		return fmt.Sprintf("%s LIMIT %d OFFSET %d", query, limit, offset)
+	}
 	return fmt.Sprintf("%s ORDER BY %s LIMIT %d OFFSET %d", query, order, limit, offset)
 }
 

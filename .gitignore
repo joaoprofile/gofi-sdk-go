@@ -1,0 +1,6 @@
+# Go test binaries and coverage output
+*.test
+*.out
+
+# Local technical specs (not published)
+spec/

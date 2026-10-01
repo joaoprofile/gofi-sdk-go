@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,7 +132,72 @@ func TestRateLimiter_BackendError_FailOpen(t *testing.T) {
 	assert.True(t, nextCalled, "fail-open: next must be called on backend error")
 }
 
-func TestRateLimiter_APIKey_UsedAsClientID(t *testing.T) {
+func TestRateLimiter_BackendError_FailClosed(t *testing.T) {
+	backend := &stubBackend{fn: func(_ context.Context, _ string, _ redis_rate.Limit) (*redis_rate.Result, error) {
+		return nil, errors.New("redis: connection refused")
+	}}
+	cfg := defaultConfig(backend)
+	cfg.FailClosed = true
+
+	nextCalled := false
+	rec := httptest.NewRecorder()
+	NewRedisRateLimiter(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.False(t, nextCalled)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
+}
+
+func TestRateLimiter_BackendError_LoggedOncePerInterval(t *testing.T) {
+	var last, suppressed atomic.Int64
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	err := errors.New("boom")
+
+	logBackendError(req, err, false, &last, &suppressed)
+	first := last.Load()
+	require.NotZero(t, first, "the first failure must be logged")
+
+	logBackendError(req, err, false, &last, &suppressed)
+	logBackendError(req, err, false, &last, &suppressed)
+	assert.Equal(t, first, last.Load(), "failures within the interval are not logged")
+	assert.Equal(t, int64(2), suppressed.Load())
+
+	last.Store(first - int64(backendErrorLogInterval))
+	logBackendError(req, err, false, &last, &suppressed)
+	assert.Zero(t, suppressed.Load(), "the next log reports and resets the suppressed count")
+}
+
+func TestNewRedisRateLimiter_InvalidConfigPanics(t *testing.T) {
+	backend := &stubBackend{}
+	cases := map[string]RedisRateLimiterConfig{
+		"nil backend":   {Default: RateLimitPlan{Rate: 1, Burst: 1}},
+		"zero default":  {Backend: backend},
+		"zero burst":    {Backend: backend, Default: RateLimitPlan{Rate: 1}},
+		"negative plan": {Backend: backend, Default: RateLimitPlan{Rate: 1, Burst: 1}, Plans: map[string]RateLimitPlan{"k": {Rate: -1, Burst: 1}}},
+	}
+	for name, cfg := range cases {
+		assert.Panics(t, func() { NewRedisRateLimiter(cfg) }, name)
+	}
+}
+
+func TestRateLimiter_IPv6ClientsShareTheir64(t *testing.T) {
+	var keys []string
+	backend := &stubBackend{fn: func(_ context.Context, key string, _ redis_rate.Limit) (*redis_rate.Result, error) {
+		keys = append(keys, key)
+		return allowedResult(1), nil
+	}}
+	mw := NewRedisRateLimiter(defaultConfig(backend))(okHandler())
+	for _, remote := range []string{"[2001:db8::1]:1", "[2001:db8::ffff:2]:1"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remote
+		mw.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	assert.Equal(t, []string{"rl:2001:db8::/64", "rl:2001:db8::/64"}, keys)
+}
+
+func TestRateLimiter_KnownAPIKey_UsesHashedKey(t *testing.T) {
 	var capturedKey string
 	backend := &stubBackend{fn: func(_ context.Context, key string, _ redis_rate.Limit) (*redis_rate.Result, error) {
 		capturedKey = key
@@ -140,10 +206,65 @@ func TestRateLimiter_APIKey_UsedAsClientID(t *testing.T) {
 
 	mw := NewRedisRateLimiter(defaultConfig(backend))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-API-Key", "my-api-key")
+	req.Header.Set("X-API-Key", "premium")
 	mw(okHandler()).ServeHTTP(httptest.NewRecorder(), req)
 
-	assert.Equal(t, "rl:my-api-key", capturedKey)
+	assert.Equal(t, "rl:key:"+apiKeyFingerprint("premium"), capturedKey)
+	assert.NotContains(t, capturedKey, "premium")
+}
+
+func TestRateLimiter_UnknownAPIKey_FallsBackToIP(t *testing.T) {
+	var keys []string
+	backend := &stubBackend{fn: func(_ context.Context, key string, _ redis_rate.Limit) (*redis_rate.Result, error) {
+		keys = append(keys, key)
+		return allowedResult(5), nil
+	}}
+
+	mw := NewRedisRateLimiter(defaultConfig(backend))
+	for _, k := range []string{"random-1", "random-2"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.168.1.1:1234"
+		req.Header.Set("X-API-Key", k)
+		mw(okHandler()).ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	assert.Equal(t, []string{"rl:192.168.1.1", "rl:192.168.1.1"}, keys, "random keys must share the IP bucket")
+}
+
+func TestRateLimiter_IsKnownAPIKey_GivesOwnBucket(t *testing.T) {
+	var key string
+	var limit redis_rate.Limit
+	backend := &stubBackend{fn: func(_ context.Context, k string, l redis_rate.Limit) (*redis_rate.Result, error) {
+		key, limit = k, l
+		return allowedResult(5), nil
+	}}
+	cfg := defaultConfig(backend)
+	cfg.IsKnownAPIKey = func(k string) bool { return k == "customer-42" }
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-API-Key", "customer-42")
+	NewRedisRateLimiter(cfg)(okHandler()).ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, "rl:key:"+apiKeyFingerprint("customer-42"), key)
+	assert.Equal(t, cfg.Default.Rate, limit.Rate)
+}
+
+func TestRateLimiter_SpoofedXFF_DoesNotChangeBucket(t *testing.T) {
+	var keys []string
+	backend := &stubBackend{fn: func(_ context.Context, key string, _ redis_rate.Limit) (*redis_rate.Result, error) {
+		keys = append(keys, key)
+		return allowedResult(5), nil
+	}}
+
+	mw := NewRedisRateLimiter(defaultConfig(backend))
+	for _, ip := range []string{"1.1.1.1", "2.2.2.2"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "203.0.113.7:1234"
+		req.Header.Set("X-Forwarded-For", ip)
+		mw(okHandler()).ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	assert.Equal(t, []string{"rl:203.0.113.7", "rl:203.0.113.7"}, keys)
 }
 
 func TestRateLimiter_NoAPIKey_IPUsedAsClientID(t *testing.T) {
@@ -269,32 +390,6 @@ func TestExtractAPIKey_ReturnsHeaderValue(t *testing.T) {
 func TestExtractAPIKey_ReturnsEmptyWhenAbsent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	assert.Empty(t, extractAPIKey(req))
-}
-
-// ── extractIP ─────────────────────────────────────────────────────────────────
-
-func TestExtractIP_UsesXForwardedForFirstEntry(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
-	assert.Equal(t, "1.2.3.4", extractIP(req))
-}
-
-func TestExtractIP_TrimsSpacesInXForwardedFor(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Forwarded-For", "  203.0.113.5  , 10.0.0.1")
-	assert.Equal(t, "203.0.113.5", extractIP(req))
-}
-
-func TestExtractIP_FallsBackToRemoteAddr(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "192.168.0.1:5000"
-	assert.Equal(t, "192.168.0.1", extractIP(req))
-}
-
-func TestExtractIP_RemoteAddrWithoutPort(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "192.168.0.1"
-	assert.Equal(t, "192.168.0.1", extractIP(req))
 }
 
 // ── NewRedisBackend ───────────────────────────────────────────────────────────

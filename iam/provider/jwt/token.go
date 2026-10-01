@@ -1,15 +1,14 @@
 package jwt
 
 import (
-	"crypto/rsa"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	gojwt "github.com/golang-jwt/jwt/v5"
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
 )
 
 // Algorithm defines the supported JWT signing algorithm.
@@ -32,8 +31,17 @@ type Config struct {
 	PrivateKey any // *rsa.PrivateKey or *ecdsa.PrivateKey
 	PublicKey  any // *rsa.PublicKey  or *ecdsa.PublicKey
 
+	// KeyID is written as the kid header, identifying the signing key.
+	KeyID string
+	// VerificationKeys are previous keys, by kid, still accepted while tokens
+	// they signed expire (key rotation). Same algorithm as the current key.
+	VerificationKeys map[string]any
+
 	AccessTokenTTL time.Duration // default: 15 min
-	Issuer         string
+	Issuer         string        // issued as iss
+	VerifyIssuer   bool          // require iss == Issuer; opt-in for services sharing a secret
+	Audience       string        // issued as aud and required on validation when set
+	Leeway         time.Duration // clock skew tolerance for exp/iat/nbf
 }
 
 // iamClaims maps types.Claims to the JWT format with RegisteredClaims.
@@ -58,17 +66,11 @@ func NewProvider(cfg Config) (*Provider, error) {
 		cfg.Algorithm = HS256
 	}
 
-	switch cfg.Algorithm {
-	case HS256:
-		if len(cfg.Secret) < 32 {
-			return nil, core.ErrJWTSecretTooShort
-		}
-	case RS256, ES256:
-		if cfg.PrivateKey == nil || cfg.PublicKey == nil {
-			return nil, fmt.Errorf("iam/jwt: PrivateKey and PublicKey are required for %s", cfg.Algorithm)
-		}
-	default:
-		return nil, fmt.Errorf("iam/jwt: unsupported algorithm %s", cfg.Algorithm)
+	if err := validateKeys(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Leeway < 0 || cfg.Leeway > core.MaxClockSkew {
+		return nil, core.ErrClockSkewExceeded
 	}
 
 	if cfg.AccessTokenTTL == 0 {
@@ -90,6 +92,7 @@ func (p *Provider) IssueAccessToken(claims types.Claims) (string, error) {
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   claims.UserID,
 			Issuer:    p.cfg.Issuer,
+			Audience:  p.audience(),
 			IssuedAt:  gojwt.NewNumericDate(now),
 			ExpiresAt: gojwt.NewNumericDate(exp),
 		},
@@ -102,6 +105,9 @@ func (p *Provider) IssueAccessToken(claims types.Claims) (string, error) {
 	}
 
 	token := gojwt.NewWithClaims(p.signingMethod(), jc)
+	if p.cfg.KeyID != "" {
+		token.Header["kid"] = p.cfg.KeyID
+	}
 	return token.SignedString(p.signingKey())
 }
 
@@ -118,8 +124,8 @@ func (p *Provider) ParseToken(token string) (*types.Claims, error) {
 		if t.Method.Alg() != string(p.cfg.Algorithm) {
 			return nil, fmt.Errorf("iam/jwt: unexpected signing method: %s", t.Method.Alg())
 		}
-		return p.verificationKey(), nil
-	})
+		return p.keyFor(t)
+	}, p.parserOptions()...)
 	if err != nil {
 		if errors.Is(err, gojwt.ErrTokenExpired) {
 			return nil, core.ErrTokenExpired
@@ -151,6 +157,28 @@ func (p *Provider) ParseToken(token string) (*types.Claims, error) {
 	return out, nil
 }
 
+func (p *Provider) parserOptions() []gojwt.ParserOption {
+	opts := []gojwt.ParserOption{
+		gojwt.WithValidMethods([]string{string(p.cfg.Algorithm)}),
+		gojwt.WithExpirationRequired(),
+		gojwt.WithLeeway(p.cfg.Leeway),
+	}
+	if p.cfg.VerifyIssuer && p.cfg.Issuer != "" {
+		opts = append(opts, gojwt.WithIssuer(p.cfg.Issuer))
+	}
+	if p.cfg.Audience != "" {
+		opts = append(opts, gojwt.WithAudience(p.cfg.Audience))
+	}
+	return opts
+}
+
+func (p *Provider) audience() gojwt.ClaimStrings {
+	if p.cfg.Audience == "" {
+		return nil
+	}
+	return gojwt.ClaimStrings{p.cfg.Audience}
+}
+
 func (p *Provider) signingMethod() gojwt.SigningMethod {
 	switch p.cfg.Algorithm {
 	case RS256:
@@ -162,14 +190,37 @@ func (p *Provider) signingMethod() gojwt.SigningMethod {
 	}
 }
 
+// signingKey returns the key NewProvider validated for the algorithm.
 func (p *Provider) signingKey() any {
 	switch p.cfg.Algorithm {
-	case RS256:
-		return p.cfg.PrivateKey.(*rsa.PrivateKey)
-	case ES256:
+	case RS256, ES256:
 		return p.cfg.PrivateKey
 	default:
 		return p.cfg.Secret
+	}
+}
+
+// keyFor picks the key by kid; tokens without kid (issued before rotation
+// was configured) are tried against every known key.
+func (p *Provider) keyFor(t *gojwt.Token) (any, error) {
+	kid, _ := t.Header["kid"].(string)
+	switch {
+	case kid == "":
+		if len(p.cfg.VerificationKeys) == 0 {
+			return p.verificationKey(), nil
+		}
+		set := gojwt.VerificationKeySet{Keys: []gojwt.VerificationKey{p.verificationKey()}}
+		for _, k := range p.cfg.VerificationKeys {
+			set.Keys = append(set.Keys, k)
+		}
+		return set, nil
+	case kid == p.cfg.KeyID:
+		return p.verificationKey(), nil
+	default:
+		if k, ok := p.cfg.VerificationKeys[kid]; ok {
+			return k, nil
+		}
+		return nil, fmt.Errorf("iam/jwt: unknown key id %q", kid)
 	}
 }
 

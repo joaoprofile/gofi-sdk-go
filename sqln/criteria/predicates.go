@@ -1,22 +1,46 @@
 package criteria
 
 import (
+	"fmt"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 // Predicate represents a single WHERE/HAVING condition or a logical connector (AND/OR).
 // Use the constructor functions below — never build Predicate literals directly.
+//
+// The field must be a column reference (col, t.col, "Col"; see driver.IsIdentifier):
+// it is written into the SQL text, so anything else fails Build with ErrInvalidField.
+// Mark a trusted SQL expression such as COUNT(*) with Raw.
 type Predicate struct {
 	field    string
 	operator string
 	value    any
 	logical  string      // non-empty only for logical connectors (AND / OR)
 	children []Predicate // non-empty only for Group predicate
+	raw      bool        // field is a trusted expression, written without validation
+	literal  bool        // LIKE value is literal text matched as a substring
+	err      error       // invalid constructor input, reported by Build
 }
 
 func (p Predicate) isLogical() bool { return p.logical != "" }
+
+// Substring makes a Contains, NotContains, Like or NotLike value literal
+// text matched anywhere in the field: its wildcards are escaped for the
+// dialect, it is wrapped in %…% and ESCAPE '!' is appended. Use it for user
+// input, so "%" or "_" cannot turn a search into a full scan pattern.
+func (p Predicate) Substring() Predicate {
+	p.literal = true
+	return p
+}
+
+// Raw marks the field as a trusted SQL expression (e.g. COUNT(*), lower(u.name))
+// written as is. Trusted input only — never user data.
+func (p Predicate) Raw() Predicate {
+	p.raw = true
+	return p
+}
 
 // Comparison
 
@@ -143,58 +167,51 @@ func Or() Predicate { return Predicate{logical: driver.Or} }
 
 // Date Predicates
 //
-// All date predicates validate that the supplied time.Time is not zero.
-// DateBetween additionally validates that from is not after to.
-// Violations panic immediately — these are programmer errors, not runtime conditions.
+// A zero time.Time, or a DateBetween whose from is after to, makes Build
+// fail with ErrInvalidValue instead of producing a query.
+
+func datePredicate(name, field, operator string, date time.Time) Predicate {
+	p := Predicate{field: field, operator: operator, value: date}
+	if date.IsZero() {
+		p.err = fmt.Errorf("%w: %s on %q requires a non-zero time", ErrInvalidValue, name, field)
+	}
+	return p
+}
 
 // DateEq produces field = $date.
 func DateEq(field string, date time.Time) Predicate {
-	if date.IsZero() {
-		panic("criteria: DateEq requires a non-zero time.Time")
-	}
-	return Predicate{field: field, operator: driver.Eq, value: date}
+	return datePredicate("DateEq", field, driver.Eq, date)
 }
 
 // DateBefore produces field < $date.
 func DateBefore(field string, date time.Time) Predicate {
-	if date.IsZero() {
-		panic("criteria: DateBefore requires a non-zero time.Time")
-	}
-	return Predicate{field: field, operator: driver.Less, value: date}
+	return datePredicate("DateBefore", field, driver.Less, date)
 }
 
 // DateAfter produces field > $date.
 func DateAfter(field string, date time.Time) Predicate {
-	if date.IsZero() {
-		panic("criteria: DateAfter requires a non-zero time.Time")
-	}
-	return Predicate{field: field, operator: driver.Greater, value: date}
+	return datePredicate("DateAfter", field, driver.Greater, date)
 }
 
 // DateOnOrBefore produces field <= $date.
 func DateOnOrBefore(field string, date time.Time) Predicate {
-	if date.IsZero() {
-		panic("criteria: DateOnOrBefore requires a non-zero time.Time")
-	}
-	return Predicate{field: field, operator: driver.LessOrEqual, value: date}
+	return datePredicate("DateOnOrBefore", field, driver.LessOrEqual, date)
 }
 
 // DateOnOrAfter produces field >= $date.
 func DateOnOrAfter(field string, date time.Time) Predicate {
-	if date.IsZero() {
-		panic("criteria: DateOnOrAfter requires a non-zero time.Time")
-	}
-	return Predicate{field: field, operator: driver.GreaterOrEqual, value: date}
+	return datePredicate("DateOnOrAfter", field, driver.GreaterOrEqual, date)
 }
 
 // DateBetween produces field BETWEEN $from AND $to.
-// Panics if either value is zero or if from is after to.
+// Build fails when either value is zero or from is after to.
 func DateBetween(field string, from, to time.Time) Predicate {
+	p := Predicate{field: field, operator: driver.Between, value: []any{from, to}}
 	switch {
 	case from.IsZero() || to.IsZero():
-		panic("criteria: DateBetween requires non-zero time.Time values")
+		p.err = fmt.Errorf("%w: DateBetween on %q requires non-zero times", ErrInvalidValue, field)
 	case from.After(to):
-		panic("criteria: DateBetween requires from <= to")
+		p.err = fmt.Errorf("%w: DateBetween on %q requires from <= to", ErrInvalidValue, field)
 	}
-	return Predicate{field: field, operator: driver.Between, value: []any{from, to}}
+	return p
 }

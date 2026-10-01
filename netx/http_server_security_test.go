@@ -2,7 +2,11 @@ package netx
 
 import (
 	"bytes"
+	"crypto/tls"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,18 +30,110 @@ func TestSecurityHeaders_SetsAllRequiredHeaders(t *testing.T) {
 	assert.Equal(t, "geolocation=(), microphone=(), camera=()", h.Get("Permissions-Policy"))
 	assert.Equal(t, "nosniff", h.Get("X-Content-Type-Options"))
 	assert.Equal(t, "DENY", h.Get("X-Frame-Options"))
-	assert.Equal(t, "max-age=63072000; includeSubDomains; preload", h.Get("Strict-Transport-Security"))
+	assert.Equal(t, "no-store", h.Get("Cache-Control"))
+	assert.Empty(t, h.Get("Strict-Transport-Security"), "no HSTS over plain HTTP")
 	assert.Contains(t, h.Get("Content-Security-Policy"), "default-src 'self'")
 	assert.Contains(t, h.Get("Content-Security-Policy"), "frame-ancestors 'none'")
 }
 
-func TestSecurityHeaders_ClearsServerFingerprinting(t *testing.T) {
+// Regression: empty Server and X-Powered-By headers were emitted.
+func TestSecurityHeaders_NoEmptyFingerprintHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	SecurityHeaders(okHandler()).ServeHTTP(rec, req)
 
-	assert.Empty(t, rec.Header().Get("Server"))
-	assert.Empty(t, rec.Header().Get("X-Powered-By"))
+	_, server := rec.Header()["Server"]
+	_, poweredBy := rec.Header()["X-Powered-By"]
+	assert.False(t, server)
+	assert.False(t, poweredBy)
+}
+
+func TestSecurityHeaders_HandlerOverridesCacheControl(t *testing.T) {
+	rec := httptest.NewRecorder()
+	SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, "public, max-age=60", rec.Header().Get("Cache-Control"))
+}
+
+// Regression: HSTS always had preload and was sent over plain HTTP.
+func TestSecurityHeaders_HSTS(t *testing.T) {
+	tlsReq := func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.TLS = &tls.ConnectionState{}
+		return r
+	}
+	proxied := func(peer, proto string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = peer + ":1234"
+		r.Header.Set("X-Forwarded-Proto", proto)
+		return r
+	}
+	proxies := []string{"10.0.0.0/8"}
+	cases := []struct {
+		name string
+		cfg  SecurityHeadersConfig
+		req  *http.Request
+		want string
+	}{
+		{"TLS default", SecurityHeadersConfig{}, tlsReq(), "max-age=63072000; includeSubDomains"},
+		{"preload opt-in", SecurityHeadersConfig{HSTS: HSTSConfig{Preload: true}}, tlsReq(), "max-age=63072000; includeSubDomains; preload"},
+		{"custom", SecurityHeadersConfig{HSTS: HSTSConfig{MaxAge: time.Hour, ExcludeSubDomains: true}}, tlsReq(), "max-age=3600"},
+		{"disabled", SecurityHeadersConfig{HSTS: HSTSConfig{Disabled: true}}, tlsReq(), ""},
+		{"trusted proxy https", SecurityHeadersConfig{TrustedProxies: proxies}, proxied("10.1.2.3", "https"), "max-age=63072000; includeSubDomains"},
+		{"trusted proxy list", SecurityHeadersConfig{TrustedProxies: proxies}, proxied("10.1.2.3", "HTTPS, http"), "max-age=63072000; includeSubDomains"},
+		{"trusted proxy http", SecurityHeadersConfig{TrustedProxies: proxies}, proxied("10.1.2.3", "http"), ""},
+		{"untrusted peer", SecurityHeadersConfig{TrustedProxies: proxies}, proxied("203.0.113.9", "https"), ""},
+		{"no proxies trusted", SecurityHeadersConfig{}, proxied("10.1.2.3", "https"), ""},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		SecurityHeadersWith(tc.cfg)(okHandler()).ServeHTTP(rec, tc.req)
+		assert.Equal(t, tc.want, rec.Header().Get("Strict-Transport-Security"), tc.name)
+	}
+}
+
+// Regression: 429/503 responses produced before SecurityHeaders lacked them.
+func TestServer_SecurityHeadersOnEarlyRejections(t *testing.T) {
+	ws := NewServer(&WSConfig{StressControl: &StressControlConfig{DefaultMaxConcurrent: 1, DefaultTimeout: time.Millisecond}}).(*httpServer)
+	hold := make(chan struct{})
+	ws.AddHandlers(routesFunc(func() []*Route {
+		return PublicRoutes("/", GET("/slow").To(func(w http.ResponseWriter, _ *http.Request) { <-hold }))
+	}))
+	go serverRequest(ws.router, http.MethodGet, "/slow", nil)
+	time.Sleep(20 * time.Millisecond)
+	rec := serverRequest(ws.router, http.MethodGet, "/slow", nil)
+	close(hold)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.NotEmpty(t, rec.Header().Get(RequestIDHeader))
+}
+
+// Regression: chi's Recoverer printed a pretty stack to stderr only.
+func TestServer_RecovererLogsAndRespondsGeneric500(t *testing.T) {
+	logs := captureLogs(t)
+
+	ws := NewServer(&WSConfig{}).(*httpServer)
+	ws.AddHandlers(routesFunc(func() []*Route {
+		return PublicRoutes("/", GET("/boom").To(func(http.ResponseWriter, *http.Request) { panic("secret state") }))
+	}))
+	rec := serverRequest(ws.router, http.MethodGet, "/boom", map[string]string{RequestIDHeader: "req-42"})
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.JSONEq(t, `{"code":500,"message":"internal server error"}`, rec.Body.String())
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Contains(t, logs.String(), `"msg":"panic recovered"`)
+	assert.Contains(t, logs.String(), `"request_id":"req-42"`)
+	assert.Contains(t, logs.String(), `"panic":"secret state"`)
+	assert.Contains(t, logs.String(), `"stack":`)
+}
+
+func TestRecoverer_RepanicsAbortHandler(t *testing.T) {
+	h := Recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	})
 }
 
 func TestSecurityHeaders_CallsNextHandler(t *testing.T) {
@@ -264,11 +360,9 @@ func TestSemaphoreLimiter_Returns503WhenFull(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range max {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			mw(slowHandler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-		}()
+		})
 		<-started
 	}
 
@@ -333,11 +427,9 @@ func TestStressControl_RouteSpecificLimiterUsedOnPrefixMatch(t *testing.T) {
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		mw(slowHandler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/heavy/task", nil))
-	}()
+	})
 	<-started
 
 	rec := httptest.NewRecorder()
@@ -368,11 +460,9 @@ func TestStressControl_DefaultUnaffectedByRouteSaturation(t *testing.T) {
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		mw(slowHandler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/heavy/task", nil))
-	}()
+	})
 	<-started
 
 	rec := httptest.NewRecorder()
@@ -381,4 +471,88 @@ func TestStressControl_DefaultUnaffectedByRouteSaturation(t *testing.T) {
 
 	close(unblock)
 	wg.Wait()
+}
+
+// ── Slow request bodies ───────────────────────────────────────────────────────
+
+// startStressServer serves an echo route behind a 2-slot stress limiter.
+func startStressServer(t *testing.T, bufferBytes int64) string {
+	t.Helper()
+	ws := NewServer(&WSConfig{StressControl: &StressControlConfig{
+		DefaultMaxConcurrent: 2,
+		DefaultTimeout:       50 * time.Millisecond,
+		BufferBodyBytes:      bufferBytes,
+	}}).(*httpServer)
+	ws.AddHandlers(&mockRouterHandler{routes: PublicRoutes("/",
+		POST("/echo").To(readBodyHandler),
+		GET("/fast").To(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
+	)})
+	srv := httptest.NewServer(ws.handler())
+	t.Cleanup(srv.Close)
+	return srv.Listener.Addr().String()
+}
+
+// openSlowBodies opens n connections that announce a 10-byte body and send
+// only sent bytes of it, the way a slow-body attacker holds requests open.
+func openSlowBodies(t *testing.T, addr string, n, sent int) {
+	t.Helper()
+	for range n {
+		conn, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+		_, err = fmt.Fprintf(conn, "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n%s", strings.Repeat("x", sent))
+		require.NoError(t, err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the server start handling them
+}
+
+func TestStressControl_SlowBodiesDoNotStarveFastRequests(t *testing.T) {
+	addr := startStressServer(t, 0)
+	openSlowBodies(t, addr, 4, 5)
+
+	resp, err := http.Get("http://" + addr + "/fast")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "slow bodies must not hold concurrency slots")
+
+	resp, err = http.Post("http://"+addr+"/echo", "text/plain", strings.NewReader("hello"))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestStressControl_BodiesAboveBufferHoldSlots(t *testing.T) {
+	// Control for the test above: once the body exceeds the buffer the slot is
+	// taken while the rest trickles in, so the same attack saturates the pool.
+	addr := startStressServer(t, 4)
+	openSlowBodies(t, addr, 2, 5)
+
+	resp, err := http.Get("http://" + addr + "/fast")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("Retry-After"))
+}
+
+func TestBufferBody_PreservesBodyAndErrors(t *testing.T) {
+	for _, size := range []int{1, 8, 9, 100} {
+		body := strings.Repeat("a", size)
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		bufferBody(req, 8)
+		got, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		assert.Equal(t, body, string(got), "size %d", size)
+		require.NoError(t, req.Body.Close())
+	}
+
+	boom := errors.New("read timeout")
+	req := httptest.NewRequest(http.MethodPost, "/", io.MultiReader(strings.NewReader("ab"), errReader{boom}))
+	bufferBody(req, 8)
+	got, err := io.ReadAll(req.Body)
+	assert.Equal(t, "ab", string(got))
+	assert.ErrorIs(t, err, boom, "a read error while buffering must reach the handler")
+}
+
+func TestDefaultMaxConcurrent_AtLeast256(t *testing.T) {
+	assert.GreaterOrEqual(t, DefaultMaxConcurrent(), 256)
 }

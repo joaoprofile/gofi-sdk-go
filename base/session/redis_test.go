@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/joaoprofile/gofi/base/session"
+	"github.com/gofi-labs/gofi-sdk-go/base/session"
 )
 
 // ---------------------------------------------------------------------------
@@ -271,7 +271,43 @@ func TestRedisSession_TryLockWithLock_EndToEnd(t *testing.T) {
 	assert.True(t, called)
 
 	// lock auto-released — can acquire again
-	ok2, err := s.TryLock(ctx, key)
+	tok, ok2, err := s.TryLock(ctx, key)
 	assert.NoError(t, err)
 	assert.True(t, ok2)
+	assert.NotEmpty(t, tok, "the Redis driver returns an owner token")
+}
+
+// TryLock/Unlock used to have no owner: a holder whose lock expired could
+// release the next holder's lock.
+func TestRedisSession_UnlockRequiresOwnerToken(t *testing.T) {
+	session.ResetSingleton()
+	t.Cleanup(session.ResetSingleton)
+	driver, mr := setupRedis(t)
+	s := session.New(driver, &session.Config{Prefix: "test", TTL: time.Minute, LockTTL: time.Second})
+	ctx := context.Background()
+
+	tokA, ok, err := s.TryLock(ctx, "job")
+	require.NoError(t, err)
+	require.True(t, ok)
+	mr.FastForward(2 * time.Second) // LockTTL applies: A's lock expired
+	tokB, ok, err := s.TryLock(ctx, "job")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, s.Unlock(ctx, "job", tokA))
+	locked, _ := s.IsLocked(ctx, "job")
+	assert.True(t, locked, "A must not release B's lock")
+	assert.ErrorIs(t, s.Unlock(ctx, "job", ""), session.ErrNotLocked, "token required")
+	require.NoError(t, s.Unlock(ctx, "job", tokB))
+	locked, _ = s.IsLocked(ctx, "job")
+	assert.False(t, locked)
+
+	mr.Close()
+	_, ok, err = s.TryLock(ctx, "job")
+	assert.Error(t, err)
+	assert.False(t, ok)
+}
+
+func TestDefaultSessionConfig_LockTTL(t *testing.T) {
+	assert.Equal(t, 10*time.Second, session.DefaultSessionConfig().LockTTL)
 }

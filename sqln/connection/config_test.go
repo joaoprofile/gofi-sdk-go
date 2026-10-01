@@ -3,7 +3,7 @@ package connection
 import (
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/migrate"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

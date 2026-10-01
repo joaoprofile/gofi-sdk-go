@@ -2,7 +2,9 @@ package observer
 
 import (
 	"context"
+	"errors"
 	"io"
+	"slices"
 	"time"
 )
 
@@ -22,25 +24,19 @@ func (r *Registry) Register(c ...any) {
 	r.closers = append(r.closers, c...)
 }
 
+// CloseAll closes registered resources in reverse (LIFO) order, continues past
+// failures and returns every error joined.
 func (r *Registry) CloseAll(ctx context.Context) error {
-	for _, c := range r.closers {
-		switch v := c.(type) {
-
+	var errs []error
+	for _, v := range slices.Backward(r.closers) {
+		switch v := v.(type) {
 		case Closer:
-			if err := v.Close(ctx); err != nil {
-				return err
-			}
-
+			errs = append(errs, v.Close(ctx))
 		case io.Closer:
-			if err := v.Close(); err != nil {
-				return err
-			}
-
-		default:
+			errs = append(errs, v.Close())
 		}
 	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *Registry) CloseWithTimeout(timeout time.Duration) error {

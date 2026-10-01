@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/lib/pq"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const slowQueryThreshold = 300 * time.Millisecond
@@ -28,40 +28,35 @@ func LogQueryDuration(start time.Time, query string) {
 	)
 }
 
-// LogPostgresError logs database errors in structured form.
-// For pq driver errors it extracts fields such as code, table and constraint.
+// LogPostgresError logs database errors in structured form, with code,
+// table and constraint for PostgreSQL errors. Detail and Where quote row
+// values (e.g. the duplicated key), so they are logged at debug level only.
 func LogPostgresError(err error) {
 	if err == nil {
 		return
 	}
-
-	var pgErr *pq.Error
-	if AsPQError(err, &pgErr) && pgErr != nil {
+	if pgErr, ok := AsPgError(err); ok {
 		logging.Error("postgres error",
 			slog.String("message", pgErr.Message),
+			slog.String("code", pgErr.Code),
+			slog.String("severity", pgErr.Severity),
+			slog.String("table", pgErr.TableName),
+			slog.String("constraint", pgErr.ConstraintName),
+		)
+		logging.Debug("postgres error detail",
+			slog.String("code", pgErr.Code),
 			slog.String("detail", pgErr.Detail),
 			slog.String("where", pgErr.Where),
-			slog.String("code", string(pgErr.Code)),
-			slog.String("severity", pgErr.Severity),
-			slog.String("table", pgErr.Table),
-			slog.String("constraint", pgErr.Constraint),
 		)
 		return
 	}
-
-	logging.Error("database error", slog.String("error", err.Error()))
+	logging.Error("database error", slog.String("error", Cause(err).Error()))
 }
 
-// AsPQError tries to extract a *pq.Error from the given error.
-// Returns true and fills out when the error comes from the pq driver.
-func AsPQError(err error, out **pq.Error) bool {
-	if err == nil {
-		return false
+// AsPgError extracts the PostgreSQL error from err's chain.
+func AsPgError(err error) (*pgconn.PgError, bool) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return pgErr, true
 	}
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) {
-		*out = pqErr
-		return true
-	}
-	return false
+	return nil, false
 }

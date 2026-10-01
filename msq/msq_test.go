@@ -6,13 +6,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/joaoprofile/gofi/msq"
-	"github.com/joaoprofile/gofi/msq/core"
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/provider/redis"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq"
+	"github.com/gofi-labs/gofi-sdk-go/msq/core"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,8 +30,6 @@ var _ msq.Producer = (port.Producer)(nil)
 var _ msq.Consumer = (port.Consumer)(nil)
 var _ msq.MessageHandler = (port.MessageHandler)(nil)
 var _ msq.Broker = (port.Broker)(nil)
-var _ msq.Messaging = (port.Broker)(nil)
-var _ msq.MessagingBroker = (port.Broker)(nil)
 var _ msq.ConsumerManager = core.ConsumerManager{}
 
 // Result constants
@@ -48,7 +44,7 @@ func TestResultConstantsAreExported(t *testing.T) {
 
 func TestNewMessageCreatesValidEnvelope(t *testing.T) {
 	type payload struct{ Amount int }
-	msg := msq.NewMessage(payload{Amount: 42})
+	msg := testMessage(payload{Amount: 42})
 
 	require.NotNil(t, msg)
 	assert.NotEqual(t, [16]byte{}, msg.Id)
@@ -60,7 +56,7 @@ func TestNewMessageCreatesValidEnvelope(t *testing.T) {
 }
 
 func TestNewMessageWithTopicSetsTopicAndValue(t *testing.T) {
-	msg := msq.NewMessageWithTopic("orders", "hello")
+	msg := testMessageWithTopic("orders", "hello")
 
 	assert.Equal(t, "orders", msg.Topic)
 	assert.NotEmpty(t, msg.Value)
@@ -74,7 +70,7 @@ func TestUnpackMessageRoundTrip(t *testing.T) {
 		Total float64
 	}
 	original := order{ID: "ord-1", Total: 99.9}
-	msg := msq.NewMessage(original)
+	msg := testMessage(original)
 
 	got, err := msq.UnpackMessage[order](msg)
 	require.NoError(t, err)
@@ -146,24 +142,21 @@ func TestNewBrokerServiceDelegates(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, p)
 
-	c := svc.NewConsumer(msq.DefaultConsumeConfig("t"))
+	c, _ := svc.NewConsumer(msq.DefaultConsumeConfig("t"))
 	assert.NotNil(t, c)
 }
 
-// msq.New with Redis broker (miniredis)
+// msq.New with a broker
 
-func TestNewWithRedisBrokerReturnsService(t *testing.T) {
-	mr := miniredis.RunT(t)
-
-	svc, err := msq.New(msq.Config{Broker: redis.New(redis.Config{Addr: mr.Addr()})})
+func TestNewWithBrokerReturnsService(t *testing.T) {
+	svc, err := msq.New(msq.Config{Broker: &stubBroker{}})
 
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
 }
 
-func TestNewRedisProducerWorks(t *testing.T) {
-	mr := miniredis.RunT(t)
-	svc, err := msq.New(msq.Config{Broker: redis.New(redis.Config{Addr: mr.Addr()})})
+func TestNewProducerWorks(t *testing.T) {
+	svc, err := msq.New(msq.Config{Broker: &stubBroker{}})
 	require.NoError(t, err)
 
 	producer, err := svc.NewProducer()
@@ -171,14 +164,12 @@ func TestNewRedisProducerWorks(t *testing.T) {
 	require.NotNil(t, producer)
 	defer producer.Close()
 
-	// Publishing to a topic with no subscriber is valid for Redis Pub/Sub.
-	msg := msq.NewMessageWithTopic("test", "hello")
+	msg := testMessageWithTopic("test", "hello")
 	assert.NoError(t, producer.SendMessage(context.Background(), msg))
 }
 
 func TestNewConsumerManagerFromService(t *testing.T) {
-	mr := miniredis.RunT(t)
-	svc, err := msq.New(msq.Config{Broker: redis.New(redis.Config{Addr: mr.Addr()})})
+	svc, err := msq.New(msq.Config{Broker: &stubBroker{}})
 	require.NoError(t, err)
 
 	mgr := svc.NewConsumerManager()
@@ -202,5 +193,7 @@ func (s *stubConsumer) Resume() error                                          {
 
 type stubBroker struct{}
 
-func (b *stubBroker) NewProducer() (port.Producer, error)             { return &stubProducer{}, nil }
-func (b *stubBroker) NewConsumer(_ types.ConsumeConfig) port.Consumer { return &stubConsumer{} }
+func (b *stubBroker) NewProducer() (port.Producer, error) { return &stubProducer{}, nil }
+func (b *stubBroker) NewConsumer(_ types.ConsumeConfig) (port.Consumer, error) {
+	return &stubConsumer{}, nil
+}

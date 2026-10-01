@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -119,4 +120,24 @@ func (r *RedisDriver) IsLocked(ctx context.Context, key string) (bool, error) {
 		return false, err
 	}
 	return n == 1, nil
+}
+
+// releaseIfOwner deletes the lock only while it still holds the caller's token.
+var releaseIfOwner = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0`)
+
+func (r *RedisDriver) AcquireLockToken(ctx context.Context, key string, ttl time.Duration) (string, bool, error) {
+	if ttl <= 0 {
+		ttl = r.ttl
+	}
+	token := rand.Text()
+	ok, err := r.client.SetNX(ctx, r.lockKey(key), token, ttl).Result()
+	return token, ok, err
+}
+
+func (r *RedisDriver) ReleaseLockToken(ctx context.Context, key, token string) error {
+	return releaseIfOwner.Run(ctx, r.client, []string{r.lockKey(key)}, token).Err()
 }

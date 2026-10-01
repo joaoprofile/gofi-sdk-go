@@ -2,18 +2,16 @@ package logging
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 
-	"github.com/joaoprofile/gofi/base/common"
-	"go.opentelemetry.io/contrib/bridges/otelslog"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
-	"go.opentelemetry.io/otel/sdk/log"
-	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"github.com/gofi-labs/gofi-sdk-go/base/common"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -22,12 +20,17 @@ const (
 )
 
 var (
-	instance *Logger
-	once     sync.Once
+	instance     atomic.Pointer[Logger]
+	once         sync.Once
+	fallbackOnce sync.Once
+	attachMu     sync.Mutex
 )
 
+// ErrNotInitialized is returned by Attach when InitGlobal has not run yet.
+var ErrNotInitialized = errors.New("logging: the global logger is not initialized; call InitGlobal first")
+
 // NewLogger initialises the global logger with sane defaults (Info level, JSON
-// console, no OTLP). It reads no environment; gofi's config.InitLogging builds
+// console). It reads no environment; gofi's config.InitLogging builds
 // an env-driven Config and is what services should use in production.
 func NewLogger(serviceName string) error {
 	return InitGlobal(context.Background(), Config{ServiceName: serviceName})
@@ -51,24 +54,34 @@ func SlogLevel(l common.LogLevel) slog.Level {
 func InitGlobal(ctx context.Context, cfg Config) error {
 	var err error
 	once.Do(func() {
-		instance, err = New(ctx, cfg)
+		var l *Logger
+		l, err = New(ctx, cfg)
+		if l != nil {
+			instance.Store(l)
+		}
 	})
 	return err
 }
 
-// Instance returns the global logger. Panics if InitGlobal was never called.
+// Instance returns the global logger. Before InitGlobal it falls back to
+// slog.Default() (warning once), so SDK packages never crash an app that did
+// not initialise gofi logging.
 func Instance() *Logger {
-	if instance == nil {
-		panic(LOG_START_ERROR)
+	if l := instance.Load(); l != nil {
+		return l
 	}
-	return instance
+	fallbackOnce.Do(func() { slog.Warn(strings.TrimSpace(LOG_START_ERROR)) })
+	return &Logger{Logger: slog.Default()}
 }
 
 // ResetForTesting resets the singleton so that InitGlobal re-initialises on the
 // next call. Must only be called from tests.
 func ResetForTesting() {
+	attachMu.Lock()
+	defer attachMu.Unlock()
 	once = sync.Once{}
-	instance = nil
+	fallbackOnce = sync.Once{}
+	instance.Store(nil)
 }
 
 // --- Shortcuts ---
@@ -88,8 +101,8 @@ func FromContext(ctx context.Context) *slog.Logger {
 }
 
 func Shutdown(ctx context.Context) error {
-	if instance != nil {
-		return instance.Shutdown(ctx)
+	if l := instance.Load(); l != nil {
+		return l.Shutdown(ctx)
 	}
 	return nil
 }
@@ -102,24 +115,37 @@ const (
 )
 
 type Config struct {
-	ServiceName   string
-	Environment   string     // deployment environment; EnvDevelopment selects text output
-	EnableDebug   bool       // legado: equivale a Level=Debug
-	Level         slog.Level // nível do handler (zero = Info); EnableDebug tem precedência
-	CollectorAddr string     // quando vazio, usa apenas saída no console (sem OTLP)
+	ServiceName string
+	Environment string     // deployment environment; EnvDevelopment selects text output
+	EnableDebug bool       // legado: equivale a Level=Debug
+	Level       slog.Level // nível do handler (zero = Info); EnableDebug tem precedência
+	// RedactKeys extends DefaultRedactKeys: attributes whose key matches have
+	// their value masked in the console and in every attached handler.
+	RedactKeys []string
 }
 
+// Logger is the global logger: console output plus the handlers attached with
+// Attach (the OTLP bridge installed by obs.Init, for instance).
 type Logger struct {
 	*slog.Logger
-	lp *log.LoggerProvider
+	console  slog.Handler
+	level    slog.Level // minimum level, applied to the console and attached handlers
+	redactor *redactor  // masks sensitive attributes, also for attached handlers
+	service  string
+	attached []slog.Handler
+	closers  []func(context.Context) error
 }
 
-func New(ctx context.Context, cfg Config) (*Logger, error) {
+// New builds a console logger (text in development, JSON otherwise) and makes
+// it slog's default. It exports nothing: exporters are attached with Attach, so
+// this package does not link any OpenTelemetry SDK or gRPC code.
+func New(_ context.Context, cfg Config) (*Logger, error) {
 	level := cfg.Level
 	if cfg.EnableDebug {
 		level = slog.LevelDebug
 	}
-	opts := &slog.HandlerOptions{Level: level}
+	r := newRedactor(cfg.RedactKeys)
+	opts := &slog.HandlerOptions{Level: level, ReplaceAttr: r.replaceAttr}
 
 	var consoleHandler slog.Handler
 	if cfg.Environment == EnvDevelopment {
@@ -128,55 +154,62 @@ func New(ctx context.Context, cfg Config) (*Logger, error) {
 		consoleHandler = slog.NewJSONHandler(os.Stdout, opts)
 	}
 
-	// When no collector is configured, skip OTLP entirely.
-	if cfg.CollectorAddr == "" {
-		l := slog.New(consoleHandler)
-		if cfg.ServiceName != "" {
-			l = l.With("service", cfg.ServiceName)
-		}
-		slog.SetDefault(l)
-		return &Logger{Logger: l}, nil
+	l := &Logger{console: consoleHandler, level: level, redactor: r, service: cfg.ServiceName}
+	l.rebuild()
+	return l, nil
+}
+
+// Attach tees the global logger to h, keeping the console output, and makes
+// the result slog's default. h receives only records at or above the level
+// set in Config, like the console, so an exporter does not ship the Debug
+// records the console drops, and with sensitive attributes masked (see
+// Config.RedactKeys). shutdown, when not nil, runs in Shutdown so h can
+// flush. Loggers derived (With, FromContext) before Attach keep writing only to
+// the previous handlers. It returns ErrNotInitialized before InitGlobal.
+func Attach(h slog.Handler, shutdown func(context.Context) error) error {
+	attachMu.Lock()
+	defer attachMu.Unlock()
+
+	cur := instance.Load()
+	if cur == nil {
+		return ErrNotInitialized
 	}
-
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(cfg.ServiceName),
-			semconv.DeploymentEnvironmentKey.String(string(cfg.Environment)),
-		),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+	r := cur.redactor
+	if r == nil {
+		r = newRedactor(nil)
 	}
-
-	exporter, err := otlploggrpc.New(ctx,
-		otlploggrpc.WithEndpoint(cfg.CollectorAddr),
-		otlploggrpc.WithInsecure(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create log exporter: %w", err)
+	next := &Logger{
+		console:  cur.console,
+		level:    cur.level,
+		redactor: r,
+		service:  cur.service,
+		attached: append(slices.Clip(cur.attached), &levelHandler{
+			Handler: &redactHandler{Handler: h, r: r},
+			min:     cur.level,
+		}),
+		closers: cur.closers,
 	}
-
-	lp := log.NewLoggerProvider(
-		log.WithResource(res),
-		log.WithProcessor(log.NewBatchProcessor(exporter)),
-	)
-
-	otlpHandler := otelslog.NewHandler(cfg.ServiceName, otelslog.WithLoggerProvider(lp))
-
-	finalHandler := &TeeHandler{
-		handlers: []slog.Handler{consoleHandler, otlpHandler},
+	if shutdown != nil {
+		next.closers = append(slices.Clip(cur.closers), shutdown)
 	}
+	next.rebuild()
+	instance.Store(next)
+	return nil
+}
 
-	l := slog.New(finalHandler)
-	if cfg.ServiceName != "" {
-		l = l.With("service", cfg.ServiceName)
+// rebuild assembles the slog.Logger from the console and attached handlers and
+// installs it as slog's default.
+func (l *Logger) rebuild() {
+	h := l.console
+	if len(l.attached) > 0 {
+		h = &TeeHandler{handlers: append([]slog.Handler{l.console}, l.attached...)}
 	}
-	slog.SetDefault(l)
-
-	return &Logger{
-		Logger: l,
-		lp:     lp,
-	}, nil
+	sl := slog.New(h)
+	if l.service != "" {
+		sl = sl.With("service", l.service)
+	}
+	slog.SetDefault(sl)
+	l.Logger = sl
 }
 
 // FromContext returns a logger enriched with trace_id and span_id from ctx.
@@ -198,11 +231,33 @@ func (l *Logger) ErrorWithStack(ctx context.Context, msg string, attrs ...any) {
 	l.FromContext(ctx).Log(ctx, slog.LevelError, msg, attrs...)
 }
 
+// Shutdown flushes the attached handlers, in reverse order of Attach.
 func (l *Logger) Shutdown(ctx context.Context) error {
-	if l.lp != nil {
-		return l.lp.Shutdown(ctx)
+	var errs []error
+	for _, closer := range slices.Backward(l.closers) {
+		errs = append(errs, closer(ctx))
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// --- levelHandler ---
+
+// levelHandler drops records below min before they reach Handler.
+type levelHandler struct {
+	slog.Handler
+	min slog.Level
+}
+
+func (h *levelHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.min && h.Handler.Enabled(ctx, level)
+}
+
+func (h *levelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &levelHandler{Handler: h.Handler.WithAttrs(attrs), min: h.min}
+}
+
+func (h *levelHandler) WithGroup(name string) slog.Handler {
+	return &levelHandler{Handler: h.Handler.WithGroup(name), min: h.min}
 }
 
 // --- TeeHandler ---

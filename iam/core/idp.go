@@ -4,9 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // IDPServiceConfig holds the parameters for building an IDPService.
@@ -18,45 +17,31 @@ type IDPServiceConfig struct {
 	Session  port.SessionPort
 	Cfg      AuthConfig
 	Emit     func(context.Context, types.IAMEvent)
+
+	// Tickets makes tenant tickets single-use; nil keeps them reusable until expiry.
+	Tickets port.TicketStore
 }
 
 // IDPService orchestrates the social login flow (OAuth2/OIDC) for a specific provider.
 type IDPService struct {
+	sessionIssuer
 	provider port.IDPAuthPort
 	user     port.UserPort
-	tenant   port.TenantPort
-	token    port.TokenPort
-	session  port.SessionPort
-	cfg      AuthConfig
-	emit     func(context.Context, types.IAMEvent)
 }
 
 // NewIDPService builds an IDPService for the given provider.
 func NewIDPService(cfg IDPServiceConfig) *IDPService {
-	emit := cfg.Emit
-	if emit == nil {
-		emit = func(context.Context, types.IAMEvent) {}
-	}
 	return &IDPService{
-		provider: cfg.Provider,
-		user:     cfg.User,
-		tenant:   cfg.Tenant,
-		token:    cfg.Token,
-		session:  cfg.Session,
-		cfg:      cfg.Cfg,
-		emit:     emit,
+		sessionIssuer: newSessionIssuer(cfg.Tenant, cfg.Token, cfg.Session, cfg.Cfg, cfg.Tickets, cfg.Emit),
+		provider:      cfg.Provider,
+		user:          cfg.User,
 	}
 }
 
 // InitFlow prepares the OAuth2/OIDC flow by generating state, PKCE, and returning the authorization URL.
-// The caller is responsible for storing IDPAuthURL.CodeVerifier and State in an HttpOnly cookie.
+// The caller must store IDPAuthURL.State and CodeVerifier in an HttpOnly cookie.
 func (s *IDPService) InitFlow(ctx context.Context, redirectURI string, extraScopes []string) (*port.IDPAuthURL, error) {
 	state, err := generateState()
-	if err != nil {
-		return nil, err
-	}
-
-	nonce, err := generateNonce()
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +50,7 @@ func (s *IDPService) InitFlow(ctx context.Context, redirectURI string, extraScop
 		RedirectURI: redirectURI,
 		Scopes:      extraScopes,
 		State:       state,
-		Nonce:       nonce,
+		Nonce:       NonceForState(state),
 	}
 
 	return s.provider.AuthorizationURL(ctx, input)
@@ -73,6 +58,19 @@ func (s *IDPService) InitFlow(ctx context.Context, redirectURI string, extraScop
 
 // HandleCallback processes the IDP callback, resolves the local user, and returns available tenants.
 func (s *IDPService) HandleCallback(ctx context.Context, input port.IDPCallbackInput) (*port.IDPCallbackResult, error) {
+	if s.user == nil || s.tenant == nil {
+		return nil, ErrLoginPortsRequired
+	}
+	// Equal empty states would pass any comparison: that is login CSRF.
+	if input.State == "" || input.ExpectedState == "" {
+		s.emit(ctx, types.IAMEvent{
+			Type:      types.EventIDPLoginFailed,
+			Provider:  s.provider.ProviderName(),
+			Timestamp: time.Now(),
+			Error:     ErrInvalidIDPState,
+		})
+		return nil, ErrInvalidIDPState
+	}
 	result, err := s.provider.HandleCallback(ctx, input)
 	if err != nil {
 		s.emit(ctx, types.IAMEvent{
@@ -86,15 +84,30 @@ func (s *IDPService) HandleCallback(ctx context.Context, input port.IDPCallbackI
 
 	// Resolve the local user via the external identity.
 	identity := types.ExternalIdentity{
-		Provider:   result.IDPUser.Provider,
-		ExternalID: result.IDPUser.ExternalID,
-		Email:      result.IDPUser.Email,
-		LinkedAt:   time.Now(),
+		Provider:      result.IDPUser.Provider,
+		ExternalID:    result.IDPUser.ExternalID,
+		Email:         result.IDPUser.Email,
+		EmailVerified: result.IDPUser.EmailVerified,
+		LinkedAt:      time.Now(),
 	}
 
 	user, err := s.user.FindOrCreateByExternalIdentity(ctx, identity)
 	if err != nil {
 		return nil, err
+	}
+	if user == nil || !user.Active {
+		var uid string
+		if user != nil {
+			uid = user.ID
+		}
+		s.emit(ctx, types.IAMEvent{
+			Type:      types.EventIDPLoginFailed,
+			UserID:    uid,
+			Provider:  s.provider.ProviderName(),
+			Timestamp: time.Now(),
+			Error:     ErrAccountInactive,
+		})
+		return nil, ErrAccountInactive
 	}
 
 	tenants, err := s.tenant.ListUserTenants(ctx, user.ID)
@@ -114,6 +127,8 @@ func (s *IDPService) HandleCallback(ctx context.Context, input port.IDPCallbackI
 	})
 
 	return &port.IDPCallbackResult{
+		UserID:    user.ID,
+		Ticket:    s.cfg.issueTenantTicket(s.provider.ProviderName(), user.ID),
 		IDPUser:   result.IDPUser,
 		Tenants:   tenants,
 		IsNewUser: result.IsNewUser,
@@ -122,72 +137,5 @@ func (s *IDPService) HandleCallback(ctx context.Context, input port.IDPCallbackI
 
 // SelectTenant creates a session after IDP login, reusing the same logic as the local flow.
 func (s *IDPService) SelectTenant(ctx context.Context, input port.SelectTenantInput) (*types.Session, error) {
-	if err := s.tenant.AssertAccess(ctx, input.UserID, input.TenantID, input.Module); err != nil {
-		return nil, ErrTenantAccessDenied
-	}
-
-	tenants, err := s.tenant.ListUserTenants(ctx, input.UserID)
-	if err != nil {
-		return nil, err
-	}
-	roles := rolesForTenant(tenants, input.TenantID)
-
-	sessionID := uuid.New().String()
-	now := time.Now()
-
-	claims := types.Claims{
-		UserID:       input.UserID,
-		TenantID:     input.TenantID,
-		Module:       input.Module,
-		Roles:        roles,
-		SessionID:    sessionID,
-		AuthProvider: s.provider.ProviderName(),
-		Issuer:       s.cfg.issuer,
-		IssuedAt:     now,
-		ExpiresAt:    now.Add(s.cfg.accessTokenTTL),
-	}
-
-	accessToken, err := s.token.IssueAccessToken(claims)
-	if err != nil {
-		return nil, err
-	}
-
-	refreshToken, err := buildRefreshToken(sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	session := &types.Session{
-		ID:                   sessionID,
-		UserID:               input.UserID,
-		TenantID:             input.TenantID,
-		Module:               input.Module,
-		AccessToken:          accessToken,
-		RefreshToken:         refreshToken,
-		RefreshTokenHash:     hashToken(refreshToken),
-		RefreshTokenLastFour: lastFour(refreshToken),
-		AuthProvider:         s.provider.ProviderName(),
-		ExpiresAt:            now.Add(s.cfg.refreshTokenTTL),
-		CreatedAt:            now,
-		LastUsedAt:           now,
-		IPAddress:            input.IPAddress,
-		UserAgent:            input.UserAgent,
-		DeviceID:             input.DeviceID,
-	}
-
-	if err := s.session.Save(ctx, session); err != nil {
-		return nil, err
-	}
-
-	s.emit(ctx, types.IAMEvent{
-		Type:      types.EventTenantSelected,
-		UserID:    input.UserID,
-		TenantID:  input.TenantID,
-		Module:    input.Module,
-		SessionID: sessionID,
-		Provider:  s.provider.ProviderName(),
-		Timestamp: now,
-	})
-
-	return session, nil
+	return s.selectTenant(ctx, s.provider.ProviderName(), input)
 }

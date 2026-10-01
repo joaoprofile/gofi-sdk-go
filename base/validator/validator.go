@@ -16,7 +16,7 @@ func New() *Validator {
 	}
 }
 
-func (v *Validator) ValidateStruct(s interface{}) error {
+func (v *Validator) ValidateStruct(s any) error {
 	err := v.validate.Struct(s)
 	if err == nil {
 		return nil

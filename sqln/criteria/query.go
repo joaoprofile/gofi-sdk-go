@@ -1,10 +1,10 @@
 package criteria
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 // Query is a declarative, dialect-aware SQL query builder.
@@ -25,11 +25,15 @@ import (
 //	        criteria.In("u.role", []string{"admin", "moderator"}),
 //	    ).
 //	    GroupBy("u.id", "u.name").
-//	    Having(criteria.Gt("COUNT(o.id)", 0)).
+//	    Having(criteria.Gt("COUNT(o.id)", 0).Raw()).
 //	    OrderBy(criteria.Asc("u.name"), criteria.Desc("u.id")).
 //	    Limit(15).Offset(0)
 //
-//	sql, params := q.Build(dialect)
+//	sql, params, err := q.Build(dialect)
+//
+// Table, alias, join ON, Select and GroupBy are written verbatim: trusted input
+// only, never user data. Predicate and order fields are validated as column
+// references (see Predicate) and may come from a request.
 //
 // Example (paged via manager — ORDER BY goes in PageRequest, not here):
 //
@@ -59,25 +63,27 @@ type joinClause struct {
 
 // From creates a new Query rooted at the given table with an optional alias.
 // Pass an empty string for alias when none is needed.
+// Both are written verbatim: trusted input only, never user data.
 func From(table, alias string) *Query {
 	return &Query{table: table, alias: alias}
 }
 
 // Select specifies the columns included in the SELECT clause.
 // If never called, SELECT * is generated.
+// Fields are SQL expressions written verbatim: trusted input only, never user data.
 func (q *Query) Select(fields ...string) *Query {
 	q.selects = append(q.selects, fields...)
 	return q
 }
 
 // Join adds an INNER JOIN clause.
-// alias may be empty.
+// alias may be empty. table, alias and on are written verbatim: trusted input only, never user data.
 func (q *Query) Join(table, alias, on string) *Query {
 	q.joins = append(q.joins, joinClause{joinType: "JOIN", table: table, alias: alias, on: on})
 	return q
 }
 
-// LeftJoin adds a LEFT JOIN clause.
+// LeftJoin adds a LEFT JOIN clause; arguments are trusted input only, as in Join.
 func (q *Query) LeftJoin(table, alias, on string) *Query {
 	q.joins = append(q.joins, joinClause{joinType: "LEFT JOIN", table: table, alias: alias, on: on})
 	return q
@@ -87,12 +93,13 @@ func (q *Query) LeftJoin(table, alias, on string) *Query {
 // outer row. The ON condition is always TRUE: a lateral subquery expresses its own
 // correlation in its WHERE, so an outer ON would only ever be redundant.
 // subquery is the parenthesized SELECT, e.g. "(SELECT x FROM t WHERE t.id = p.id LIMIT 1)".
+// subquery and alias are written verbatim: trusted input only, never user data.
 func (q *Query) LeftJoinLateral(subquery, alias string) *Query {
 	q.joins = append(q.joins, joinClause{joinType: "LEFT JOIN LATERAL", table: subquery, alias: alias, on: "TRUE"})
 	return q
 }
 
-// RightJoin adds a RIGHT JOIN clause.
+// RightJoin adds a RIGHT JOIN clause; arguments are trusted input only, as in Join.
 func (q *Query) RightJoin(table, alias, on string) *Query {
 	q.joins = append(q.joins, joinClause{joinType: "RIGHT JOIN", table: table, alias: alias, on: on})
 	return q
@@ -106,6 +113,7 @@ func (q *Query) Where(predicates ...Predicate) *Query {
 }
 
 // GroupBy appends fields to the GROUP BY clause.
+// Fields are written verbatim: trusted input only, never user data.
 func (q *Query) GroupBy(fields ...string) *Query {
 	q.group = append(q.group, fields...)
 	return q
@@ -119,7 +127,8 @@ func (q *Query) Having(predicates ...Predicate) *Query {
 }
 
 // OrderBy appends sort expressions.
-// Use criteria.Asc(field) and criteria.Desc(field) as constructors.
+// Use criteria.Asc(field) and criteria.Desc(field) as constructors; fields that
+// are not column references fail Build unless marked Raw.
 func (q *Query) OrderBy(orders ...Order) *Query {
 	q.order = append(q.order, orders...)
 	return q
@@ -146,92 +155,117 @@ func (q *Query) Offset(n int) *Query {
 // for placeholder format and LIKE behaviour.
 //
 // Pass the returned parameters directly to database/sql query functions.
-func (q *Query) Build(d driver.FilterDialect) (string, []any) {
-	b := newBuilder(d)
+// It fails with ErrInvalidField when a predicate or order field is not a column
+// reference, so a request-supplied name never reaches the SQL text.
+func (q *Query) Build(d driver.FilterDialect) (string, []any, error) {
 	var sb strings.Builder
+	sb.Grow(256)
+	b := newBuilder(d, &sb)
 
-	q.writeBody(&sb, b)
-	q.writeOrderBy(&sb)
+	q.writeBody(b)
+	q.writeOrderBy(b)
 	q.writeLimitOffset(&sb)
 
-	return sb.String(), b.params
+	if b.err != nil {
+		return "", nil, b.err
+	}
+	return sb.String(), b.params, nil
 }
 
 // BuildBase compiles the query without ORDER BY, LIMIT, and OFFSET.
 // Used internally by the manager when dialect-level pagination wraps the base query
 // (manager.WithPage + PagedList). Prefer Build for direct execution.
-func (q *Query) BuildBase(d driver.FilterDialect) (string, []any) {
-	b := newBuilder(d)
+func (q *Query) BuildBase(d driver.FilterDialect) (string, []any, error) {
 	var sb strings.Builder
+	sb.Grow(256)
+	b := newBuilder(d, &sb)
 
-	q.writeBody(&sb, b)
+	q.writeBody(b)
 
-	return sb.String(), b.params
+	if b.err != nil {
+		return "", nil, b.err
+	}
+	return sb.String(), b.params, nil
 }
 
 // Internal helpers
 
 // writeBody writes: SELECT … FROM … JOIN … WHERE … GROUP BY … HAVING …
-func (q *Query) writeBody(sb *strings.Builder, b *builder) {
+func (q *Query) writeBody(b *builder) {
 	// SELECT
 	if len(q.selects) == 0 {
-		sb.WriteString("SELECT *")
+		b.write("SELECT *")
 	} else {
-		sb.WriteString("SELECT ")
-		sb.WriteString(strings.Join(q.selects, ", "))
+		b.write("SELECT ")
+		writeList(b.sb, q.selects)
 	}
 
 	// FROM
-	sb.WriteString(fmt.Sprintf(" FROM %s", q.table))
+	b.write(" FROM ", q.table)
 	if q.alias != "" {
-		sb.WriteString(fmt.Sprintf(" %s", q.alias))
+		b.write(" ", q.alias)
 	}
 
 	// JOINs
 	for _, j := range q.joins {
+		b.write(" ", j.joinType, " ", j.table)
 		if j.alias != "" {
-			sb.WriteString(fmt.Sprintf(" %s %s %s ON %s", j.joinType, j.table, j.alias, j.on))
-		} else {
-			sb.WriteString(fmt.Sprintf(" %s %s ON %s", j.joinType, j.table, j.on))
+			b.write(" ", j.alias)
 		}
+		b.write(" ON ", j.on)
 	}
 
 	// WHERE
 	if len(q.where) > 0 {
-		sb.WriteString(" WHERE ")
-		sb.WriteString(b.buildClause(q.where))
+		b.write(" WHERE ")
+		b.writeClause(q.where)
 	}
 
 	// GROUP BY
 	if len(q.group) > 0 {
-		sb.WriteString(" GROUP BY ")
-		sb.WriteString(strings.Join(q.group, ", "))
+		b.write(" GROUP BY ")
+		writeList(b.sb, q.group)
 	}
 
 	// HAVING
 	if len(q.having) > 0 {
-		sb.WriteString(" HAVING ")
-		sb.WriteString(b.buildClause(q.having))
+		b.write(" HAVING ")
+		b.writeClause(q.having)
 	}
 }
 
-func (q *Query) writeOrderBy(sb *strings.Builder) {
+func writeList(sb *strings.Builder, items []string) {
+	for i, s := range items {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(s)
+	}
+}
+
+func (q *Query) writeOrderBy(b *builder) {
 	if len(q.order) == 0 {
 		return
 	}
-	parts := make([]string, len(q.order))
+	b.write(" ORDER BY ")
 	for i, o := range q.order {
-		parts[i] = fmt.Sprintf("%s %s", o.Field, o.Direction)
+		if !b.checkField(o.Field, o.raw) {
+			return
+		}
+		if i > 0 {
+			b.write(", ")
+		}
+		b.write(o.Field, " ", driver.SortDirection(o.Direction))
 	}
-	sb.WriteString(" ORDER BY ")
-	sb.WriteString(strings.Join(parts, ", "))
 }
 
 func (q *Query) writeLimitOffset(sb *strings.Builder) {
 	if q.limit > 0 {
-		sb.WriteString(fmt.Sprintf(" LIMIT %d", q.limit))
+		sb.WriteString(" LIMIT ")
+		sb.WriteString(strconv.Itoa(q.limit))
 	}
 	if q.offset > 0 {
-		sb.WriteString(fmt.Sprintf(" OFFSET %d", q.offset))
+		sb.WriteString(" OFFSET ")
+		sb.WriteString(strconv.Itoa(q.offset))
 	}
 }

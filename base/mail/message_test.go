@@ -152,3 +152,39 @@ func TestEncode_CcAndHeaders(t *testing.T) {
 		t.Fatalf("From with name mismatch: %q", msg.Header.Get("From"))
 	}
 }
+
+// writeBase64 folds exactly like the RFC 2045 76-column wrap, for every
+// boundary length and without a trailing CRLF.
+func TestWriteBase64Folding(t *testing.T) {
+	for n := range 300 {
+		data := bytes.Repeat([]byte{'x'}, n)
+		enc := base64.StdEncoding.EncodeToString(data)
+		var want strings.Builder
+		for len(enc) > 76 {
+			want.WriteString(enc[:76] + "\r\n")
+			enc = enc[76:]
+		}
+		want.WriteString(enc)
+
+		var got bytes.Buffer
+		if err := writeBase64(&got, data); err != nil {
+			t.Fatal(err)
+		}
+		if got.String() != want.String() {
+			t.Fatalf("n=%d:\n got %q\nwant %q", n, got.String(), want.String())
+		}
+	}
+}
+
+func BenchmarkEncodeAttachment(b *testing.B) {
+	m := &Message{
+		From: Address{Email: "a@example.com"}, To: []Address{{Email: "b@example.com"}}, Subject: "s", Text: "hi",
+		Attachments: []Attachment{{Filename: "f.bin", Content: bytes.Repeat([]byte{7}, 10<<20)}},
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := writeMessage(io.Discard, m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

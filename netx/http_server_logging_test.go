@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,10 +182,44 @@ func TestGenerateRequestID_ReturnsNonEmptyString(t *testing.T) {
 	assert.NotEmpty(t, id)
 }
 
-func TestGenerateRequestID_ReturnsHex16Chars(t *testing.T) {
+func TestGenerateRequestID_IsValidRandomText(t *testing.T) {
 	id := generateRequestID()
-	// hex-encoded 8 bytes = 16 characters
-	assert.Len(t, id, 16)
+	assert.Len(t, id, 26, "crypto/rand.Text: 128 bits in base32")
+	assert.True(t, validRequestID(id))
+}
+
+// Regression: any client X-Request-Id was trusted (chi RequestID).
+func TestRequestContext_ValidatesClientRequestID(t *testing.T) {
+	cases := map[string]bool{
+		"abc-DEF_1.2":                   true,
+		strings.Repeat("a", 64):         true,
+		strings.Repeat("a", 65):         false,
+		"":                              false,
+		"id with space":                 false,
+		"id\nforged=1":                  false,
+		`id","level":"ERROR`:            false,
+		"ümlaut":                        false,
+		"0123456789abcdefghijklmnopqrs": true,
+	}
+	for in, keep := range cases {
+		var got, chiID string
+		h := requestContext(false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got, chiID = GetRequestID(r.Context()), chiMiddleware.GetReqID(r.Context())
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(RequestIDHeader, in)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, got, rec.Header().Get(RequestIDHeader), "echoed: %q", in)
+		assert.Equal(t, got, chiID, "chi's key carries the same ID")
+		if keep {
+			assert.Equal(t, in, got)
+		} else {
+			assert.NotEqual(t, in, got)
+			assert.True(t, validRequestID(got), "generated: %q", got)
+		}
+	}
 }
 
 func TestGenerateRequestID_ProducesUniqueValues(t *testing.T) {

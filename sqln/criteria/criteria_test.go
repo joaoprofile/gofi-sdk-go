@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/criteria"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,146 +48,146 @@ var mss = mssDialect{}
 //  SELECT / FROM / alias ─
 
 func TestBuild_SelectStar_WhenNoFieldsSpecified(t *testing.T) {
-	sql, params := criteria.From("users", "").Build(pg)
+	sql, params := built(t)(criteria.From("users", "").Build(pg))
 	assert.Equal(t, "SELECT * FROM users", sql)
 	assert.Empty(t, params)
 }
 
 func TestBuild_SelectSpecificFields(t *testing.T) {
-	sql, params := criteria.From("users", "").
+	sql, params := built(t)(criteria.From("users", "").
 		Select("id", "name", "email").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT id, name, email FROM users", sql)
 	assert.Empty(t, params)
 }
 
 func TestBuild_FromWithAlias(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Build(pg))
 	assert.Equal(t, "SELECT * FROM users u", sql)
 }
 
 func TestBuild_SelectWithAlias(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Select("u.id", "u.name").Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Select("u.id", "u.name").Build(pg))
 	assert.Equal(t, "SELECT u.id, u.name FROM users u", sql)
 }
 
 func TestBuild_MultipleSelectCalls_Accumulated(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		Select("u.id").
 		Select("u.name").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT u.id, u.name FROM users u", sql)
 }
 
 //  JOIN variants
 
 func TestBuild_InnerJoinWithAlias(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		Join("orders", "o", "o.user_id = u.id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u JOIN orders o ON o.user_id = u.id", sql)
 }
 
 func TestBuild_InnerJoinWithoutAlias(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		Join("orders", "", "orders.user_id = u.id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u JOIN orders ON orders.user_id = u.id", sql)
 }
 
 func TestBuild_LeftJoin(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		LeftJoin("orders", "o", "o.user_id = u.id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u LEFT JOIN orders o ON o.user_id = u.id", sql)
 }
 
 func TestBuild_LeftJoinLateral(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		LeftJoinLateral("(SELECT o.total FROM orders o WHERE o.user_id = u.id ORDER BY o.created_at DESC LIMIT 1)", "last_order").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t,
 		"SELECT * FROM users u LEFT JOIN LATERAL (SELECT o.total FROM orders o WHERE o.user_id = u.id ORDER BY o.created_at DESC LIMIT 1) last_order ON TRUE",
 		sql)
 }
 
 func TestBuild_RightJoin(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		RightJoin("orders", "o", "o.user_id = u.id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u RIGHT JOIN orders o ON o.user_id = u.id", sql)
 }
 
 func TestBuild_MultipleJoins(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		Join("orders", "o", "o.user_id = u.id").
 		LeftJoin("payments", "p", "p.order_id = o.id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u JOIN orders o ON o.user_id = u.id LEFT JOIN payments p ON p.order_id = o.id", sql)
 }
 
 //  WHERE — single predicates
 
 func TestBuild_Where_Eq(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Eq("u.active", true)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1", sql)
 	assert.Equal(t, []any{true}, params)
 }
 
 func TestBuild_Where_Ne(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Ne("u.status", "banned")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.status != $1", sql)
 	assert.Equal(t, []any{"banned"}, params)
 }
 
 func TestBuild_Where_Lt(t *testing.T) {
-	sql, params := criteria.From("products", "p").
+	sql, params := built(t)(criteria.From("products", "p").
 		Where(criteria.Lt("p.price", 100)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM products p WHERE p.price < $1", sql)
 	assert.Equal(t, []any{100}, params)
 }
 
 func TestBuild_Where_Lte(t *testing.T) {
-	sql, params := criteria.From("products", "p").
+	sql, params := built(t)(criteria.From("products", "p").
 		Where(criteria.Lte("p.price", 100)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM products p WHERE p.price <= $1", sql)
 	assert.Equal(t, []any{100}, params)
 }
 
 func TestBuild_Where_Gt(t *testing.T) {
-	sql, params := criteria.From("products", "p").
+	sql, params := built(t)(criteria.From("products", "p").
 		Where(criteria.Gt("p.stock", 0)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM products p WHERE p.stock > $1", sql)
 	assert.Equal(t, []any{0}, params)
 }
 
 func TestBuild_Where_Gte(t *testing.T) {
-	sql, params := criteria.From("products", "p").
+	sql, params := built(t)(criteria.From("products", "p").
 		Where(criteria.Gte("p.score", 4.5)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM products p WHERE p.score >= $1", sql)
 	assert.Equal(t, []any{4.5}, params)
 }
 
 func TestBuild_Where_IsNull(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.IsNull("u.deleted_at")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.deleted_at IS NULL", sql)
 	assert.Empty(t, params)
 }
 
 func TestBuild_Where_IsNotNull(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.IsNotNull("u.confirmed_at")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.confirmed_at IS NOT NULL", sql)
 	assert.Empty(t, params)
 }
@@ -195,42 +195,42 @@ func TestBuild_Where_IsNotNull(t *testing.T) {
 //  WHERE — text search
 
 func TestBuild_Where_Contains_Postgres_UsesILike(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Contains("u.name", "%john%")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.name ILIKE $1", sql)
 	assert.Equal(t, []any{"%john%"}, params)
 }
 
 func TestBuild_Where_Contains_MySQL_UsesLike(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Contains("u.name", "%john%")).
-		Build(my)
+		Build(my))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.name LIKE ?", sql)
 	assert.Equal(t, []any{"%john%"}, params)
 }
 
 func TestBuild_Where_NotContains_Postgres_UsesNotILike(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.NotContains("u.name", "%spam%")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.name NOT ILIKE $1", sql)
 	assert.Equal(t, []any{"%spam%"}, params)
 }
 
 func TestBuild_Where_Like_CaseSensitive(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Like("u.code", "USR%")).
-		Build(pg)
+		Build(pg))
 
 	assert.Equal(t, "SELECT * FROM users u WHERE u.code LIKE $1", sql)
 	assert.Equal(t, []any{"USR%"}, params)
 }
 
 func TestBuild_Where_NotLike(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.NotLike("u.code", "TMP%")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.code NOT LIKE $1", sql)
 	assert.Equal(t, []any{"TMP%"}, params)
 }
@@ -242,7 +242,7 @@ func TestBuild_Where_Like_SameAcrossDialects(t *testing.T) {
 		Like(string, string) string
 		NotLike(string, string) string
 	}{pg, my, ora, mss} {
-		sql, _ := criteria.From("t", "").Where(criteria.Like("t.col", "X%")).Build(d)
+		sql, _ := built(t)(criteria.From("t", "").Where(criteria.Like("t.col", "X%")).Build(d))
 		assert.Contains(t, sql, "LIKE")
 	}
 }
@@ -250,66 +250,66 @@ func TestBuild_Where_Like_SameAcrossDialects(t *testing.T) {
 //  WHERE — membership
 
 func TestBuild_Where_In_StringSlice(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.role", []string{"admin", "moderator"})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.role IN ($1, $2)", sql)
 	assert.Equal(t, []any{"admin", "moderator"}, params)
 }
 
 func TestBuild_Where_In_IntSlice(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.id", []int{1, 2, 3})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.id IN ($1, $2, $3)", sql)
 	assert.Equal(t, []any{1, 2, 3}, params)
 }
 
 func TestBuild_Where_In_Int32Slice(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.id", []int32{10, 20})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.id IN ($1, $2)", sql)
 	assert.Equal(t, []any{int32(10), int32(20)}, params)
 }
 
 func TestBuild_Where_In_Int64Slice(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.id", []int64{100, 200})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.id IN ($1, $2)", sql)
 	assert.Equal(t, []any{int64(100), int64(200)}, params)
 }
 
 func TestBuild_Where_In_Float64Slice(t *testing.T) {
-	sql, params := criteria.From("products", "p").
+	sql, params := built(t)(criteria.From("products", "p").
 		Where(criteria.In("p.price", []float64{9.99, 19.99})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM products p WHERE p.price IN ($1, $2)", sql)
 	assert.Equal(t, []any{9.99, 19.99}, params)
 }
 
 func TestBuild_Where_In_AnySlice(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.id", []any{1, "two", 3})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.id IN ($1, $2, $3)", sql)
 	assert.Equal(t, []any{1, "two", 3}, params)
 }
 
 func TestBuild_Where_In_ScalarFallback(t *testing.T) {
 	// Non-slice value treated as single-element IN.
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.In("u.id", 42)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.id IN ($1)", sql)
 	assert.Equal(t, []any{42}, params)
 }
 
 func TestBuild_Where_NotIn(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.NotIn("u.status", []string{"banned", "deleted"})).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.status NOT IN ($1, $2)", sql)
 	assert.Equal(t, []any{"banned", "deleted"}, params)
 }
@@ -317,9 +317,9 @@ func TestBuild_Where_NotIn(t *testing.T) {
 //  WHERE — range
 
 func TestBuild_Where_Between(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.Between("o.total", 100, 500)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.total BETWEEN $1 AND $2", sql)
 	assert.Equal(t, []any{100, 500}, params)
 }
@@ -336,67 +336,67 @@ func TestBuild_Where_Between_PanicOnWrongCount(t *testing.T) {
 //  WHERE — logical connectors
 
 func TestBuild_Where_TwoPredicates_ImplicitAnd(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.active", true),
 			criteria.Eq("u.role", "admin"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role = $2", sql)
 	assert.Equal(t, []any{true, "admin"}, params)
 }
 
 func TestBuild_Where_ExplicitAnd(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.active", true),
 			criteria.And(),
 			criteria.Eq("u.role", "admin"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role = $2", sql)
 	assert.Equal(t, []any{true, "admin"}, params)
 }
 
 func TestBuild_Where_ExplicitOr(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.role", "admin"),
 			criteria.Or(),
 			criteria.Eq("u.role", "moderator"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.role = $1 OR u.role = $2", sql)
 	assert.Equal(t, []any{"admin", "moderator"}, params)
 }
 
 func TestBuild_Where_MixedAndOr(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.active", true),
 			criteria.And(),
 			criteria.Eq("u.role", "admin"),
 			criteria.Or(),
 			criteria.Eq("u.role", "moderator"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role = $2 OR u.role = $3", sql)
 	assert.Equal(t, []any{true, "admin", "moderator"}, params)
 }
 
 func TestBuild_Where_ThreePredicates_AllImplicitAnd(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.active", true),
 			criteria.Eq("u.role", "admin"),
 			criteria.IsNull("u.deleted_at"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role = $2 AND u.deleted_at IS NULL", sql)
 	assert.Equal(t, []any{true, "admin"}, params)
 }
 
 // Calling Where multiple times accumulates predicates with implicit AND between groups.
 func TestBuild_Where_CalledMultipleTimes_Accumulates(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(criteria.Eq("u.active", true)).
 		Where(criteria.Eq("u.role", "admin")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role = $2", sql)
 	assert.Equal(t, []any{true, "admin"}, params)
 }
@@ -404,49 +404,49 @@ func TestBuild_Where_CalledMultipleTimes_Accumulates(t *testing.T) {
 // GROUP BY / HAVING
 
 func TestBuild_GroupBy_SingleField(t *testing.T) {
-	sql, _ := criteria.From("orders", "o").
+	sql, _ := built(t)(criteria.From("orders", "o").
 		Select("o.user_id", "COUNT(*) total").
 		GroupBy("o.user_id").
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT o.user_id, COUNT(*) total FROM orders o GROUP BY o.user_id", sql)
 }
 
 func TestBuild_GroupBy_MultipleFields(t *testing.T) {
-	sql, _ := criteria.From("orders", "o").
+	sql, _ := built(t)(criteria.From("orders", "o").
 		GroupBy("o.user_id", "o.status").
-		Build(pg)
+		Build(pg))
 	assert.Contains(t, sql, "GROUP BY o.user_id, o.status")
 }
 
 func TestBuild_Having_SinglePredicate(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Select("o.user_id", "COUNT(*) cnt").
 		GroupBy("o.user_id").
-		Having(criteria.Gt("COUNT(*)", 5)).
-		Build(pg)
+		Having(criteria.Gt("COUNT(*)", 5).Raw()).
+		Build(pg))
 	assert.Equal(t, "SELECT o.user_id, COUNT(*) cnt FROM orders o GROUP BY o.user_id HAVING COUNT(*) > $1", sql)
 	assert.Equal(t, []any{5}, params)
 }
 
 func TestBuild_Having_MultiplePredicates_ImplicitAnd(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		GroupBy("o.user_id").
 		Having(
-			criteria.Gt("COUNT(*)", 5),
-			criteria.Lt("SUM(o.total)", 10000),
-		).Build(pg)
+			criteria.Gt("COUNT(*)", 5).Raw(),
+			criteria.Lt("SUM(o.total)", 10000).Raw(),
+		).Build(pg))
 	assert.Contains(t, sql, "HAVING COUNT(*) > $1 AND SUM(o.total) < $2")
 	assert.Equal(t, []any{5, 10000}, params)
 }
 
 func TestBuild_Having_WithOrConnector(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		GroupBy("o.user_id").
 		Having(
-			criteria.Gt("COUNT(*)", 10),
+			criteria.Gt("COUNT(*)", 10).Raw(),
 			criteria.Or(),
-			criteria.Gt("SUM(o.total)", 5000),
-		).Build(pg)
+			criteria.Gt("SUM(o.total)", 5000).Raw(),
+		).Build(pg))
 	assert.Contains(t, sql, "HAVING COUNT(*) > $1 OR SUM(o.total) > $2")
 	assert.Equal(t, []any{10, 5000}, params)
 }
@@ -454,81 +454,81 @@ func TestBuild_Having_WithOrConnector(t *testing.T) {
 // ORDER BY
 
 func TestBuild_OrderBy_Asc(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		OrderBy(criteria.Asc("u.name")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u ORDER BY u.name ASC", sql)
 }
 
 func TestBuild_OrderBy_Desc(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		OrderBy(criteria.Desc("u.created_at")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u ORDER BY u.created_at DESC", sql)
 }
 
 func TestBuild_OrderBy_Multiple(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		OrderBy(criteria.Asc("u.name"), criteria.Desc("u.created_at")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM users u ORDER BY u.name ASC, u.created_at DESC", sql)
 }
 
 // LIMIT / OFFSET
 func TestBuild_Limit(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Limit(10).Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Limit(10).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u LIMIT 10", sql)
 }
 
 func TestBuild_Offset(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Offset(20).Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Offset(20).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u OFFSET 20", sql)
 }
 
 func TestBuild_LimitAndOffset(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Limit(15).Offset(30).Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Limit(15).Offset(30).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u LIMIT 15 OFFSET 30", sql)
 }
 
 func TestBuild_Limit_Zero_NotEmitted(t *testing.T) {
 	// Limit(0) is treated as "not set" — no LIMIT clause emitted.
-	sql, _ := criteria.From("users", "u").Limit(0).Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Limit(0).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u", sql)
 }
 
 func TestBuild_Offset_Zero_NotEmitted(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Offset(0).Build(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Offset(0).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u", sql)
 }
 
 // BuildBase
 
 func TestBuildBase_OmitsOrderBy(t *testing.T) {
-	sql, _ := criteria.From("users", "u").
+	sql, _ := built(t)(criteria.From("users", "u").
 		Where(criteria.Eq("u.active", true)).
 		OrderBy(criteria.Asc("u.name")).
-		BuildBase(pg)
+		BuildBase(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1", sql)
 }
 
 func TestBuildBase_OmitsLimit(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Limit(10).BuildBase(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Limit(10).BuildBase(pg))
 	assert.Equal(t, "SELECT * FROM users u", sql)
 }
 
 func TestBuildBase_OmitsOffset(t *testing.T) {
-	sql, _ := criteria.From("users", "u").Offset(5).BuildBase(pg)
+	sql, _ := built(t)(criteria.From("users", "u").Offset(5).BuildBase(pg))
 	assert.Equal(t, "SELECT * FROM users u", sql)
 }
 
 func TestBuildBase_PreservesWhereGroupByHaving(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		GroupBy("o.user_id").
-		Having(criteria.Gt("COUNT(*)", 3)).
+		Having(criteria.Gt("COUNT(*)", 3).Raw()).
 		Where(criteria.Eq("o.status", "paid")).
 		OrderBy(criteria.Desc("o.created_at")).
 		Limit(5).
-		BuildBase(pg)
+		BuildBase(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.status = $1 GROUP BY o.user_id HAVING COUNT(*) > $2", sql)
 	assert.Equal(t, []any{"paid", 3}, params)
 }
@@ -536,43 +536,43 @@ func TestBuildBase_PreservesWhereGroupByHaving(t *testing.T) {
 // Dialect placeholder variation
 
 func TestBuild_PlaceholderFormat_Postgres(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		Where(criteria.Eq("a", 1), criteria.Eq("b", 2)).
-		Build(pg)
+		Build(pg))
 	assert.Contains(t, sql, "$1")
 	assert.Contains(t, sql, "$2")
 }
 
 func TestBuild_PlaceholderFormat_MySQL(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		Where(criteria.Eq("a", 1), criteria.Eq("b", 2)).
-		Build(my)
+		Build(my))
 	assert.Equal(t, "SELECT * FROM t WHERE a = ? AND b = ?", sql)
 }
 
 func TestBuild_PlaceholderFormat_Oracle(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		Where(criteria.Eq("a", 1), criteria.Eq("b", 2)).
-		Build(ora)
+		Build(ora))
 	assert.Equal(t, "SELECT * FROM t WHERE a = :1 AND b = :2", sql)
 }
 
 func TestBuild_PlaceholderFormat_SQLServer(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		Where(criteria.Eq("a", 1), criteria.Eq("b", 2)).
-		Build(mss)
+		Build(mss))
 
 	assert.Equal(t, "SELECT * FROM t WHERE a = @p1 AND b = @p2", sql)
 }
 
 // Parameter indices advance correctly across different predicate types.
 func TestBuild_ParameterOrdering_MixedPredicates(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.Eq("u.active", true),
 			criteria.In("u.role", []string{"admin", "mod"}),
 			criteria.Contains("u.name", "%john%"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM users u WHERE u.active = $1 AND u.role IN ($2, $3) AND u.name ILIKE $4", sql)
 	assert.Equal(t, []any{true, "admin", "mod", "%john%"}, params)
 }
@@ -580,7 +580,7 @@ func TestBuild_ParameterOrdering_MixedPredicates(t *testing.T) {
 //  Full query
 
 func TestBuild_FullQuery_AllClauses(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Select("u.id", "u.name", "COUNT(o.id) orders").
 		LeftJoin("orders", "o", "o.user_id = u.id").
 		Where(
@@ -589,11 +589,11 @@ func TestBuild_FullQuery_AllClauses(t *testing.T) {
 			criteria.In("u.role", []string{"admin", "moderator"}),
 		).
 		GroupBy("u.id", "u.name").
-		Having(criteria.Gt("COUNT(o.id)", 0)).
+		Having(criteria.Gt("COUNT(o.id)", 0).Raw()).
 		OrderBy(criteria.Asc("u.name"), criteria.Desc("u.id")).
 		Limit(20).
 		Offset(40).
-		Build(pg)
+		Build(pg))
 
 	expected := "SELECT u.id, u.name, COUNT(o.id) orders" +
 		" FROM users u" +
@@ -633,10 +633,10 @@ func TestBuild_ChainingIsIsolated(t *testing.T) {
 		Where(criteria.Eq("u.active", true))
 
 	// Two independent extensions of the same base.
-	sqlA, paramsA := base.Where(criteria.Eq("u.role", "admin")).Build(pg)
-	sqlB, _ := criteria.From("users", "u").
+	sqlA, paramsA := built(t)(base.Where(criteria.Eq("u.role", "admin")).Build(pg))
+	sqlB, _ := built(t)(criteria.From("users", "u").
 		Where(criteria.Eq("u.active", true)).
-		Build(pg)
+		Build(pg))
 
 	// sqlA has both predicates.
 	assert.Contains(t, sqlA, "u.role = $2")
@@ -649,7 +649,7 @@ func TestBuild_ChainingIsIsolated(t *testing.T) {
 //  Empty WHERE / GROUP BY / HAVING
 
 func TestBuild_NoWhere_NoGroupBy_NoHaving(t *testing.T) {
-	sql, params := criteria.From("users", "").Build(pg)
+	sql, params := built(t)(criteria.From("users", "").Build(pg))
 	assert.Equal(t, "SELECT * FROM users", sql)
 	assert.Empty(t, params)
 	assert.NotContains(t, sql, "WHERE")
@@ -660,11 +660,11 @@ func TestBuild_NoWhere_NoGroupBy_NoHaving(t *testing.T) {
 //  Between - parameter placement
 
 func TestBuild_Between_ParamsInOrder(t *testing.T) {
-	sql, params := criteria.From("events", "e").
+	sql, params := built(t)(criteria.From("events", "e").
 		Where(
 			criteria.Eq("e.type", "click"),
 			criteria.Between("e.created_at", "2024-01-01", "2024-12-31"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM events e WHERE e.type = $1 AND e.created_at BETWEEN $2 AND $3", sql)
 	assert.Equal(t, []any{"click", "2024-01-01", "2024-12-31"}, params)
 }
@@ -672,11 +672,11 @@ func TestBuild_Between_ParamsInOrder(t *testing.T) {
 //  IsNull alongside other predicates
 
 func TestBuild_IsNull_DoesNotAddParameter(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.IsNull("u.deleted_at"),
 			criteria.Eq("u.active", true),
-		).Build(pg)
+		).Build(pg))
 	// IS NULL has no param; Eq gets $1 (not $2).
 	assert.Equal(t, "SELECT * FROM users u WHERE u.deleted_at IS NULL AND u.active = $1", sql)
 	assert.Equal(t, []any{true}, params)
@@ -685,27 +685,27 @@ func TestBuild_IsNull_DoesNotAddParameter(t *testing.T) {
 // IsTrue / IsFalse
 
 func TestBuild_Where_IsTrue(t *testing.T) {
-	sql, params := criteria.From("product", "p").
+	sql, params := built(t)(criteria.From("product", "p").
 		Where(criteria.IsTrue("p.managed")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM product p WHERE p.managed IS TRUE", sql)
 	assert.Empty(t, params)
 }
 
 func TestBuild_Where_IsFalse(t *testing.T) {
-	sql, params := criteria.From("product", "p").
+	sql, params := built(t)(criteria.From("product", "p").
 		Where(criteria.IsFalse("p.active")).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM product p WHERE p.active IS FALSE", sql)
 	assert.Empty(t, params)
 }
 
 func TestBuild_Where_IsTrue_DoesNotAdvanceParamIndex(t *testing.T) {
-	sql, params := criteria.From("product", "p").
+	sql, params := built(t)(criteria.From("product", "p").
 		Where(
 			criteria.IsTrue("p.managed"),
 			criteria.Eq("p.company_id", 42),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM product p WHERE p.managed IS TRUE AND p.company_id = $1", sql)
 	assert.Equal(t, []any{42}, params)
 }
@@ -713,20 +713,20 @@ func TestBuild_Where_IsTrue_DoesNotAdvanceParamIndex(t *testing.T) {
 // Group
 
 func TestBuild_Where_Group_SingleOr(t *testing.T) {
-	sql, params := criteria.From("product", "p").
+	sql, params := built(t)(criteria.From("product", "p").
 		Where(
 			criteria.Group(
 				criteria.Eq("p.sku", "ABC"),
 				criteria.Or(),
 				criteria.Eq("p.sku_marketplace", "ABC"),
 			),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM product p WHERE (p.sku = $1 OR p.sku_marketplace = $2)", sql)
 	assert.Equal(t, []any{"ABC", "ABC"}, params)
 }
 
 func TestBuild_Where_Group_IsolatesOrFromSurroundingAnd(t *testing.T) {
-	sql, params := criteria.From("product", "p").
+	sql, params := built(t)(criteria.From("product", "p").
 		Where(
 			criteria.Eq("p.company_id", 1),
 			criteria.Group(
@@ -734,13 +734,13 @@ func TestBuild_Where_Group_IsolatesOrFromSurroundingAnd(t *testing.T) {
 				criteria.Or(),
 				criteria.Eq("p.sku_marketplace", "X"),
 			),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM product p WHERE p.company_id = $1 AND (p.sku = $2 OR p.sku_marketplace = $3)", sql)
 	assert.Equal(t, []any{1, "X", "X"}, params)
 }
 
 func TestBuild_Where_Group_NestedGroup(t *testing.T) {
-	sql, params := criteria.From("t", "").
+	sql, params := built(t)(criteria.From("t", "").
 		Where(
 			criteria.Group(
 				criteria.Eq("a", 1),
@@ -750,13 +750,13 @@ func TestBuild_Where_Group_NestedGroup(t *testing.T) {
 					criteria.Eq("c", 3),
 				),
 			),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM t WHERE (a = $1 OR (b = $2 AND c = $3))", sql)
 	assert.Equal(t, []any{1, 2, 3}, params)
 }
 
 func TestBuild_Where_Group_ParamIndexContinuesAfterGroup(t *testing.T) {
-	sql, params := criteria.From("t", "").
+	sql, params := built(t)(criteria.From("t", "").
 		Where(
 			criteria.Eq("x", 10),
 			criteria.Group(
@@ -765,7 +765,7 @@ func TestBuild_Where_Group_ParamIndexContinuesAfterGroup(t *testing.T) {
 				criteria.Eq("b", 2),
 			),
 			criteria.Eq("y", 20),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM t WHERE x = $1 AND (a = $2 OR b = $3) AND y = $4", sql)
 	assert.Equal(t, []any{10, 1, 2, 20}, params)
 }
@@ -809,7 +809,7 @@ func TestBuild_FullProductQuery_WithSearchAndMarketplaceFilter(t *testing.T) {
 		q = q.Where(criteria.In("p.marketplace_id", marketplaceIDs))
 	}
 
-	sql, params := q.Build(pg)
+	sql, params := built(t)(q.Build(pg))
 
 	expected := "SELECT p.id, p.company_id, p.marketplace_id, p.title, p.sku, p.sku_marketplace, p.price, p.managed" +
 		" FROM product p" +
@@ -848,7 +848,7 @@ func TestBuild_FullProductQuery_WithoutOptionalFilters(t *testing.T) {
 		q = q.Where(criteria.In("p.marketplace_id", marketplaceIDs))
 	}
 
-	sql, params := q.Build(pg)
+	sql, params := built(t)(q.Build(pg))
 
 	expected := "SELECT p.id, p.company_id, p.marketplace_id, p.title, p.sku, p.sku_marketplace, p.price, p.managed" +
 		" FROM product p" +
@@ -867,58 +867,58 @@ var (
 )
 
 func TestBuild_Where_DateEq(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateEq("o.created_at", buildDate)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.created_at = $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
 }
 
 func TestBuild_Where_DateBefore(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateBefore("o.expires_at", buildDate)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.expires_at < $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
 }
 
 func TestBuild_Where_DateAfter(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateAfter("o.created_at", buildDate)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.created_at > $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
 }
 
 func TestBuild_Where_DateOnOrBefore(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateOnOrBefore("o.scheduled_at", buildDate)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.scheduled_at <= $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
 }
 
 func TestBuild_Where_DateOnOrAfter(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateOnOrAfter("o.scheduled_at", buildDate)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.scheduled_at >= $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
 }
 
 func TestBuild_Where_DateBetween_SQL(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateBetween("o.created_at", buildDate, buildDateLater)).
-		Build(pg)
+		Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.created_at BETWEEN $1 AND $2", sql)
 	assert.Equal(t, []any{buildDate, buildDateLater}, params)
 }
 
 // DateBetween from/to are bound as $1 and $2 — never swapped.
 func TestBuild_Where_DateBetween_ParamOrder(t *testing.T) {
-	_, params := criteria.From("o", "").
+	_, params := built(t)(criteria.From("o", "").
 		Where(criteria.DateBetween("o.created_at", buildDate, buildDateLater)).
-		Build(pg)
+		Build(pg))
 	require.Len(t, params, 2)
 	assert.Equal(t, buildDate, params[0])
 	assert.Equal(t, buildDateLater, params[1])
@@ -926,26 +926,26 @@ func TestBuild_Where_DateBetween_ParamOrder(t *testing.T) {
 
 // DateBetween consumes two param slots; the next predicate gets $3.
 func TestBuild_Where_DateBetween_AdvancesParamIndex(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(
 			criteria.DateBetween("o.created_at", buildDate, buildDateLater),
 			criteria.Eq("o.status", "paid"),
-		).Build(pg)
+		).Build(pg))
 	assert.Equal(t, "SELECT * FROM orders o WHERE o.created_at BETWEEN $1 AND $2 AND o.status = $3", sql)
 	assert.Equal(t, []any{buildDate, buildDateLater, "paid"}, params)
 }
 
 // DateOnOrAfter + DateOnOrBefore is semantically equivalent to DateBetween.
 func TestBuild_Where_DateRange_TwoPredicates_EquivalentToBetween(t *testing.T) {
-	sqlBetween, _ := criteria.From("orders", "o").
+	sqlBetween, _ := built(t)(criteria.From("orders", "o").
 		Where(criteria.DateBetween("o.created_at", buildDate, buildDateLater)).
-		Build(pg)
+		Build(pg))
 
-	sqlRange, _ := criteria.From("orders", "o").
+	sqlRange, _ := built(t)(criteria.From("orders", "o").
 		Where(
 			criteria.DateOnOrAfter("o.created_at", buildDate),
 			criteria.DateOnOrBefore("o.created_at", buildDateLater),
-		).Build(pg)
+		).Build(pg))
 
 	assert.Equal(t,
 		"SELECT * FROM orders o WHERE o.created_at BETWEEN $1 AND $2",
@@ -959,12 +959,12 @@ func TestBuild_Where_DateRange_TwoPredicates_EquivalentToBetween(t *testing.T) {
 
 // Realistic: active orders within a time window.
 func TestBuild_Where_DateBetween_CombinedWithOtherPredicates(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Where(
 			criteria.Eq("o.company_id", 42),
 			criteria.Eq("o.status", "paid"),
 			criteria.DateBetween("o.created_at", buildDate, buildDateLater),
-		).Build(pg)
+		).Build(pg))
 
 	expected := "SELECT * FROM orders o WHERE o.company_id = $1 AND o.status = $2 AND o.created_at BETWEEN $3 AND $4"
 	assert.Equal(t, expected, sql)
@@ -973,11 +973,11 @@ func TestBuild_Where_DateBetween_CombinedWithOtherPredicates(t *testing.T) {
 
 // Realistic: not-deleted records created after a given date.
 func TestBuild_Where_IsNull_AndDateAfter(t *testing.T) {
-	sql, params := criteria.From("users", "u").
+	sql, params := built(t)(criteria.From("users", "u").
 		Where(
 			criteria.IsNull("u.deleted_at"),
 			criteria.DateAfter("u.created_at", buildDate),
-		).Build(pg)
+		).Build(pg))
 
 	assert.Equal(t, "SELECT * FROM users u WHERE u.deleted_at IS NULL AND u.created_at > $1", sql)
 	assert.Equal(t, []any{buildDate}, params)
@@ -1001,9 +1001,9 @@ func TestBuild_Date_PlaceholderAcrossDialects(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sql, _ := criteria.From("orders", "o").
+			sql, _ := built(t)(criteria.From("orders", "o").
 				Where(criteria.DateBetween("o.created_at", buildDate, buildDateLater)).
-				Build(tc.dialect)
+				Build(tc.dialect))
 			assert.Equal(t, tc.wantSQL, sql)
 		})
 	}
@@ -1011,7 +1011,7 @@ func TestBuild_Date_PlaceholderAcrossDialects(t *testing.T) {
 
 // Realistic: order report — date range + join + group + having + order + pagination.
 func TestBuild_FullOrderReport_WithDateRange(t *testing.T) {
-	sql, params := criteria.From("orders", "o").
+	sql, params := built(t)(criteria.From("orders", "o").
 		Select("o.seller_id", "COUNT(*) total", "SUM(o.amount) revenue").
 		Join("sellers", "s", "s.id = o.seller_id").
 		Where(
@@ -1020,10 +1020,10 @@ func TestBuild_FullOrderReport_WithDateRange(t *testing.T) {
 			criteria.NotIn("o.status", []string{"cancelled", "refunded"}),
 		).
 		GroupBy("o.seller_id").
-		Having(criteria.Gt("COUNT(*)", 0)).
+		Having(criteria.Gt("COUNT(*)", 0).Raw()).
 		OrderBy(criteria.Desc("revenue")).
 		Limit(50).
-		Build(pg)
+		Build(pg))
 
 	expected := "SELECT o.seller_id, COUNT(*) total, SUM(o.amount) revenue" +
 		" FROM orders o" +
@@ -1056,7 +1056,7 @@ func TestBuild_ComparisonOperators(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sql, params := criteria.From("t", "").Where(tc.predicate).Build(pg)
+			sql, params := built(t)(criteria.From("t", "").Where(tc.predicate).Build(pg))
 			assert.Equal(t, fmt.Sprintf("SELECT * FROM t WHERE f %s $1", tc.wantOp), sql)
 			assert.Equal(t, []any{1}, params)
 		})

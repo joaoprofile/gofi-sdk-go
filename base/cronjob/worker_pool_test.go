@@ -2,8 +2,7 @@ package cronjob
 
 import (
 	"errors"
-	"io"
-	"log"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
@@ -20,55 +19,55 @@ func TestNewPool_SetsWorkerCount(t *testing.T) {
 
 func TestWorkerPool_RunsAllJobs(t *testing.T) {
 	const numJobs = 20
-	var executed int64
+	var executed atomic.Int64
 
 	p := NewPool(4)
 	p.Start()
 
 	batch := make([]func(), numJobs)
 	for i := range batch {
-		batch[i] = func() { atomic.AddInt64(&executed, 1) }
+		batch[i] = func() { executed.Add(1) }
 	}
 
 	p.EnqueueJobBatch(batch)
 	p.Close()
 
-	assert.Equal(t, int64(numJobs), atomic.LoadInt64(&executed))
+	assert.Equal(t, int64(numJobs), executed.Load())
 }
 
 func TestWorkerPool_MultipleBatches(t *testing.T) {
-	var executed int64
+	var executed atomic.Int64
 
 	p := NewPool(3)
 	p.Start()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		batch := []func(){
-			func() { atomic.AddInt64(&executed, 1) },
-			func() { atomic.AddInt64(&executed, 1) },
+			func() { executed.Add(1) },
+			func() { executed.Add(1) },
 		}
 		p.EnqueueJobBatch(batch)
 	}
 
 	p.Close()
-	assert.Equal(t, int64(10), atomic.LoadInt64(&executed))
+	assert.Equal(t, int64(10), executed.Load())
 }
 
 func TestWorkerPool_SingleWorker(t *testing.T) {
-	var executed int64
+	var executed atomic.Int64
 
 	p := NewPool(1)
 	p.Start()
 
 	batch := []func(){
-		func() { atomic.AddInt64(&executed, 1) },
-		func() { atomic.AddInt64(&executed, 1) },
-		func() { atomic.AddInt64(&executed, 1) },
+		func() { executed.Add(1) },
+		func() { executed.Add(1) },
+		func() { executed.Add(1) },
 	}
 	p.EnqueueJobBatch(batch)
 	p.Close()
 
-	assert.Equal(t, int64(3), atomic.LoadInt64(&executed))
+	assert.Equal(t, int64(3), executed.Load())
 }
 
 func TestWorkerPool_EmptyBatch(t *testing.T) {
@@ -82,20 +81,20 @@ func TestWorkerPool_EmptyBatch(t *testing.T) {
 }
 
 func TestWorkerPool_WaitBlocksUntilDone(t *testing.T) {
-	var executed int64
+	var executed atomic.Int64
 
 	p := NewPool(2)
 	p.Start()
 
 	batch := make([]func(), 10)
 	for i := range batch {
-		batch[i] = func() { atomic.AddInt64(&executed, 1) }
+		batch[i] = func() { executed.Add(1) }
 	}
 
 	p.EnqueueJobBatch(batch)
 	p.Wait()
 
-	assert.Equal(t, int64(10), atomic.LoadInt64(&executed))
+	assert.Equal(t, int64(10), executed.Load())
 	close(p.Jobs) // manual close after Wait
 }
 
@@ -171,14 +170,9 @@ func TestJobGenerator_GenerateJobs_ExecutesWithCorrectItems(t *testing.T) {
 }
 
 func TestJobGenerator_ProcessJobFunc_ErrorIsLogged(t *testing.T) {
-	// Errors from ProcessJobFunc are logged (not propagated). The job func
-	// should complete without panicking even when the processor returns an error.
-	prev := log.Writer()
-	log.SetOutput(io.Discard) // suppress expected error log
-	defer log.SetOutput(prev)
-
-	items := []int{1, 2, 3}
-	g := NewJobGenerator(items, 10, func(int) error {
+	// Without OnError, errors are logged (not propagated) and the job func
+	// completes without panicking.
+	g := NewJobGenerator([]int{1, 2, 3}, 10, func(int) error {
 		return errors.New("processing failed")
 	})
 
@@ -191,19 +185,63 @@ func TestJobGenerator_ProcessJobFunc_ErrorIsLogged(t *testing.T) {
 	})
 }
 
+func TestJobGenerator_OnErrorReceivesFailedItems(t *testing.T) {
+	g := NewJobGenerator([]int{1, 2, 3}, 2, func(i int) error {
+		if i%2 == 1 {
+			return errors.New("odd")
+		}
+		return nil
+	})
+	var failed []int
+	g.OnError = func(i int, err error) {
+		assert.EqualError(t, err, "odd")
+		failed = append(failed, i)
+	}
+	for _, batch := range g.GenerateJobs() {
+		for _, fn := range batch {
+			fn()
+		}
+	}
+	assert.Equal(t, []int{1, 3}, failed)
+}
+
 func TestJobGenerator_RunWithPool_ExecutesAllItems(t *testing.T) {
-	var executed int64
+	var executed atomic.Int64
 	items := []int{1, 2, 3, 4, 5, 6, 7, 8}
 
 	g := NewJobGenerator(items, 3, func(int) error {
-		atomic.AddInt64(&executed, 1)
+		executed.Add(1)
 		return nil
 	})
 
 	p := NewPool(4)
 	p.Start()
-	g.RunWithPool(p)
+	assert.NoError(t, g.RunWithPool(p))
 	p.Close()
 
-	assert.Equal(t, int64(len(items)), atomic.LoadInt64(&executed))
+	assert.Equal(t, int64(len(items)), executed.Load())
+}
+
+// Regression: NewPool(0) created no workers and Enqueue blocked forever.
+func TestNewPool_ZeroWorkersUsesGOMAXPROCS(t *testing.T) {
+	p := NewPool(0)
+	assert.Equal(t, runtime.GOMAXPROCS(0), p.Workers)
+	p.Start()
+	var ran atomic.Bool
+	require.NoError(t, p.EnqueueJobBatch([]func(){func() { ran.Store(true) }}))
+	p.Close()
+	assert.True(t, ran.Load())
+}
+
+// Regression: enqueueing after Close panicked with a send on a closed channel.
+func TestWorkerPool_EnqueueAfterCloseFails(t *testing.T) {
+	p := NewPool(1)
+	p.Start()
+	p.Close()
+	assert.NotPanics(t, func() {
+		assert.ErrorIs(t, p.EnqueueJobBatch([]func(){func() {}}), ErrPoolClosed)
+		p.Close() // idempotent
+	})
+	g := NewJobGenerator([]int{1}, 1, func(int) error { return nil })
+	assert.ErrorIs(t, g.RunWithPool(p), ErrPoolClosed)
 }

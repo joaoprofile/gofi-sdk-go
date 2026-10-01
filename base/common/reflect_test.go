@@ -12,7 +12,7 @@ func TestGetStructName(t *testing.T) {
 	type AnotherStruct struct{}
 
 	tests := []struct {
-		input    interface{}
+		input    any
 		expected string
 		err      error
 	}{{MyStruct{}, "my_struct", nil},
@@ -41,7 +41,7 @@ func TestGetColumns(t *testing.T) {
 	}
 
 	tests := []struct {
-		input    interface{}
+		input    any
 		expected string
 		err      error
 	}{

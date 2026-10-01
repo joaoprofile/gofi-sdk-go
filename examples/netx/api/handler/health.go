@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/joaoprofile/gofi/netx"
+	"github.com/gofi-labs/gofi-sdk-go/netx"
 )
 
 // HealthHandler exposes a single public liveness probe.

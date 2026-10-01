@@ -4,17 +4,22 @@ package google
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/provider/oidc"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/provider/oidc"
 )
 
 const (
 	issuerURL    = "https://accounts.google.com"
 	providerName = "google"
 )
+
+// ErrHostedDomainMismatch is returned when the id_token hd claim differs from Config.HostedDomain.
+var ErrHostedDomainMismatch = errors.New("iam/google: hosted domain mismatch")
 
 // Config configures the Google provider.
 type Config struct {
@@ -37,22 +42,30 @@ type Provider struct {
 
 // New creates a Google OIDC provider.
 func New(cfg Config) *Provider {
-	var extraScopes []string
-	if cfg.HostedDomain != "" {
-		extraScopes = append(extraScopes, "hd")
-	}
-
-	inner := oidc.New(providerName, oidc.Config{
+	oc := oidc.Config{
 		IssuerURL:    issuerURL,
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		RedirectURI:  cfg.RedirectURI,
-		ExtraScopes:  extraScopes,
 		JWKSCacheTTL: time.Hour,
 		HTTPClient:   cfg.HTTPClient,
-	})
+	}
+	if cfg.HostedDomain != "" {
+		// hd in the URL is only a UI hint; the claim check is what enforces the domain.
+		oc.AuthParams = map[string]string{"hd": cfg.HostedDomain}
+		oc.ValidateClaims = hostedDomainValidator(cfg.HostedDomain)
+	}
 
-	return &Provider{inner: inner}
+	return &Provider{inner: oidc.New(providerName, oc)}
+}
+
+func hostedDomainValidator(domain string) func(map[string]any) error {
+	return func(claims map[string]any) error {
+		if hd, _ := claims["hd"].(string); !strings.EqualFold(hd, domain) {
+			return ErrHostedDomainMismatch
+		}
+		return nil
+	}
 }
 
 func (p *Provider) ProviderName() string { return providerName }

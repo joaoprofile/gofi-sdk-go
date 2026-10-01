@@ -1,11 +1,12 @@
 package cache
 
 // Config holds the Redis connection settings and key namespace for the cache.
-// gofi's config package populates it from CACHE_* and APP_NAME; tests call
+// gofi's cache and database components populate it from CACHE_* and APP_NAME; tests call
 // Configure directly. Set it before the first cache access.
 type Config struct {
 	URI      string
 	Password string
+	TLS      bool // enables TLS 1.2+ to the Redis server
 	// Prefix namespaces every key as "<Prefix>::<name>".
 	Prefix string
 }

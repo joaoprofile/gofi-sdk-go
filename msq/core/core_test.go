@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/msq/core"
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq/core"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,14 +66,16 @@ type fakeBroker struct {
 }
 
 func (b *fakeBroker) NewProducer() (port.Producer, error) { return b.producer, nil }
-func (b *fakeBroker) NewConsumer(_ types.ConsumeConfig) port.Consumer {
-	return b.consumer
+func (b *fakeBroker) NewConsumer(_ types.ConsumeConfig) (port.Consumer, error) {
+	return b.consumer, nil
 }
 
 // nilConsumerBroker always returns nil from NewConsumer.
 type nilConsumerBroker struct{ fakeBroker }
 
-func (b *nilConsumerBroker) NewConsumer(_ types.ConsumeConfig) port.Consumer { return nil }
+func (b *nilConsumerBroker) NewConsumer(_ types.ConsumeConfig) (port.Consumer, error) {
+	return nil, nil
+}
 
 // BrokerService
 
@@ -99,17 +102,25 @@ func TestBrokerServiceNewProducer(t *testing.T) {
 	svc := core.NewService(core.ServiceConfig{Broker: broker})
 
 	got, err := svc.NewProducer()
-	assert.NoError(t, err)
-	assert.Equal(t, p, got)
+	require.NoError(t, err)
+	assert.NoError(t, got.SendMessage(context.Background(), &types.Message{Topic: "orders"}))
 }
 
-func TestBrokerServiceNewConsumer(t *testing.T) {
-	c := &fakeConsumer{}
-	broker := &fakeBroker{consumer: c}
+func TestBrokerServiceNewConsumerDelegatesClose(t *testing.T) {
+	sentinel := errors.New("close failed")
+	broker := &fakeBroker{consumer: &fakeConsumer{closeErr: sentinel}}
 	svc := core.NewService(core.ServiceConfig{Broker: broker})
 
-	got := svc.NewConsumer(types.ConsumeConfig{Topic: "orders"})
-	assert.Equal(t, c, got)
+	got, err := svc.NewConsumer(types.ConsumeConfig{Topic: "orders"})
+	require.NoError(t, err)
+	assert.ErrorIs(t, got.Close(), sentinel)
+}
+
+func TestBrokerServiceRejectsNilConsumer(t *testing.T) {
+	svc := core.NewService(core.ServiceConfig{Broker: &fakeBroker{}})
+
+	_, err := svc.NewConsumer(types.ConsumeConfig{Topic: "orders"})
+	assert.Error(t, err)
 }
 
 func TestBrokerServiceNewConsumerManager(t *testing.T) {
@@ -151,8 +162,8 @@ func TestConsumerManagerRegisterAndStart(t *testing.T) {
 }
 
 // TestConsumerManagerCloseIsIdempotent guards the shutdown barrier: the main
-// goroutine's defer and the observer-driven shutdown both call Close(); it must
-// drain exactly once and be safe to call repeatedly/concurrently.
+// goroutine's defer and BrokerService.Close both call Close(); it must drain
+// exactly once and be safe to call repeatedly/concurrently.
 func TestConsumerManagerCloseIsIdempotent(t *testing.T) {
 	consumer := &fakeConsumer{}
 	broker := &fakeBroker{consumer: consumer}
@@ -230,10 +241,9 @@ func TestConsumerManagerSkipsEmptyTopic(t *testing.T) {
 		types.ConsumeConfig{Topic: ""}, // empty — should be skipped
 		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
 	)
-	// Should not block or panic.
-	mgr.Start()
-	time.Sleep(50 * time.Millisecond)
+	assert.ErrorIs(t, mgr.Start(), core.ErrTopicRequired)
 	mgr.Close()
+	assert.False(t, broker.consumer.(*fakeConsumer).started.Load(), "no consumer runs for an empty topic")
 }
 
 func TestConsumerManagerSkipsNilConsumer(t *testing.T) {
@@ -243,9 +253,7 @@ func TestConsumerManagerSkipsNilConsumer(t *testing.T) {
 		types.ConsumeConfig{Topic: "orders"},
 		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
 	)
-	// Should not panic even though broker returns nil consumer.
-	mgr.Start()
-	time.Sleep(50 * time.Millisecond)
+	assert.ErrorIs(t, mgr.Start(), core.ErrConsumerFailed)
 	mgr.Close()
 }
 
@@ -282,7 +290,7 @@ func TestConsumerManagerMultipleConsumers(t *testing.T) {
 	broker := makeBroker()
 	mgr := core.NewConsumerManager(broker)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		mgr.Register(
 			types.ConsumeConfig{Topic: "t", Concurrency: 1},
 			func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
@@ -324,13 +332,48 @@ func TestConsumerManagerConsumerError(t *testing.T) {
 	consumer := &errorConsumer{err: errConsume}
 	broker := &fakeBroker{consumer: consumer}
 
-	mgr := core.NewConsumerManager(broker)
+	var mu sync.Mutex
+	var events []types.BrokerEvent
+	svc := core.NewService(core.ServiceConfig{Broker: broker, OnEvent: func(_ context.Context, e types.BrokerEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	}})
+	mgr := svc.NewConsumerManager()
 	mgr.Register(
 		types.ConsumeConfig{Topic: "t"},
 		func(_ context.Context, _ *types.Message) (types.Result, error) { return types.Ack, nil },
 	)
-	mgr.Start()
-	// Manager must not panic even when Consume returns an error immediately.
-	time.Sleep(50 * time.Millisecond)
-	mgr.Close()
+	require.NoError(t, mgr.Start())
+	mgr.Close() // waits for the consumer goroutine
+
+	mu.Lock()
+	defer mu.Unlock()
+	var got error
+	for _, e := range events {
+		if e.Type == types.EventConsumerError {
+			got = e.Error
+		}
+	}
+	assert.ErrorIs(t, got, errConsume, "a failing Consume is reported, not swallowed")
+}
+
+// BrokerService.Close drains the managers it created, so gofi's shutdown stops
+// consumers before closing the pools their handlers use.
+func TestBrokerServiceCloseDrainsManagers(t *testing.T) {
+	consumer := &fakeConsumer{}
+	svc := core.NewService(core.ServiceConfig{Broker: &fakeBroker{consumer: consumer}})
+	mgr := svc.NewConsumerManager()
+	mgr.Register(types.ConsumeConfig{Topic: "orders", Concurrency: 1},
+		func(context.Context, *types.Message) (types.Result, error) { return types.Ack, nil })
+	require.NoError(t, mgr.Start())
+	require.Eventually(t, consumer.started.Load, 2*time.Second, 10*time.Millisecond)
+
+	done := make(chan struct{})
+	go func() { _ = svc.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not drain the manager")
+	}
 }

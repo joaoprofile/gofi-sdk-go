@@ -12,3 +12,11 @@ var (
 	// ErrConsumerFailed is returned when a consumer exits with an unrecoverable error.
 	ErrConsumerFailed = errors.New("msq: consumer failed")
 )
+
+var (
+	// ErrManagerClosed is returned by Start and Healthy after Close.
+	ErrManagerClosed = errors.New("msq: consumer manager closed")
+
+	// ErrConsumerDown is reported by Healthy for a consumer that stays down.
+	ErrConsumerDown = errors.New("msq: consumer down")
+)

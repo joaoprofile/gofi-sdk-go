@@ -5,15 +5,43 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
 
-	"github.com/joaoprofile/gofi/base/validator"
+	"github.com/gofi-labs/gofi-sdk-go/base/validator"
 )
 
 const ErrMsgOnQueryParameter = "error on parsing query parameters %w"
+
+// Causes wrapped by RequestError, for errors.Is.
+var (
+	ErrUnsupportedMediaType = errors.New("unsupported media type")
+	ErrBodyTooLarge         = errors.New("request body too large")
+	ErrInvalidJSON          = errors.New("invalid JSON body")
+	ErrInvalidQueryParam    = errors.New("invalid query parameter")
+)
+
+// RequestError is a client error. Error returns Message, which is safe to
+// send to the client; Err keeps the detailed cause for logs (errors.Unwrap).
+type RequestError struct {
+	Status  int
+	Message string
+	Err     error
+}
+
+func (e *RequestError) Error() string { return e.Message }
+func (e *RequestError) Unwrap() error { return e.Err }
+
+func newRequestError(status int, kind error, message string, cause error) *RequestError {
+	err := kind
+	if cause != nil {
+		err = fmt.Errorf("%w: %w", kind, cause)
+	}
+	return &RequestError{Status: status, Message: message, Err: err}
+}
 
 //	Body parsing
 //
@@ -24,38 +52,107 @@ func ReadBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-// ParseRequestBody decodes the JSON request body into tStruct.
-// tStruct must be a non-nil pointer to a struct; otherwise ErrInvalidStruct is returned.
-func ParseRequestBody(_ http.ResponseWriter, r *http.Request, tStruct interface{}) error {
+// BodyOption tunes ParseRequestBody.
+type BodyOption func(*bodyOptions)
+
+type bodyOptions struct {
+	allowUnknown bool
+	maxBytes     int64
+}
+
+// AllowUnknownFields accepts JSON fields the target struct does not declare.
+func AllowUnknownFields() BodyOption {
+	return func(o *bodyOptions) { o.allowUnknown = true }
+}
+
+// WithMaxBodyBytes caps the body read by ParseRequestBody (default
+// DefaultMaxBodyBytes); the server-wide WSConfig.MaxBodyBytes still applies.
+func WithMaxBodyBytes(n int64) BodyOption {
+	return func(o *bodyOptions) {
+		if n > 0 {
+			o.maxBytes = n
+		}
+	}
+}
+
+// ParseRequestBody decodes a single JSON value from the request body into
+// tStruct, a non-nil pointer to a struct (ErrInvalidStruct otherwise). It
+// requires Content-Type application/json (or application/*+json), rejects
+// unknown fields (see AllowUnknownFields) and trailing data. Client errors
+// are *RequestError: 415 for the media type, 413 for an oversized body and
+// 400 for invalid JSON, with generic messages safe to return.
+func ParseRequestBody(w http.ResponseWriter, r *http.Request, tStruct any, opts ...BodyOption) error {
 	if err := validator.IsStructP(tStruct); err != nil {
 		return ErrInvalidStruct
 	}
-
-	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	o := bodyOptions{maxBytes: DefaultMaxBodyBytes}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if err := requireJSON(r.Header.Get("Content-Type")); err != nil {
 		return err
 	}
+	if r.Body == nil {
+		return bodyError(io.EOF)
+	}
+	defer r.Body.Close()
 
-	return json.Unmarshal(body, tStruct)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, o.maxBytes))
+	if !o.allowUnknown {
+		dec.DisallowUnknownFields()
+	}
+	if err := dec.Decode(tStruct); err != nil {
+		return bodyError(err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("trailing data after the JSON value")
+		}
+		return bodyError(err)
+	}
+	return nil
+}
+
+// requireJSON accepts application/json and application/*+json, with params.
+func requireJSON(contentType string) error {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err == nil && (mt == "application/json" || strings.HasPrefix(mt, "application/") && strings.HasSuffix(mt, "+json")) {
+		return nil
+	}
+	return newRequestError(http.StatusUnsupportedMediaType, ErrUnsupportedMediaType,
+		"content type must be application/json", fmt.Errorf("content type %q", contentType))
+}
+
+func bodyError(err error) *RequestError {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return newRequestError(http.StatusRequestEntityTooLarge, ErrBodyTooLarge, ErrBodyTooLarge.Error(), err)
+	}
+	if errors.Is(err, io.EOF) {
+		err = errors.New("empty body")
+	}
+	return newRequestError(http.StatusBadRequest, ErrInvalidJSON, ErrInvalidJSON.Error(), err)
 }
 
 // Query / path parameters
 //
-// GetQueryParam returns the lowercased value of the named URL query parameter.
+// GetQueryParam returns the value of the named URL query parameter, unchanged.
 func GetQueryParam(filter string, r *http.Request) string {
-	return strings.ToLower(r.URL.Query().Get(filter))
+	return r.URL.Query().Get(filter)
 }
 
-// GetPathParam returns the lowercased value of the named URL path parameter.
+// GetPathParam returns the value of the named URL path parameter, unchanged.
 func GetPathParam(param string, r *http.Request) string {
-	return strings.ToLower(r.PathValue(param))
+	return r.PathValue(param)
 }
 
 // BindQueryParamsToStruct populates tStruct from the URL query parameters.
-// Each exported field is matched by its `form` tag, falling back to the lowercased
-// field name. tStruct must be a non-nil pointer to a struct.
-func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct interface{}) error {
+// Each exported field is matched by its `form` tag ("-" skips it), falling
+// back to the lowercased field name; unexported fields are ignored. tStruct
+// must be a non-nil pointer to a struct. A value that does not parse or does
+// not fit the field is a 400 *RequestError naming the parameter, never
+// echoing the value.
+func BindQueryParamsToStruct(r *http.Request, _ http.ResponseWriter, tStruct any) error {
 	if err := validator.IsStructP(tStruct); err != nil {
 		return fmt.Errorf(ErrMsgOnQueryParameter, err)
 	}
@@ -64,29 +161,42 @@ func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct int
 	objValue := reflect.ValueOf(tStruct).Elem()
 	queryParams := r.URL.Query()
 
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-		paramName := field.Tag.Get("form")
-		if paramName == "" {
-			paramName = strings.ToLower(field.Name)
-		}
-		vals, ok := queryParams[paramName]
-		if !ok || len(vals) == 0 {
+	for i := range structType.NumField() {
+		name, ok := queryParamName(structType.Field(i))
+		if !ok {
 			continue
 		}
-		fieldValue := objValue.Field(i)
-		if fieldValue.Kind() == reflect.Slice {
-			if err := setSliceFromStrings(fieldValue, vals); err != nil {
-				return fmt.Errorf("%s%s", paramName, err.Error())
-			}
+		vals := queryParams[name]
+		if len(vals) == 0 {
 			continue
 		}
-		if err := setFieldValue(fieldValue, vals[0]); err != nil {
-			return err
+		if err := bindField(objValue.Field(i), vals); err != nil {
+			return newRequestError(http.StatusBadRequest, ErrInvalidQueryParam,
+				"invalid query parameter: "+name, fmt.Errorf("%s: %w", name, err))
 		}
 	}
-
 	return nil
+}
+
+func queryParamName(field reflect.StructField) (string, bool) {
+	if !field.IsExported() {
+		return "", false
+	}
+	name := field.Tag.Get("form")
+	if name == "-" {
+		return "", false
+	}
+	if name == "" {
+		name = strings.ToLower(field.Name)
+	}
+	return name, true
+}
+
+func bindField(value reflect.Value, vals []string) error {
+	if value.Kind() == reflect.Slice {
+		return setSliceFromStrings(value, vals)
+	}
+	return setFieldValue(value, vals[0])
 }
 
 // Field binding
@@ -94,9 +204,9 @@ func BindQueryParamsToStruct(r *http.Request, w http.ResponseWriter, tStruct int
 // setFieldValue sets a struct field from its string query-parameter value,
 // applying the appropriate conversion for the field's kind. Supported kinds:
 // string, bool, int/int8..int64, uint/uint8..uint64, and pointers to any of
-// these (the pointer is allocated on demand).
+// these (the pointer is allocated on demand). Numbers must fit the field.
 func setFieldValue(value reflect.Value, strValue string) error {
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			value.Set(reflect.New(value.Type().Elem()))
 		}
@@ -106,27 +216,42 @@ func setFieldValue(value reflect.Value, strValue string) error {
 	switch value.Kind() {
 	case reflect.String:
 		value.SetString(strValue)
+		return nil
 	case reflect.Bool:
-		v, err := strconv.ParseBool(strValue)
-		if err != nil {
-			return err
-		}
-		value.SetBool(v)
+		return setBool(value, strValue)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		v, err := strconv.ParseUint(strValue, 10, 64)
-		if err != nil {
-			return err
-		}
-		value.SetUint(v)
+		return setUint(value, strValue)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v, err := strconv.ParseInt(strValue, 10, 64)
-		if err != nil {
-			return err
-		}
-		value.SetInt(v)
+		return setInt(value, strValue)
 	default:
 		return errors.New("unsupported kind")
 	}
+}
+
+func setBool(value reflect.Value, s string) error {
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return err
+	}
+	value.SetBool(v)
+	return nil
+}
+
+func setUint(value reflect.Value, s string) error {
+	v, err := strconv.ParseUint(s, 10, value.Type().Bits())
+	if err != nil {
+		return err
+	}
+	value.SetUint(v)
+	return nil
+}
+
+func setInt(value reflect.Value, s string) error {
+	v, err := strconv.ParseInt(s, 10, value.Type().Bits())
+	if err != nil {
+		return err
+	}
+	value.SetInt(v)
 	return nil
 }
 
@@ -143,7 +268,7 @@ func setSliceFromStrings(value reflect.Value, vals []string) error {
 	if len(vals) == 1 && strings.HasPrefix(strings.TrimSpace(vals[0]), "[") {
 		target := reflect.New(value.Type())
 		if err := json.Unmarshal([]byte(vals[0]), target.Interface()); err != nil {
-			return fmt.Errorf(": invalid JSON array '%s': %v", vals[0], err)
+			return fmt.Errorf("invalid JSON array: %w", err)
 		}
 		value.Set(target.Elem())
 		return nil
@@ -151,23 +276,20 @@ func setSliceFromStrings(value reflect.Value, vals []string) error {
 
 	var expanded []string
 	for _, v := range vals {
-		for _, piece := range strings.Split(v, ",") {
-			piece = strings.TrimSpace(piece)
-			if piece == "" {
-				continue
+		for piece := range strings.SplitSeq(v, ",") {
+			if piece = strings.TrimSpace(piece); piece != "" {
+				expanded = append(expanded, piece)
 			}
-			expanded = append(expanded, piece)
 		}
 	}
 	if len(expanded) == 0 {
 		return nil
 	}
 
-	elemType := value.Type().Elem()
 	slice := reflect.MakeSlice(value.Type(), len(expanded), len(expanded))
 	for i, s := range expanded {
 		if err := setFieldValue(slice.Index(i), s); err != nil {
-			return fmt.Errorf("[%d]: invalid %s: '%s'", i, elemType, s)
+			return fmt.Errorf("[%d]: %w", i, err)
 		}
 	}
 	value.Set(slice)

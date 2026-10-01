@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

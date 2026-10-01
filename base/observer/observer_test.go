@@ -3,9 +3,7 @@ package observer
 import (
 	"log"
 	"sync"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -165,36 +163,16 @@ func TestWaitRunningTimeoutExpires(t *testing.T) {
 	}
 }
 
-func TestWaitForSignal(t *testing.T) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		waitForSignal()
-	}()
+func TestShutdown_ClosesOnceInReverseOrder(t *testing.T) {
+	instanceOnce = sync.Once{}
+	instance = nil
+	shutdownOnce = sync.Once{}
 
-	// Give the goroutine time to register the signal handler.
-	time.Sleep(20 * time.Millisecond)
+	var order []string
+	Attach(&orderObserver{name: "db", order: &order})
+	Attach(&orderObserver{name: "consumer", order: &order})
 
-	// Send SIGTERM to ourselves; waitForSignal must unblock.
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatalf("Kill(SIGTERM) failed: %v", err)
-	}
-
-	select {
-	case <-done:
-		// waitForSignal returned as expected
-	case <-time.After(2 * time.Second):
-		t.Error("waitForSignal did not return after SIGTERM")
-	}
-}
-
-// TestSetupShutdownLaunches must run AFTER TestWaitForSignal (i.e. after the
-// SIGTERM has been consumed) so the goroutine spawned by SetupShutdown blocks
-// safely on waitForSignal without ever reaching os.Exit(0).
-func TestSetupShutdownLaunches(t *testing.T) {
-	r := New()
-	SetupShutdown(r, 100*time.Millisecond)
-	// Give the goroutine time to start and reach waitForSignal.
-	time.Sleep(20 * time.Millisecond)
-	// The goroutine is now blocked inside waitForSignal; test ends cleanly.
+	Shutdown()
+	Shutdown()
+	assert.Equal(t, []string{"consumer", "db"}, order)
 }

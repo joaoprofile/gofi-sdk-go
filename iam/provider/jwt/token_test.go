@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,8 +57,7 @@ func TestNewProvider_RS256_MissingKeys(t *testing.T) {
 	_, err := NewProvider(Config{
 		Algorithm: RS256,
 	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "PrivateKey and PublicKey are required")
+	assert.ErrorIs(t, err, ErrInvalidKey)
 }
 
 func TestNewProvider_ES256_Success(t *testing.T) {

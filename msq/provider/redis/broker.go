@@ -1,21 +1,45 @@
 package redis
 
 import (
+	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/msq/worker"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// Config configures the Redis Pub/Sub broker.
+// Mode selects the Redis messaging primitive.
+type Mode string
+
+const (
+	// ModePubSub uses Pub/Sub: at-most-once, subscribers must be connected.
+	ModePubSub Mode = "pubsub"
+	// ModeStreams uses Streams with consumer groups: at-least-once,
+	// messages wait for consumers and Nacks are redelivered.
+	ModeStreams Mode = "streams"
+)
+
+// Config configures the Redis broker. Printing or logging it redacts the
+// password.
 type Config struct {
+	// Mode defaults to ModePubSub.
+	Mode Mode
+	// StreamMaxLen caps each stream approximately (XADD MAXLEN ~); 0 keeps all.
+	StreamMaxLen int64
+	// ClaimIdle is how long an unacked stream message waits before it is
+	// redelivered (default 1m); ConsumeConfig.VisibilityTimeout overrides it.
+	ClaimIdle time.Duration
+
 	// Standalone mode.
 	Addr     string
 	Password string
@@ -26,15 +50,19 @@ type Config struct {
 
 	// TLS
 	TLSEnabled bool
+	// TLS is the client TLS configuration (private CA, mTLS, server name);
+	// setting it enables TLS. Versions below TLS 1.2 are raised to it.
+	TLS *tls.Config `json:"-"`
 
 	// Connection pool.
 	PoolSize     int
 	MinIdleConns int
 }
 
-// Broker implements port.Broker using Redis Pub/Sub.
+// Broker implements port.Broker using Redis Pub/Sub or Streams.
 type Broker struct {
 	client goredis.UniversalClient
+	cfg    Config
 }
 
 // New creates a Broker from configuration.
@@ -44,6 +72,7 @@ func New(cfg Config) *Broker {
 		client = goredis.NewClusterClient(&goredis.ClusterOptions{
 			Addrs:        cfg.ClusterAddrs,
 			Password:     cfg.Password,
+			TLSConfig:    tlsConfig(cfg),
 			PoolSize:     cfg.PoolSize,
 			MinIdleConns: cfg.MinIdleConns,
 		})
@@ -52,35 +81,50 @@ func New(cfg Config) *Broker {
 			Addr:         cfg.Addr,
 			Password:     cfg.Password,
 			DB:           cfg.DB,
+			TLSConfig:    tlsConfig(cfg),
 			PoolSize:     cfg.PoolSize,
 			MinIdleConns: cfg.MinIdleConns,
 		})
 	}
-	return &Broker{client: client}
+	return &Broker{client: client, cfg: cfg}
 }
 
-// NewWithClient creates a Broker reusing an existing Redis client.
-// Useful for sharing the connection pool with other packages (e.g. cache, session).
-func NewWithClient(client goredis.UniversalClient) *Broker {
-	return &Broker{client: client}
+// NewWithClient creates a Broker reusing an existing Redis client, e.g. the
+// cache pool. Only the Mode, StreamMaxLen and ClaimIdle fields of cfg apply.
+func NewWithClient(client goredis.UniversalClient, cfg ...Config) *Broker {
+	b := &Broker{client: client}
+	if len(cfg) > 0 {
+		b.cfg = cfg[0]
+	}
+	return b
 }
 
-// NewProducer returns a Redis Pub/Sub producer.
+// NewProducer returns a producer for the configured mode.
 func (b *Broker) NewProducer() (port.Producer, error) {
+	if b.cfg.Mode == ModeStreams {
+		return &streamProducer{client: b.client, maxLen: b.cfg.StreamMaxLen}, nil
+	}
 	return &producer{client: b.client}, nil
 }
 
-// NewConsumer returns a Redis Pub/Sub consumer subscribed to cfg.Topic.
-func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
+// NewConsumer returns a consumer of cfg.Topic for the configured mode.
+func (b *Broker) NewConsumer(cfg types.ConsumeConfig) (port.Consumer, error) {
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
 		concurrency = types.DefaultConcurrency
+	}
+	switch b.cfg.Mode {
+	case "", ModePubSub:
+	case ModeStreams:
+		return newStreamConsumer(b.client, cfg, concurrency, b.cfg.ClaimIdle), nil
+	default:
+		return nil, fmt.Errorf("redis: unknown mode %q", b.cfg.Mode)
 	}
 	return &consumer{
 		client:      b.client,
 		cfg:         cfg,
 		concurrency: concurrency,
-	}
+	}, nil
 }
 
 // Producer
@@ -170,19 +214,20 @@ func (c *consumer) Consume(ctx context.Context, handler port.MessageHandler) err
 				continue
 			}
 
-			payload := redisMsg.Payload
+			payload, channel := redisMsg.Payload, redisMsg.Channel
 			pool.Enqueue(func() {
-				c.handle(ctx, payload, handler)
+				c.handle(ctx, channel, payload, handler)
 			})
 		}
 	}
 }
 
-func (c *consumer) handle(ctx context.Context, payload string, handler port.MessageHandler) {
-	var msg types.Message
-	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
-		// Payload is not a wrapped Message — treat the raw string as the value.
-		msg = types.Message{Value: []byte(payload)}
+func (c *consumer) handle(ctx context.Context, channel, payload string, handler port.MessageHandler) {
+	msg := types.DecodeEnvelope([]byte(payload))
+	msg.Topic = cmp.Or(channel, c.cfg.Topic)
+	msg.DeliveryCount = 1 // Pub/Sub never redelivers
+	if msg.Id == uuid.Nil {
+		msg.Id = uuid.New() // Pub/Sub has no message id
 	}
 
 	result, err := handler.Handle(ctx, &msg)
@@ -190,7 +235,7 @@ func (c *consumer) handle(ctx context.Context, payload string, handler port.Mess
 	switch result {
 	case types.Ack:
 		// No explicit ack needed in Pub/Sub.
-	case types.Nack:
+	case types.Nack, types.Reject:
 		logging.Error("redis consumer: handler nacked message (no requeue in Pub/Sub)",
 			slog.String("channel", c.cfg.Topic),
 			slog.Any("error", err))
@@ -209,4 +254,40 @@ func (c *consumer) Pause() error {
 func (c *consumer) Resume() error {
 	c.paused.Store(false)
 	return nil
+}
+
+// tlsConfig returns a TLS 1.2+ config when enabled; without a custom
+// ServerName the name is taken from each dial address.
+func tlsConfig(cfg Config) *tls.Config {
+	if cfg.TLS != nil {
+		t := cfg.TLS.Clone()
+		t.MinVersion = max(t.MinVersion, tls.VersionTLS12)
+		return t
+	}
+	if !cfg.TLSEnabled {
+		return nil
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12}
+}
+
+// String implements fmt.Stringer with the password redacted.
+func (c Config) String() string { return fmt.Sprintf("%+v", c.redacted()) }
+
+// GoString implements fmt.GoStringer with the password redacted.
+func (c Config) GoString() string { return fmt.Sprintf("%#v", c.redacted()) }
+
+// LogValue implements slog.LogValuer with the password redacted.
+func (c Config) LogValue() slog.Value { return slog.StringValue(c.String()) }
+
+// MarshalJSON encodes the configuration with the password redacted.
+func (c Config) MarshalJSON() ([]byte, error) { return json.Marshal(c.redacted()) }
+
+type plainConfig Config
+
+func (c Config) redacted() plainConfig {
+	if c.Password != "" {
+		c.Password = "[REDACTED]"
+	}
+	c.TLS = nil // holds private keys
+	return plainConfig(c)
 }

@@ -1,0 +1,58 @@
+# Local observability stack. The service (go run .) sends OTLP to the
+# collector on :4317; the collector fans out to the backends:
+#
+#   app ──OTLP──> otel-collector ──> Tempo       (traces)
+#                                ──> Prometheus  (metrics, scraped on :8889)
+#                                ──> Loki        (logs)
+#   Grafana (http://localhost:3000) reads all three.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.149.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC (the app sends here)
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # Prometheus exporter (scraped by Prometheus)
+    depends_on: [tempo, loki]
+
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --enable-feature=exemplar-storage # metric -> trace links in Grafana
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  tempo:
+    image: grafana/tempo:2.10.3
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: root # writes to /var/tempo; fine for a local demo
+    volumes:
+      - ./deploy/tempo.yaml:/etc/tempo.yaml:ro
+    ports:
+      - "3200:3200"
+
+  loki:
+    image: grafana/loki:3.6.5
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./deploy/loki.yaml:/etc/loki/config.yaml:ro
+    ports:
+      - "3100:3100"
+
+  grafana:
+    image: grafana/grafana:12.2.8
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus, tempo, loki]

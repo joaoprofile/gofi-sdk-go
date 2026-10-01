@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,42 +29,6 @@ func TestIsValidEnvironment(t *testing.T) {
 	for _, v := range invalid {
 		if isValidEnvironment(v) {
 			t.Errorf("expected %q to be invalid", v)
-		}
-	}
-}
-
-// ---- isValidCloudProvider ----
-
-func TestIsValidCloudProvider(t *testing.T) {
-	valid := []string{"aws", "gcp", "oci", "none"}
-	for _, v := range valid {
-		if !isValidCloudProvider(v) {
-			t.Errorf("expected cloud provider %q to be valid", v)
-		}
-	}
-
-	invalid := []string{"digitalocean", "linode", "vultr", ""}
-	for _, v := range invalid {
-		if isValidCloudProvider(v) {
-			t.Errorf("expected cloud provider %q to be invalid", v)
-		}
-	}
-}
-
-// ---- isValidMessagingProvider ----
-
-func TestIsValidMessagingProvider(t *testing.T) {
-	valid := []string{"rabbitmq", "kafka", "sqs_sns", "aws", "gcp"}
-	for _, v := range valid {
-		if !isValidMessagingProvider(v) {
-			t.Errorf("expected messaging provider %q to be valid", v)
-		}
-	}
-
-	invalid := []string{"activemq", "nats", ""}
-	for _, v := range invalid {
-		if isValidMessagingProvider(v) {
-			t.Errorf("expected messaging provider %q to be invalid", v)
 		}
 	}
 }
@@ -94,10 +59,9 @@ func TestBootstrap(t *testing.T) {
 	t.Setenv("APP_ENVIRONMENT", "dev")
 	t.Setenv("PORT", "9090")
 	t.Setenv("LOG_LEVEL", "debug")
-	t.Setenv("CLOUD_PROVIDER", "aws")
 
-	if err := bootstrap(); err != nil {
-		t.Fatalf("bootstrap failed: %v", err)
+	if err := LoadError(); err != nil {
+		t.Fatalf("load failed: %v", err)
 	}
 
 	env := Instance()
@@ -167,7 +131,6 @@ func TestEnvironmentCheckFunctions(t *testing.T) {
 func TestTypedAccessors(t *testing.T) {
 	env := Environment{
 		AppEnvironment:    "prod",
-		CloudProvider:     "aws",
 		MessagingProvider: "rabbitmq",
 		CacheType:         "redis",
 		LogLevel:          "debug",
@@ -175,9 +138,6 @@ func TestTypedAccessors(t *testing.T) {
 
 	if got := env.GetEnvironmentType(); got != ENV_PROD {
 		t.Errorf("GetEnvironmentType()=%q, want %q", got, ENV_PROD)
-	}
-	if got := env.GetCloudProvider(); got != CLOUD_AWS {
-		t.Errorf("GetCloudProvider()=%q, want %q", got, CLOUD_AWS)
 	}
 	if got := env.GetMessagingProvider(); got != MESSAGING_RABBITMQ {
 		t.Errorf("GetMessagingProvider()=%q, want %q", got, MESSAGING_RABBITMQ)
@@ -192,9 +152,6 @@ func TestTypedAccessors(t *testing.T) {
 func TestIsConfigured(t *testing.T) {
 	t.Run("all empty", func(t *testing.T) {
 		env := Environment{}
-		if env.IsCloudConfigured() {
-			t.Error("expected IsCloudConfigured()=false for empty provider")
-		}
 		if env.IsMessagingConfigured() {
 			t.Error("expected IsMessagingConfigured()=false for empty provider")
 		}
@@ -206,23 +163,12 @@ func TestIsConfigured(t *testing.T) {
 		}
 	})
 
-	t.Run("CLOUD_NONE is not configured", func(t *testing.T) {
-		env := Environment{CloudProvider: string(CLOUD_NONE)}
-		if env.IsCloudConfigured() {
-			t.Error("expected IsCloudConfigured()=false when provider=none")
-		}
-	})
-
 	t.Run("configured", func(t *testing.T) {
 		env := Environment{
-			CloudProvider:     "aws",
 			MessagingProvider: "kafka",
 			CacheType:         "redis",
 			DatabaseDriver:    "postgres",
 			DatabaseHost:      "localhost",
-		}
-		if !env.IsCloudConfigured() {
-			t.Error("expected IsCloudConfigured()=true")
 		}
 		if !env.IsMessagingConfigured() {
 			t.Error("expected IsMessagingConfigured()=true")
@@ -467,8 +413,13 @@ func TestEnvironmentNewFieldsBootstrap(t *testing.T) {
 	t.Setenv("OAUTH_GOOGLE_CLIENT_SECRET", "gsec")
 	t.Setenv("OAUTH_GOOGLE_REDIRECT_URI", "http://x/cb")
 	t.Setenv("ALLOWED_ORIGINS", "http://a, http://b")
+	t.Setenv("IAM_LOGIN_MAX_ATTEMPTS", "7")
+	t.Setenv("IAM_LOGIN_LOCKOUT", "20m")
 
 	env := Instance()
+	if env.IAMLoginMaxAttempts != 7 || env.IAMLoginLockout != 20*time.Minute {
+		t.Errorf("IAM login throttling not loaded: %d / %v", env.IAMLoginMaxAttempts, env.IAMLoginLockout)
+	}
 	if env.JWTSecret != "x" || env.JWTIssuer != "iss" {
 		t.Errorf("JWT vars not loaded: %+v", env)
 	}
@@ -481,6 +432,97 @@ func TestEnvironmentNewFieldsBootstrap(t *testing.T) {
 	origins := env.HTTP().AllowedOrigins
 	if len(origins) != 2 || origins[0] != "http://a" || origins[1] != "http://b" {
 		t.Errorf("AllowedOrigins not parsed correctly: %v", origins)
+	}
+}
+
+// End-to-end parser for the HTTP server fields.
+func TestEnvironmentHTTPServerFieldsBootstrap(t *testing.T) {
+	reset(t)
+	vars := map[string]string{
+		"HTTP_TLS_CERT_FILE":          "/tls/tls.crt",
+		"HTTP_TLS_KEY_FILE":           "/tls/tls.key",
+		"HTTP_TLS_CLIENT_CA_FILE":     "/tls/ca.crt",
+		"HTTP_TLS_CLIENT_AUTH":        "require_and_verify",
+		"HTTP_TRUSTED_PROXIES":        "private,203.0.113.0/24",
+		"HTTP_MAX_CONCURRENT":         "512",
+		"HTTP_RATE_LIMIT_FAIL_CLOSED": "true",
+		"HTTP_ALLOWED_ORIGINS":        "https://a.example.com",
+		"HTTP_REQUIRE_TLS":            "true",
+	}
+	for k, v := range vars {
+		t.Setenv(k, v)
+	}
+
+	env := Instance()
+	got := Environment{
+		HTTPTLSCertFile: env.HTTPTLSCertFile, HTTPTLSKeyFile: env.HTTPTLSKeyFile,
+		HTTPTLSClientCAFile: env.HTTPTLSClientCAFile, HTTPTLSClientAuth: env.HTTPTLSClientAuth,
+		HTTPTrustedProxies: env.HTTPTrustedProxies, HTTPMaxConcurrent: env.HTTPMaxConcurrent,
+		HTTPRateLimitFailClosed: env.HTTPRateLimitFailClosed, HTTPAllowedOrigins: env.HTTPAllowedOrigins,
+		HTTPRequireTLS: env.HTTPRequireTLS,
+	}
+	want := Environment{
+		HTTPTLSCertFile: "/tls/tls.crt", HTTPTLSKeyFile: "/tls/tls.key",
+		HTTPTLSClientCAFile: "/tls/ca.crt", HTTPTLSClientAuth: "require_and_verify",
+		HTTPTrustedProxies: "private,203.0.113.0/24", HTTPMaxConcurrent: 512,
+		HTTPRateLimitFailClosed: true, HTTPAllowedOrigins: "https://a.example.com",
+		HTTPRequireTLS: true,
+	}
+	if got != want {
+		t.Errorf("HTTP_* not loaded:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+// End-to-end parser for the OTLP TLS file fields.
+func TestEnvironmentOTLPTLSFieldsBootstrap(t *testing.T) {
+	reset(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_CERTIFICATE", "/tls/ca.crt")
+	t.Setenv("OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE", "/tls/client.crt")
+	t.Setenv("OTEL_EXPORTER_OTLP_CLIENT_KEY", "/tls/client.key")
+
+	env := Instance()
+	if env.OtelExporterOTLPCertificate != "/tls/ca.crt" ||
+		env.OtelExporterOTLPClientCertificate != "/tls/client.crt" ||
+		env.OtelExporterOTLPClientKey != "/tls/client.key" {
+		t.Errorf("OTEL_EXPORTER_OTLP_* TLS files not loaded: %q %q %q",
+			env.OtelExporterOTLPCertificate, env.OtelExporterOTLPClientCertificate, env.OtelExporterOTLPClientKey)
+	}
+}
+
+// End-to-end parser for the transport security and timeout fields.
+func TestEnvironmentSecurityFieldsBootstrap(t *testing.T) {
+	reset(t)
+	t.Setenv("GOFI_ALLOW_INSECURE_TRANSPORT", "database,cache")
+	t.Setenv("DATABASE_SSL_ROOT_CERT", "/ca.pem")
+	t.Setenv("DATABASE_SSL_CERT", "/c.pem")
+	t.Setenv("DATABASE_SSL_KEY", "/k.pem")
+	t.Setenv("DATABASE_STATEMENT_TIMEOUT", "5s")
+	t.Setenv("DATABASE_QUERY_TIMEOUT", "10s")
+	t.Setenv("MESSAGING_TLS_CA_FILE", "/mca.pem")
+	t.Setenv("MESSAGING_TLS_CERT_FILE", "/mc.pem")
+	t.Setenv("MESSAGING_TLS_KEY_FILE", "/mk.pem")
+	t.Setenv("MESSAGING_TLS_SERVER_NAME", "mq.internal")
+	t.Setenv("MESSAGING_TLS_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("MESSAGING_ALLOW_PLAINTEXT_SASL", "true")
+	t.Setenv("MESSAGING_MAX_DELIVERIES", "7")
+	t.Setenv("MESSAGING_HANDLER_TIMEOUT", "1m")
+	t.Setenv("JWT_AUDIENCE", "billing-api")
+
+	env := Instance()
+	if err := LoadError(); err != nil {
+		t.Fatalf("LoadError: %v", err)
+	}
+	if env.AllowInsecureTransport != "database,cache" || env.JWTAudience != "billing-api" {
+		t.Errorf("guard/audience not loaded: %q %q", env.AllowInsecureTransport, env.JWTAudience)
+	}
+	if env.DatabaseSSLRootCert != "/ca.pem" || env.DatabaseSSLCert != "/c.pem" || env.DatabaseSSLKey != "/k.pem" ||
+		env.DatabaseStatementTimeout != 5*time.Second || env.DatabaseQueryTimeout != 10*time.Second {
+		t.Errorf("database vars not loaded")
+	}
+	if env.MessagingTLSCAFile != "/mca.pem" || env.MessagingTLSCertFile != "/mc.pem" || env.MessagingTLSKeyFile != "/mk.pem" ||
+		env.MessagingTLSServerName != "mq.internal" || !env.MessagingTLSInsecureSkipVerify || !env.MessagingAllowPlaintextSASL ||
+		env.MessagingMaxDeliveries != 7 || env.MessagingHandlerTimeout != time.Minute {
+		t.Errorf("messaging vars not loaded")
 	}
 }
 
@@ -504,11 +546,12 @@ func TestApplyEnvironmentConfigurationsWarnings(t *testing.T) {
 	env := &Environment{
 		AppEnvironment:        "invalid-env-type",  // triggers invalid-env warning
 		AppMaxParallelWorkers: -1,                  // triggers default reset
-		CloudProvider:         "invalid-cloud",     // triggers invalid-cloud warning
 		MessagingProvider:     "invalid-messaging", // triggers invalid-messaging warning
 		CacheType:             "invalid-cache",     // triggers invalid-cache warning
 	}
-	applyEnvironmentConfigurations(env)
+	if err := applyEnvironmentConfigurations(env); !errors.Is(err, ErrInvalidEnvironment) {
+		t.Errorf("invalid APP_ENVIRONMENT: err=%v, want ErrInvalidEnvironment", err)
+	}
 
 	if env.AppMaxParallelWorkers != APP_MAX_PARALLEL_WORKERS {
 		t.Errorf("Expected AppMaxParallelWorkers=%d after reset, got %d",
@@ -565,5 +608,76 @@ func TestInstanceBootstrapFailure(t *testing.T) {
 	env := Instance()
 	if env == nil {
 		t.Error("Expected non-nil Environment even after bootstrap failure")
+	}
+}
+
+func TestLoad_ReportsEveryInvalidVariable(t *testing.T) {
+	t.Setenv("GOFI_DOTENV", "false")
+	t.Setenv("PORT", "not-a-number")
+	t.Setenv("DATABASE_MIGRATION", "maybe")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "PORT") || !strings.Contains(err.Error(), "DATABASE_MIGRATION") {
+		t.Fatalf("both invalid variables must be reported, got %v", err)
+	}
+}
+
+func TestLoad_FileSuffixReadsMountedSecret(t *testing.T) {
+	t.Setenv("GOFI_DOTENV", "false")
+	path := filepath.Join(t.TempDir(), "db-password")
+	if err := os.WriteFile(path, []byte("s3cr3t\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DATABASE_PASSWORD", "")
+	t.Setenv("DATABASE_PASSWORD_FILE", path)
+
+	env, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.DatabasePassword != "s3cr3t" {
+		t.Fatalf("DatabasePassword=%q, want value from _FILE", env.DatabasePassword)
+	}
+}
+
+func TestShouldLoadDotEnv(t *testing.T) {
+	cases := []struct {
+		appEnv, override string
+		want             bool
+	}{
+		{"", "", true}, {"dev", "", true}, {"prod", "", false}, {"stage", "", false},
+		{"prod", "true", true}, {"dev", "false", false},
+		{"test", "", true}, {"production", "", false}, {"development", "", false},
+	}
+	for _, c := range cases {
+		t.Setenv("APP_ENVIRONMENT", c.appEnv)
+		t.Setenv("GOFI_DOTENV", c.override)
+		if got := shouldLoadDotEnv(); got != c.want {
+			t.Errorf("APP_ENVIRONMENT=%q GOFI_DOTENV=%q: got %v, want %v", c.appEnv, c.override, got, c.want)
+		}
+	}
+}
+
+// ---- secret references ----
+
+func TestLoadResolvesSecretReferences(t *testing.T) {
+	reset(t)
+	t.Setenv("GOFI_TEST_DB_PASSWORD", "from-secret")
+	t.Setenv("DATABASE_PASSWORD", "secret://env/GOFI_TEST_DB_PASSWORD")
+	env, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.DatabasePassword != "from-secret" {
+		t.Errorf("DatabasePassword=%q", env.DatabasePassword)
+	}
+}
+
+func TestLoadReportsUnresolvedSecret(t *testing.T) {
+	reset(t)
+	t.Setenv("DATABASE_PASSWORD", "secret://env/GOFI_TEST_MISSING_SECRET")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_PASSWORD") {
+		t.Errorf("err=%v, want the variable name", err)
 	}
 }

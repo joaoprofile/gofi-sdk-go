@@ -1,0 +1,5 @@
+services:
+  kafka:
+    image: apache/kafka:3.9.1 # single-node KRaft; topics are created on first use
+    ports:
+      - "9092:9092"

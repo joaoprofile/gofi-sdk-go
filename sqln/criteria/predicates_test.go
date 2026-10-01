@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -326,8 +326,8 @@ func TestDateEq_Fields(t *testing.T) {
 	assert.False(t, p.isLogical())
 }
 
-func TestDateEq_PanicsOnZeroTime(t *testing.T) {
-	assert.Panics(t, func() { DateEq("f", time.Time{}) })
+func TestDateEq_ZeroTimeIsInvalid(t *testing.T) {
+	assert.ErrorIs(t, DateEq("f", time.Time{}).err, ErrInvalidValue)
 }
 
 func TestDateBefore_Fields(t *testing.T) {
@@ -336,8 +336,8 @@ func TestDateBefore_Fields(t *testing.T) {
 	assert.Equal(t, dateNow, p.value)
 }
 
-func TestDateBefore_PanicsOnZeroTime(t *testing.T) {
-	assert.Panics(t, func() { DateBefore("f", time.Time{}) })
+func TestDateBefore_ZeroTimeIsInvalid(t *testing.T) {
+	assert.ErrorIs(t, DateBefore("f", time.Time{}).err, ErrInvalidValue)
 }
 
 func TestDateAfter_Fields(t *testing.T) {
@@ -346,8 +346,8 @@ func TestDateAfter_Fields(t *testing.T) {
 	assert.Equal(t, dateNow, p.value)
 }
 
-func TestDateAfter_PanicsOnZeroTime(t *testing.T) {
-	assert.Panics(t, func() { DateAfter("f", time.Time{}) })
+func TestDateAfter_ZeroTimeIsInvalid(t *testing.T) {
+	assert.ErrorIs(t, DateAfter("f", time.Time{}).err, ErrInvalidValue)
 }
 
 func TestDateOnOrBefore_Fields(t *testing.T) {
@@ -356,8 +356,8 @@ func TestDateOnOrBefore_Fields(t *testing.T) {
 	assert.Equal(t, dateNow, p.value)
 }
 
-func TestDateOnOrBefore_PanicsOnZeroTime(t *testing.T) {
-	assert.Panics(t, func() { DateOnOrBefore("f", time.Time{}) })
+func TestDateOnOrBefore_ZeroTimeIsInvalid(t *testing.T) {
+	assert.ErrorIs(t, DateOnOrBefore("f", time.Time{}).err, ErrInvalidValue)
 }
 
 func TestDateOnOrAfter_Fields(t *testing.T) {
@@ -366,8 +366,8 @@ func TestDateOnOrAfter_Fields(t *testing.T) {
 	assert.Equal(t, dateNow, p.value)
 }
 
-func TestDateOnOrAfter_PanicsOnZeroTime(t *testing.T) {
-	assert.Panics(t, func() { DateOnOrAfter("f", time.Time{}) })
+func TestDateOnOrAfter_ZeroTimeIsInvalid(t *testing.T) {
+	assert.ErrorIs(t, DateOnOrAfter("f", time.Time{}).err, ErrInvalidValue)
 }
 
 func TestDateBetween_Fields(t *testing.T) {
@@ -384,17 +384,17 @@ func TestDateBetween_Fields(t *testing.T) {
 }
 
 func TestDateBetween_SameDateAllowed(t *testing.T) {
-	assert.NotPanics(t, func() { DateBetween("f", dateNow, dateNow) })
+	assert.NoError(t, DateBetween("f", dateNow, dateNow).err)
 }
 
-func TestDateBetween_PanicsWhenFromIsZero(t *testing.T) {
-	assert.Panics(t, func() { DateBetween("f", time.Time{}, dateLater) })
+func TestDateBetween_InvalidWhenFromIsZero(t *testing.T) {
+	assert.ErrorIs(t, DateBetween("f", time.Time{}, dateLater).err, ErrInvalidValue)
 }
 
-func TestDateBetween_PanicsWhenToIsZero(t *testing.T) {
-	assert.Panics(t, func() { DateBetween("f", dateNow, time.Time{}) })
+func TestDateBetween_InvalidWhenToIsZero(t *testing.T) {
+	assert.ErrorIs(t, DateBetween("f", dateNow, time.Time{}).err, ErrInvalidValue)
 }
 
-func TestDateBetween_PanicsWhenFromAfterTo(t *testing.T) {
-	assert.Panics(t, func() { DateBetween("f", dateLater, dateNow) })
+func TestDateBetween_InvalidWhenFromAfterTo(t *testing.T) {
+	assert.ErrorIs(t, DateBetween("f", dateLater, dateNow).err, ErrInvalidValue)
 }

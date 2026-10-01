@@ -15,6 +15,7 @@ func TestApplyDefaults_SetsAllDefaultValues(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, s.AccessTokenTTL)
 	assert.Equal(t, 7*24*time.Hour, s.RefreshTokenTTL)
 	assert.Equal(t, "gofi/iam", s.Issuer)
+	assert.True(t, s.VerifyIssuer, "the issuer is verified by default")
 	assert.Equal(t, "iam_rt", s.CookieName)
 	assert.Equal(t, "/auth/refresh", s.CookiePath)
 	assert.Equal(t, http.SameSiteStrictMode, s.CookieSameSite)
@@ -100,4 +101,28 @@ func TestIDPConfig_Fields(t *testing.T) {
 	assert.Equal(t, "google", cfg.Provider)
 	assert.Equal(t, "id", cfg.ClientID)
 	assert.Equal(t, []string{"profile"}, cfg.Scopes)
+}
+
+func TestApplyDefaults_IssuerCheck(t *testing.T) {
+	skip := &SecurityConfig{InsecureSkipIssuerCheck: true}
+	skip.ApplyDefaults()
+	assert.False(t, skip.VerifyIssuer, "the explicit opt-out keeps it off")
+
+	both := &SecurityConfig{VerifyIssuer: true, InsecureSkipIssuerCheck: true}
+	both.ApplyDefaults()
+	assert.True(t, both.VerifyIssuer, "an explicit VerifyIssuer wins")
+}
+
+func TestApplyDefaults_SessionMaxLifetime(t *testing.T) {
+	s := &SecurityConfig{}
+	s.ApplyDefaults()
+	assert.Equal(t, DefaultSessionMaxLifetime, s.SessionMaxLifetime)
+
+	long := &SecurityConfig{RefreshTokenTTL: 60 * 24 * time.Hour}
+	long.ApplyDefaults()
+	assert.Equal(t, 60*24*time.Hour, long.SessionMaxLifetime, "the default never shortens the refresh TTL")
+
+	set := &SecurityConfig{SessionMaxLifetime: time.Hour}
+	set.ApplyDefaults()
+	assert.Equal(t, time.Hour, set.SessionMaxLifetime)
 }

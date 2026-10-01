@@ -3,28 +3,25 @@ package connection
 import (
 	"database/sql"
 	"fmt"
-	"sync"
+	"sync/atomic"
 
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
-var (
-	globalConn *Connection
-	onceGlobal sync.Once
-)
+var globalConn atomic.Pointer[Connection]
 
+// SetGlobal sets the process-wide connection; the first call wins.
 func SetGlobal(conn *Connection) {
-	onceGlobal.Do(func() {
-		globalConn = conn
-	})
+	globalConn.CompareAndSwap(nil, conn)
 }
 
 func Global() (*Connection, error) {
-	if globalConn == nil {
+	conn := globalConn.Load()
+	if conn == nil {
 		return nil, fmt.Errorf("sqln global connection not initialized")
 	}
 
-	return globalConn, nil
+	return conn, nil
 }
 
 func DB() (*sql.DB, error) {
@@ -48,15 +45,15 @@ func MustDB() *sql.DB {
 // Dialect returns the SQL dialect of the active global connection.
 // Returns nil if no connection has been established yet.
 func Dialect() driver.Dialect {
-	if globalConn == nil {
+	conn := globalConn.Load()
+	if conn == nil {
 		return nil
 	}
-	return globalConn.Dialect()
+	return conn.Dialect()
 }
 
 // ResetGlobalForTest resets the global connection state.
 // Must only be called from tests; not safe for concurrent use.
 func ResetGlobalForTest() {
-	globalConn = nil
-	onceGlobal = sync.Once{}
+	globalConn.Store(nil)
 }

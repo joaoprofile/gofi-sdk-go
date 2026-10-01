@@ -1,11 +1,15 @@
 package connection
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,67 +32,48 @@ func TestLogQueryDuration_SlowQuery(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// AsPQError
+// AsPgError
 // ---------------------------------------------------------------------------
 
-func TestAsPQError_NilError(t *testing.T) {
-	var out *pq.Error
-	ok := AsPQError(nil, &out)
-	assert.False(t, ok)
-	assert.Nil(t, out)
-}
-
-func TestAsPQError_PQError(t *testing.T) {
-	pqErr := &pq.Error{Code: "23505", Message: "unique violation", Table: "users"}
-	var out *pq.Error
-	ok := AsPQError(pqErr, &out)
+func TestAsPgError(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: "23505", Message: "unique violation", TableName: "users"}
+	got, ok := AsPgError(fmt.Errorf("insert: %w", pgErr))
 	assert.True(t, ok)
-	assert.Equal(t, pqErr, out)
-}
+	assert.Same(t, pgErr, got)
 
-func TestAsPQError_NonPQError(t *testing.T) {
-	generic := errors.New("some db error")
-	var out *pq.Error
-	ok := AsPQError(generic, &out)
+	_, ok = AsPgError(errors.New("some db error"))
 	assert.False(t, ok)
-	assert.Nil(t, out)
-}
-
-func TestAsPQError_WrappedPQError(t *testing.T) {
-	pqErr := &pq.Error{Code: "23503", Message: "fk violation"}
-	wrapped := errors.Join(errors.New("wrapper"), pqErr)
-	var out *pq.Error
-	ok := AsPQError(wrapped, &out)
-	assert.True(t, ok)
-	assert.Equal(t, pqErr, out)
+	_, ok = AsPgError(nil)
+	assert.False(t, ok)
+	assert.True(t, IsRetryable(&pgconn.PgError{Code: "40001"}), "pgx errors expose SQLState")
 }
 
 // ---------------------------------------------------------------------------
 // LogPostgresError
 // ---------------------------------------------------------------------------
 
-func TestLogPostgresError_NilError(t *testing.T) {
+// Regression: Detail quotes row values (PII) and was logged at error level.
+func TestLogPostgresError_DetailOnlyAtDebug(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	logging.ResetForTesting()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		logging.ResetForTesting()
+		_ = logging.NewLogger("connection-test")
+	})
+
+	LogPostgresError(WrapError("exec", &pgconn.PgError{Code: "23505", Message: "duplicate key", Detail: "Key (email)=(a@b.c) already exists."}))
+
+	assert.Contains(t, buf.String(), "23505")
+	assert.NotContains(t, buf.String(), "a@b.c")
+}
+
+func TestLogPostgresError(t *testing.T) {
 	assert.NotPanics(t, func() {
 		LogPostgresError(nil)
-	})
-}
-
-func TestLogPostgresError_PQError(t *testing.T) {
-	pqErr := &pq.Error{
-		Code:       "23505",
-		Message:    "duplicate key",
-		Detail:     "key exists",
-		Severity:   "ERROR",
-		Table:      "products",
-		Constraint: "products_pkey",
-	}
-	assert.NotPanics(t, func() {
-		LogPostgresError(pqErr)
-	})
-}
-
-func TestLogPostgresError_GenericError(t *testing.T) {
-	assert.NotPanics(t, func() {
+		LogPostgresError(&pgconn.PgError{Code: "23505", Message: "duplicate key", TableName: "products", ConstraintName: "products_pkey"})
 		LogPostgresError(errors.New("connection reset by peer"))
 	})
 }

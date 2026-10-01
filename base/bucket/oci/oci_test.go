@@ -1,9 +1,12 @@
 package oci
 
 import (
+	"context"
 	"testing"
+	"time"
 
-	"github.com/joaoprofile/gofi/base/bucket"
+	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
+	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,23 +45,25 @@ MbRdPvVxXn517zTdQa05Wlku
 
 func validConfig() Config {
 	return Config{
-		Bucket:      "my-bucket",
-		Region:      "sa-saopaulo-1",
-		TenancyID:   "ocid1.tenancy.oc1..aaaa",
-		UserID:      "ocid1.user.oc1..bbbb",
-		Fingerprint: "aa:bb:cc",
-		PrivateKey:  testPrivateKey,
+		Bucket: "my-bucket",
+		Credentials: cloudoci.Config{
+			Region:      "sa-saopaulo-1",
+			TenancyID:   "ocid1.tenancy.oc1..aaaa",
+			UserID:      "ocid1.user.oc1..bbbb",
+			Fingerprint: "aa:bb:cc",
+			PrivateKey:  testPrivateKey,
+		},
 	}
 }
 
 func TestNew_MissingFields_ReturnsInvalidConfig(t *testing.T) {
 	cases := map[string]func(c *Config){
 		"bucket":      func(c *Config) { c.Bucket = "" },
-		"tenancy":     func(c *Config) { c.TenancyID = "" },
-		"user":        func(c *Config) { c.UserID = "" },
-		"region":      func(c *Config) { c.Region = "" },
-		"fingerprint": func(c *Config) { c.Fingerprint = "" },
-		"privateKey":  func(c *Config) { c.PrivateKey = "" },
+		"tenancy":     func(c *Config) { c.Credentials.TenancyID = "" },
+		"user":        func(c *Config) { c.Credentials.UserID = "" },
+		"region":      func(c *Config) { c.Credentials.Region = "" },
+		"fingerprint": func(c *Config) { c.Credentials.Fingerprint = "" },
+		"privateKey":  func(c *Config) { c.Credentials.PrivateKey = "" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -86,7 +91,7 @@ func TestNew_PreSeededNamespace_SkipsLookup(t *testing.T) {
 
 func TestNew_UnsupportedAuthMode_ReturnsInvalidConfig(t *testing.T) {
 	cfg := validConfig()
-	cfg.AuthMode = "bogus"
+	cfg.Credentials.AuthMode = "bogus"
 	_, err := New(cfg)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, bucket.ErrInvalidConfig)
@@ -96,4 +101,29 @@ func TestNew_SatisfiesStoreInterface(t *testing.T) {
 	s, err := New(validConfig())
 	require.NoError(t, err)
 	var _ bucket.Store = s
+}
+
+// Regression: PARs cannot be revoked by the URL holder, so PresignGet must
+// refuse a non-positive ttl or one above the configured cap before creating one.
+func TestPresignGet_RejectsTTLOutsideLimit(t *testing.T) {
+	cfg := validConfig()
+	cfg.Namespace = "ns"
+	cfg.PresignMaxTTL = time.Hour
+	s, err := New(cfg)
+	require.NoError(t, err)
+	for _, ttl := range []time.Duration{0, -time.Second, time.Hour + time.Second} {
+		_, err := s.PresignGet(context.Background(), "a.txt", ttl)
+		assert.ErrorIs(t, err, bucket.ErrInvalidTTL, "ttl %s", ttl)
+	}
+}
+
+func TestOpen_MapsPresignMaxTTL(t *testing.T) {
+	c := validConfig().Credentials
+	st, err := bucket.Open(context.Background(), bucket.Config{
+		Provider: bucket.ProviderOCI, Name: "b", Region: c.Region, PresignMaxTTL: time.Hour,
+		OCICredentials: bucket.OCICredentials{Namespace: "ns", TenancyID: c.TenancyID, UserID: c.UserID,
+			FingerPrint: c.Fingerprint, PrivateKey: c.PrivateKey},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, time.Hour, st.(*Store).presignMax)
 }

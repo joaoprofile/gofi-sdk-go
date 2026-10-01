@@ -9,14 +9,17 @@ func (MySQLDialect) Param(_ int) string {
 }
 
 func (MySQLDialect) Like(field string, param string) string {
-	return fmt.Sprintf("%s LIKE %s", field, param)
+	return field + " LIKE " + param
 }
 
 func (MySQLDialect) NotLike(field string, param string) string {
-	return fmt.Sprintf("%s NOT LIKE %s", field, param)
+	return field + " NOT LIKE " + param
 }
 
 func (MySQLDialect) BuildPagination(query string, order string, limit uint16, offset uint64) string {
+	if order == "" {
+		return fmt.Sprintf("%s LIMIT %d OFFSET %d", query, limit, offset)
+	}
 	return fmt.Sprintf("%s ORDER BY %s LIMIT %d OFFSET %d", query, order, limit, offset)
 }
 

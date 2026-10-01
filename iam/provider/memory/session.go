@@ -8,16 +8,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // Provider implements port.SessionPort in memory.
 type Provider struct {
-	mu       sync.RWMutex
-	sessions map[string]*types.Session
-	withTTL  bool
-	stopGC   chan struct{}
+	mu            sync.RWMutex
+	sessions      map[string]*types.Session
+	revokedBefore map[string]time.Time // userID -> RevokeAllForUser cut-off
+	withTTL       bool
+	stopGC        chan struct{}
 }
 
 // NewProvider creates an in-memory Provider with TTL and periodic GC.
@@ -25,9 +26,10 @@ type Provider struct {
 // Not suitable for multiple instances as it is not distributed.
 func NewProvider() *Provider {
 	p := &Provider{
-		sessions: make(map[string]*types.Session),
-		withTTL:  true,
-		stopGC:   make(chan struct{}),
+		sessions:      make(map[string]*types.Session),
+		revokedBefore: make(map[string]time.Time),
+		withTTL:       true,
+		stopGC:        make(chan struct{}),
 	}
 	go p.runGC(30 * time.Second)
 	return p
@@ -37,8 +39,9 @@ func NewProvider() *Provider {
 // Intended exclusively for unit tests.
 func NewTestProvider() *Provider {
 	return &Provider{
-		sessions: make(map[string]*types.Session),
-		withTTL:  false,
+		sessions:      make(map[string]*types.Session),
+		revokedBefore: make(map[string]time.Time),
+		withTTL:       false,
 	}
 }
 
@@ -46,6 +49,7 @@ func NewTestProvider() *Provider {
 func (p *Provider) Save(_ context.Context, session *types.Session) error {
 	copy := *session
 	copy.RefreshToken = "" // never store the raw token
+	copy.AccessToken = ""  // bearer credential; the returned Session still carries it
 
 	p.mu.Lock()
 	p.sessions[session.ID] = &copy
@@ -92,12 +96,33 @@ func (p *Provider) Revoke(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// RevokeAllForUser invalidates all sessions for the given user.
+// RevokeIfActive revokes the session unless it is already revoked.
+func (p *Provider) RevokeIfActive(_ context.Context, sessionID string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	s, ok := p.sessions[sessionID]
+	if !ok {
+		return false, core.ErrSessionNotFound
+	}
+	if s.Revoked {
+		return false, nil
+	}
+	now := time.Now()
+	s.Revoked = true
+	s.RevokedAt = &now
+	s.RevokedBy = "user"
+	return true, nil
+}
+
+// RevokeAllForUser invalidates all sessions for the given user and records the
+// cut-off (see RevokedBefore) that also covers sessions a concurrent refresh opens.
 func (p *Provider) RevokeAllForUser(_ context.Context, userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	now := time.Now()
+	p.revokedBefore[userID] = now
 	for _, s := range p.sessions {
 		if s.UserID == userID && !s.Revoked {
 			s.Revoked = true
@@ -106,6 +131,13 @@ func (p *Provider) RevokeAllForUser(_ context.Context, userID string) error {
 		}
 	}
 	return nil
+}
+
+// RevokedBefore implements port.UserRevocationStore; zero when never set.
+func (p *Provider) RevokedBefore(_ context.Context, userID string) (time.Time, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.revokedBefore[userID], nil
 }
 
 // ListByUser returns the active sessions for the given user.

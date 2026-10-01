@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/joaoprofile/gofi/msq/provider/rabbitmq"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq/provider/rabbitmq"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 func TestDialURLReturnsErrorForBadURL(t *testing.T) {
 	_, err := rabbitmq.DialURL("not-an-amqp-url")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "rabbitmq: dial failed")
+	assert.Contains(t, err.Error(), "rabbitmq: invalid AMQP URL")
 }
 
 func TestDialURLReturnsErrorWhenServerUnreachable(t *testing.T) {
@@ -88,7 +88,7 @@ func TestNewConsumer(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	c := broker.NewConsumer(types.ConsumeConfig{
+	c, _ := broker.NewConsumer(types.ConsumeConfig{
 		Topic:       "test-queue",
 		RoutingKey:  "test-queue",
 		Concurrency: 1,
@@ -103,7 +103,7 @@ func TestNewConsumerRoutingKeyDefaultsToTopic(t *testing.T) {
 	broker := rabbitmq.New(conn, "test-exchange")
 
 	// RoutingKey="" should default to Topic.
-	c := broker.NewConsumer(types.ConsumeConfig{Topic: "routing-test", RoutingKey: ""})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "routing-test", RoutingKey: ""})
 	require.NotNil(t, c)
 	defer c.Close()
 }
@@ -118,7 +118,7 @@ func TestProducerSendMessage(t *testing.T) {
 	require.NotNil(t, p)
 	defer p.Close()
 
-	msg := types.NewMessageWithTopic("test-queue", map[string]string{"event": "test"})
+	msg := testMessageWithTopic("test-queue", map[string]string{"event": "test"})
 	assert.NoError(t, p.SendMessage(context.Background(), msg))
 }
 
@@ -133,8 +133,8 @@ func TestProducerSendMessagesBatch(t *testing.T) {
 	defer p.Close()
 
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("test-queue", "a"),
-		types.NewMessageWithTopic("test-queue", "b"),
+		testMessageWithTopic("test-queue", "a"),
+		testMessageWithTopic("test-queue", "b"),
 	}
 	assert.NoError(t, p.SendMessagesBatch(context.Background(), msgs))
 }
@@ -144,7 +144,7 @@ func TestConsumerPauseAndResume(t *testing.T) {
 	conn.Setup(context.Background(), "test-exchange") //nolint:errcheck
 	broker := rabbitmq.New(conn, "test-exchange")
 
-	c := broker.NewConsumer(types.ConsumeConfig{Topic: "pause-test", Concurrency: 1})
+	c, _ := broker.NewConsumer(types.ConsumeConfig{Topic: "pause-test", Concurrency: 1})
 	require.NotNil(t, c)
 	defer c.Close()
 

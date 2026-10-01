@@ -1,8 +1,8 @@
 package sqln
 
 import (
-	"github.com/joaoprofile/gofi/sqln/driver"
-	"github.com/joaoprofile/gofi/sqln/filter"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/filter"
 )
 
 // Types
@@ -16,10 +16,20 @@ type QueryParam = filter.QueryParam
 // Sourced from the driver package — the single authoritative definition.
 type FilterDialect = driver.FilterDialect
 
-// FieldMapping and QueryMapping allow consumers to define allowed fields and operators
-// for dynamic query validation without importing the filter sub-package directly.
-type FieldMapping = filter.FieldMapping
-type QueryMapping = filter.QueryMapping
+// FilterMapping is the allowlist of names a dynamic query accepts, each bound
+// to its column; FilterField describes one name (see filter.Mapping).
+type FilterMapping = filter.Mapping
+type FilterField = filter.Field
+
+// Operator sets for FilterField.Ops.
+var (
+	Equality = filter.Equality
+	Range    = filter.Range
+	Text     = filter.Text
+)
+
+// AllowColumns maps each column to itself (see filter.Allow).
+func AllowColumns(columns ...string) FilterMapping { return filter.Allow(columns...) }
 
 // Value type wrappers for type-safe parameter binding in tests and custom scan logic.
 type StringValue = filter.StringValue
@@ -93,14 +103,16 @@ func NewFilters() *Filters {
 	return filter.NewFilters()
 }
 
-// NewQueryBuild appends filter conditions to the base query using PostgreSQL-style
-// parameterized placeholders ($1, $2, …). For other databases, use NewQueryBuildWithDialect.
-func NewQueryBuild(query string, f *Filters) *QueryParam {
-	return filter.NewQueryBuild(query, f)
+// FilterOption changes the bounds BuildQuery enforces (see filter.Option).
+type FilterOption = filter.Option
+
+// BuildQuery appends the filters to base through the mapping; placeholders
+// continue after args. A nil dialect uses the active connection. Requests
+// above filter.DefaultMaxFilters conditions, DefaultMaxInValues list values
+// or DefaultMaxLikeLength LIKE characters are rejected (see filter.Build).
+func BuildQuery(base string, args []any, f *Filters, m FilterMapping, dialect FilterDialect, opts ...FilterOption) (*QueryParam, error) {
+	return filter.Build(base, args, f, m, dialect, opts...)
 }
 
-// NewQueryBuildWithDialect appends filter conditions using the given database dialect
-// for placeholder style and case-insensitive LIKE behavior.
-func NewQueryBuildWithDialect(query string, f *Filters, dialect FilterDialect) *QueryParam {
-	return filter.NewQueryBuildWithDialect(query, f, dialect)
-}
+// ErrInvalidFilter is wrapped by BuildQuery for each rejected filter or sort.
+var ErrInvalidFilter = filter.ErrInvalidFilter

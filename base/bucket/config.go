@@ -1,13 +1,28 @@
 package bucket
 
+import (
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/gofi-labs/gofi-sdk-go/base/redact"
+)
+
 // Provider selects the object-storage backend a Config targets.
 type Provider string
 
 // Supported object-storage providers.
 const (
-	ProviderOCI   Provider = "oci"
+	ProviderOCI Provider = "oci"
+	// ProviderS3 targets Amazon S3 or any S3-compatible service (MinIO, R2, ...).
+	ProviderS3 Provider = "s3"
+	// ProviderMinIO is an alias of ProviderS3 kept for existing BUCKET_PROVIDER values.
 	ProviderMinIO Provider = "minio"
-	ProviderNone  Provider = "none"
+	// ProviderFile stores objects under a local directory (Config.Endpoint).
+	ProviderFile Provider = "file"
+	// ProviderMem keeps objects in memory; for tests.
+	ProviderMem  Provider = "mem"
+	ProviderNone Provider = "none"
 )
 
 // Config describes which object-storage backend to open and its credentials.
@@ -19,6 +34,9 @@ type Config struct {
 	Name     string
 	Region   string
 	Endpoint string
+	// PresignMaxTTL lowers the longest validity PresignGet accepts; zero
+	// keeps MaxPresignTTL, and larger values are capped at it.
+	PresignMaxTTL time.Duration
 	// OCICredentials holds OCI Object Storage auth fields.
 	OCICredentials OCICredentials
 	// S3Credentials holds MinIO / S3-compatible auth fields.
@@ -56,16 +74,31 @@ type OCICredentials struct {
 	TenancyID   string
 	UserID      string
 	FingerPrint string
-	PrivateKey  string
-	Passphrase  string
+	PrivateKey  string `redact:"true"`
+	Passphrase  string `redact:"true"`
 }
 
-// S3Credentials holds auth fields exclusive to the MinIO / S3 backend.
+// String, GoString, Format, LogValue and MarshalJSON mask the secret fields.
+func (c OCICredentials) String() string                { return redact.Sprint(c) }
+func (c OCICredentials) GoString() string              { return redact.GoSprint(c) }
+func (c OCICredentials) Format(f fmt.State, verb rune) { redact.Format(f, verb, c) }
+func (c OCICredentials) LogValue() slog.Value          { return redact.LogValue(c) }
+func (c OCICredentials) MarshalJSON() ([]byte, error)  { return redact.JSON(c) }
+
+// S3Credentials holds auth fields exclusive to the S3 backend. Empty keys use
+// the AWS default credential chain (IRSA, EKS Pod Identity, instance profile).
 type S3Credentials struct {
 	AccessKey string
-	SecretKey string
-	UseSSL    bool
+	SecretKey string `redact:"true"`
+	UseSSL    bool   // for custom endpoints without a scheme
 }
+
+// String, GoString, Format, LogValue and MarshalJSON mask the secret fields.
+func (c S3Credentials) String() string                { return redact.Sprint(c) }
+func (c S3Credentials) GoString() string              { return redact.GoSprint(c) }
+func (c S3Credentials) Format(f fmt.State, verb rune) { redact.Format(f, verb, c) }
+func (c S3Credentials) LogValue() slog.Value          { return redact.LogValue(c) }
+func (c S3Credentials) MarshalJSON() ([]byte, error)  { return redact.JSON(c) }
 
 // IsConfigured reports whether a backend is explicitly selected, i.e. Provider
 // is set and is not ProviderNone.

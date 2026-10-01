@@ -2,10 +2,11 @@ package msq
 
 import (
 	"context"
+	"time"
 
-	"github.com/joaoprofile/gofi/msq/core"
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/core"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
 )
 
 // ConsumerManager orchestrates multiple consumers against a single broker.
@@ -16,13 +17,6 @@ type ConsumerManager = core.ConsumerManager
 // Register consumers with Register, then call Start or Dispatcher.
 func NewConsumerManager(broker port.Broker) *core.ConsumerManager {
 	return core.NewConsumerManager(broker)
-}
-
-// Constructor configures an msq provider for registration with the GOFI builder.
-// Pass to Builder.AddMessaging when wiring messaging into a GOFI service.
-type Constructor struct {
-	// Factory builds the Broker on demand.
-	Factory port.BrokerFactory
 }
 
 //  Type re-exports
@@ -38,15 +32,17 @@ type (
 	// OffsetReset controls where a consumer group starts with no committed offset.
 	OffsetReset = types.OffsetReset
 
-	// QueueAttributes identifies a queue by broker-specific coordinates.
-	// Prefer ConsumeConfig in new code.
-	QueueAttributes = types.QueueAttributes
+	// Encoding selects the wire format of providers that support more than one.
+	Encoding = types.Encoding
 
 	// Result signals the broker how to handle a processed message.
 	Result = types.Result
 
 	// BrokerEvent carries observability payloads emitted during broker lifecycle.
 	BrokerEvent = types.BrokerEvent
+
+	// BrokerEventType identifies the kind of BrokerEvent.
+	BrokerEventType = types.BrokerEventType
 
 	// Producer sends messages to a broker.
 	Producer = port.Producer
@@ -63,22 +59,38 @@ type (
 	// Broker is the central port every messaging provider must implement.
 	Broker = port.Broker
 
-	// MessagingBroker is an alias for Broker kept for backward compatibility.
-	MessagingBroker = port.Broker
-
-	// Messaging is a backward-compatible alias for Broker.
-	// Prefer Broker in new code.
-	Messaging = port.Broker
-
 	// BrokerSetup is implemented by brokers that require infrastructure setup
 	// before producing or consuming (e.g. RabbitMQ exchange declaration).
 	BrokerSetup = port.BrokerSetup
+)
 
-	// BrokerFactory creates a Broker from configuration.
-	BrokerFactory = port.BrokerFactory
+// Event types re-exported at package level.
+const (
+	EventMessageSent         = types.EventMessageSent
+	EventMessageReceived     = types.EventMessageReceived
+	EventMessageAcked        = types.EventMessageAcked
+	EventMessageNacked       = types.EventMessageNacked
+	EventMessageDeadLettered = types.EventMessageDeadLettered
+	EventConsumerStarted     = types.EventConsumerStarted
+	EventConsumerStopped     = types.EventConsumerStopped
+	EventProducerError       = types.EventProducerError
+	EventConsumerError       = types.EventConsumerError
+	EventMessageRejected     = types.EventMessageRejected
+	EventConsumerRestarting  = types.EventConsumerRestarting
+)
 
-	// Connection represents a low-level broker connection.
-	Connection = port.Connection
+// Dead-letter headers set on the copy published to ConsumeConfig.DeadLetterTopic.
+const (
+	HeaderDLQOriginalTopic = core.HeaderDLQOriginalTopic
+	HeaderDLQError         = core.HeaderDLQError
+	HeaderDLQAttempts      = core.HeaderDLQAttempts
+	HeaderDLQDeliveries    = core.HeaderDLQDeliveries
+)
+
+// Wire formats re-exported at package level.
+const (
+	EncodingEnvelope    = types.EncodingEnvelope
+	EncodingCloudEvents = types.EncodingCloudEvents
 )
 
 // Result constants re-exported at package level.
@@ -86,24 +98,28 @@ const (
 	Ack    = types.Ack
 	Nack   = types.Nack
 	Ignore = types.Ignore
+	Reject = types.Reject
 )
 
-// Consumer concurrency / polling defaults re-exported at package level.
+// Consumer concurrency / polling / lease defaults re-exported at package level.
 const (
-	DefaultConcurrency  = types.DefaultConcurrency
-	DefaultPollInterval = types.DefaultPollInterval
+	DefaultConcurrency       = types.DefaultConcurrency
+	DefaultPollInterval      = types.DefaultPollInterval
+	DefaultVisibilityTimeout = types.DefaultVisibilityTimeout
+	DefaultMaxDeliveries     = types.DefaultMaxDeliveries
+	DefaultHandlerTimeout    = types.DefaultHandlerTimeout
 )
 
-//  Message constructo
+//  Message constructors
 
 // NewMessage creates a Message with the payload serialized as JSON.
 // Set Topic via WithTopic or directly before sending.
-func NewMessage(value interface{}) *Message {
+func NewMessage(value any) (*Message, error) {
 	return types.NewMessage(value)
 }
 
 // NewMessageWithTopic creates a Message with topic and payload already set.
-func NewMessageWithTopic(topic string, value interface{}) *Message {
+func NewMessageWithTopic(topic string, value any) (*Message, error) {
 	return types.NewMessageWithTopic(topic, value)
 }
 
@@ -130,7 +146,7 @@ func DefaultConsumeConfig(topic string) ConsumeConfig {
 //  Broker type
 
 // BrokerType identifies a messaging provider so that AddMessaging can build
-// the broker automatically from environment variables.
+// the broker automatically from environment variables (see Register).
 // Values are intentionally lowercase strings to match MESSAGING_PROVIDER env values.
 type BrokerType string
 
@@ -140,6 +156,7 @@ const (
 	BrokerSQS      BrokerType = "sqs"
 	BrokerOCI      BrokerType = "oci"
 	BrokerRedis    BrokerType = "redis"
+	BrokerNATS     BrokerType = "nats"
 )
 
 //  Service config
@@ -164,8 +181,17 @@ type Config struct {
 	// Use when you need configuration beyond what environment variables provide.
 	Broker port.Broker
 
-	// OnEvent is called for every broker lifecycle event. Optional.
+	// System is the OpenTelemetry messaging.system attribute; defaults to the
+	// semantic-convention value of BrokerType.
+	System string
+
+	// OnEvent is called for every message and consumer lifecycle event. It runs
+	// on the hot path, so keep it cheap. Optional.
 	OnEvent func(ctx context.Context, event types.BrokerEvent)
+	// MaxDeliveries and HandlerTimeout are service-wide defaults for the
+	// ConsumeConfig fields of the same name a consumer leaves at zero.
+	MaxDeliveries  int
+	HandlerTimeout time.Duration
 }
 
 //  Constructor
@@ -175,8 +201,27 @@ func New(cfg Config) (*core.BrokerService, error) {
 	if cfg.Broker == nil {
 		return nil, core.ErrBrokerRequired
 	}
+	system := cfg.System
+	if system == "" {
+		system = systems[cfg.BrokerType]
+	}
 	return core.NewService(core.ServiceConfig{
 		Broker:  cfg.Broker,
+		System:  system,
 		OnEvent: cfg.OnEvent,
+		Defaults: core.ConsumeDefaults{
+			MaxDeliveries:  cfg.MaxDeliveries,
+			HandlerTimeout: cfg.HandlerTimeout,
+		},
 	}), nil
+}
+
+// systems maps broker types to OpenTelemetry messaging.system values.
+var systems = map[BrokerType]string{
+	BrokerKafka:    "kafka",
+	BrokerRabbitMQ: "rabbitmq",
+	BrokerSQS:      "aws_sqs",
+	BrokerOCI:      "oci_queue",
+	BrokerRedis:    "redis",
+	BrokerNATS:     "nats",
 }

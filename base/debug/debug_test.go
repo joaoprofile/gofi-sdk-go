@@ -74,118 +74,111 @@ func TestBasicAuthMiddleware_ValidCredentials(t *testing.T) {
 // Server.Handler
 // ---------------------------------------------------------------------------
 
-func TestServerHandler_NoAuth(t *testing.T) {
-	srv := New(Config{Addr: ":9999"})
-	h := srv.Handler()
+func TestServerHandler_NoAuthServesOnlyPprof(t *testing.T) {
+	http.HandleFunc("/debug-test-private", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := New(Config{}).Handler()
 
-	// Without credentials, Handler must return http.DefaultServeMux directly.
-	if h != http.DefaultServeMux {
-		t.Error("expected http.DefaultServeMux when no credentials are set")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug-test-private", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("routes from http.DefaultServeMux must not be exposed, got %d", rec.Code)
 	}
-}
 
-func TestServerHandler_OnlyUser(t *testing.T) {
-	srv := New(Config{Addr: ":9999", User: "admin"}) // Pass is empty
-	h := srv.Handler()
-
-	// Both User AND Pass must be non-empty; if either is missing, no auth.
-	if h != http.DefaultServeMux {
-		t.Error("expected http.DefaultServeMux when only User is set (Pass is empty)")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected pprof index, got %d", rec.Code)
 	}
 }
 
 func TestServerHandler_WithAuth(t *testing.T) {
-	srv := New(Config{Addr: ":9999", User: "admin", Pass: "secret"})
-	h := srv.Handler()
+	h := New(Config{User: "admin", Pass: "secret"}).Handler()
 
-	// With credentials, a custom mux (not DefaultServeMux) must be returned.
-	if h == http.DefaultServeMux {
-		t.Error("expected a custom mux (not DefaultServeMux) when credentials are set")
-	}
-
-	// Verify the custom mux enforces auth on a pprof route.
-	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 on pprof route without credentials, got %d", rec.Code)
+		t.Errorf("expected 401 without credentials, got %d", rec.Code)
 	}
 
-	// With valid credentials the mux should forward to DefaultServeMux (pprof).
-	req2 := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
-	req2.SetBasicAuth("admin", "secret")
-	rec2 := httptest.NewRecorder()
-	h.ServeHTTP(rec2, req2)
-
-	// pprof is registered, so we expect a successful response (200 or 303).
-	if rec2.Code == http.StatusUnauthorized {
-		t.Errorf("expected a non-401 response with valid credentials, got %d", rec2.Code)
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 with valid credentials, got %d", rec.Code)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Server.ListenAndServe
-// ---------------------------------------------------------------------------
+func TestListenAndServe_AddrPolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"default addr", Config{}, DefaultAddr},
+		{"explicit loopback", Config{Addr: "127.0.0.1:7000"}, "127.0.0.1:7000"},
+		{"ipv6 loopback", Config{Addr: "[::1]:7000"}, "[::1]:7000"},
+		{"all interfaces without auth", Config{Addr: ":7000"}, "127.0.0.1:7000"},
+		{"public ip without auth", Config{Addr: "0.0.0.0:7000"}, "127.0.0.1:7000"},
+		{"only user set", Config{Addr: ":7000", User: "admin"}, "127.0.0.1:7000"},
+		{"all interfaces with auth", Config{Addr: ":7000", User: "admin", Pass: "secret"}, ":7000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(tt.cfg)
+			var got string
+			srv.serve = func(s *http.Server) error { got = s.Addr; return nil }
+			if err := srv.ListenAndServe(); err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("listen addr=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
-func TestServerListenAndServe_Success(t *testing.T) {
-	srv := New(Config{Addr: ":9999"})
-	srv.listenAndServe = func(addr string, h http.Handler) error {
-		if addr != ":9999" {
-			t.Errorf("expected addr=\":9999\", got %q", addr)
+func TestServerHandler_ExposesExpvar(t *testing.T) {
+	rec := httptest.NewRecorder()
+	New(Config{}).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/vars", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected /debug/vars, got %d", rec.Code)
+	}
+}
+
+func TestListenAndServe_ServerHasTimeouts(t *testing.T) {
+	srv := New(Config{})
+	srv.serve = func(s *http.Server) error {
+		if s.ReadHeaderTimeout <= 0 || s.IdleTimeout <= 0 {
+			t.Errorf("missing timeouts: %+v", s)
+		}
+		if s.Addr != DefaultAddr {
+			t.Errorf("Addr=%q, want %q", s.Addr, DefaultAddr)
 		}
 		return nil
 	}
-
 	if err := srv.ListenAndServe(); err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
 }
 
-func TestServerListenAndServe_Error(t *testing.T) {
-	want := errors.New("bind: address already in use")
-	srv := New(Config{Addr: ":9999"})
-	srv.listenAndServe = func(_ string, _ http.Handler) error { return want }
-
-	err := srv.ListenAndServe()
-	if !errors.Is(err, want) {
-		t.Errorf("expected error %v, got %v", want, err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Server.run
-// ---------------------------------------------------------------------------
-
-func TestServerRun_Success(t *testing.T) {
-	srv := New(Config{})
-	srv.listenAndServe = func(_ string, _ http.Handler) error { return nil }
-
-	if err := srv.run(); err != nil {
-		t.Errorf("expected nil, got %v", err)
-	}
-}
-
-func TestServerRun_ErrServerClosed(t *testing.T) {
-	srv := New(Config{})
-	srv.listenAndServe = func(_ string, _ http.Handler) error {
-		return http.ErrServerClosed
-	}
-
-	// ErrServerClosed must be treated as a clean shutdown — not an error.
-	if err := srv.run(); err != nil {
-		t.Errorf("expected nil for ErrServerClosed, got %v", err)
-	}
-}
-
-func TestServerRun_OtherError(t *testing.T) {
-	want := errors.New("unexpected listen error")
-	srv := New(Config{})
-	srv.listenAndServe = func(_ string, _ http.Handler) error { return want }
-
-	err := srv.run()
-	if !errors.Is(err, want) {
-		t.Errorf("expected error %v, got %v", want, err)
+func TestServerRun(t *testing.T) {
+	other := errors.New("unexpected listen error")
+	for name, tc := range map[string]struct {
+		serveErr error
+		want     error
+	}{
+		"success":         {nil, nil},
+		"ErrServerClosed": {http.ErrServerClosed, nil},
+		"other error":     {other, other},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := New(Config{})
+			srv.serve = func(*http.Server) error { return tc.serveErr }
+			if err := srv.run(); !errors.Is(err, tc.want) {
+				t.Errorf("run()=%v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 

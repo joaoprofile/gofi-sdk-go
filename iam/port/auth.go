@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // AuthPort orchestrates the local authentication flow (email and password credentials).
@@ -35,9 +35,12 @@ type AuthInput struct {
 	Email    string
 	Password string
 
+	// IPAddress of the client, when known; keys the per-IP LoginThrottler limit.
+	IPAddress string
+
 	// Extra carries provider-specific input that does not fit Email/Password,
 	// e.g. an external token already issued by a third party. Forwarded
-	// unchanged to the custom AuthPort implementation.
+	// unchanged to the custom AuthPort implementation; the built-in one ignores it.
 	Extra map[string]string
 }
 
@@ -47,9 +50,14 @@ type AuthResult struct {
 	UserID  string
 	Tenants []types.TenantAccess
 
+	// Ticket proves this authentication; pass it back in SelectTenantInput.Ticket.
+	// Valid for 5 minutes and only for UserID.
+	Ticket string
+
 	// Extra carries handoff data that the custom AuthPort needs between
 	// Authenticate and SelectTenant (e.g. an external session token). The
-	// caller is responsible for re-injecting it into SelectTenantInput.Extra.
+	// caller re-injects it into SelectTenantInput.SessionExtra (secrets) or
+	// ClaimsExtra (public claims only).
 	Extra map[string]string
 }
 
@@ -59,13 +67,20 @@ type SelectTenantInput struct {
 	TenantID string
 	Module   string
 
+	// Ticket from AuthResult/IDPCallbackResult, bound to UserID and the login
+	// flow; required unless SecurityConfig.InsecureSkipTenantTicket is set.
+	Ticket string
+
 	// Audit and security context.
 	IPAddress string
 	UserAgent string
 	DeviceID  string
 
-	// Extra carries provider-specific data needed to issue the session
-	// (e.g. an external org-scoped token, a domain role label). Propagated
-	// by the custom AuthPort into types.Claims.Extra and types.Session.Extra.
-	Extra map[string]string
+	// ClaimsExtra goes into the access token ("ext" claim), readable by any
+	// bearer: public labels only (e.g. a domain role), never secrets or tokens.
+	ClaimsExtra map[string]string
+
+	// SessionExtra stays server-side, persisted with the session and never put
+	// in a token: the place for external provider tokens and other secrets.
+	SessionExtra map[string]string
 }

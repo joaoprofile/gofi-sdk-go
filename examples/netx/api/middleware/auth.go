@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/joaoprofile/gofi/netx"
+	"github.com/gofi-labs/gofi-sdk-go/netx"
 )
 
 // demoToken is hardcoded for the example only. A real service validates a JWT

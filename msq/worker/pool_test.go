@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/msq/worker"
+	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,7 +37,7 @@ func TestAllJobsRun(t *testing.T) {
 	defer p.Close()
 
 	var count atomic.Int32
-	for i := 0; i < total; i++ {
+	for range total {
 		p.Enqueue(func() { count.Add(1) })
 	}
 	p.Wait()
@@ -53,7 +53,7 @@ func TestJobsRunConcurrently(t *testing.T) {
 	defer p.Close()
 
 	start := time.Now()
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		p.Enqueue(func() { time.Sleep(50 * time.Millisecond) })
 	}
 	p.Wait()
@@ -67,7 +67,7 @@ func TestCloseWaitsForPendingJobs(t *testing.T) {
 	p := worker.New(2)
 
 	var count atomic.Int32
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		p.Enqueue(func() { count.Add(1) })
 	}
 
@@ -97,7 +97,7 @@ func TestSingleWorker(t *testing.T) {
 
 	results := make([]int, 0, 5)
 	var mu sync.Mutex
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		n := i
 		p.Enqueue(func() {
 			mu.Lock()

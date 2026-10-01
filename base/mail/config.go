@@ -3,8 +3,11 @@ package mail
 import (
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/gofi-labs/gofi-sdk-go/base/redact"
 )
 
 // Encryption is the transport security used to reach the SMTP server.
@@ -38,7 +41,7 @@ type Config struct {
 	Host     string
 	Port     int
 	Username string
-	Password string
+	Password string `redact:"true"`
 	From     Address
 
 	Encryption Encryption
@@ -50,8 +53,15 @@ type Config struct {
 	HELODomain string
 
 	// TLSConfig overrides the default tls.Config (ServerName = Host). Optional.
-	TLSConfig *tls.Config
+	TLSConfig *tls.Config `redact:"true"`
 }
+
+// String, GoString, Format, LogValue and MarshalJSON mask the secret fields.
+func (c Config) String() string                { return redact.Sprint(c) }
+func (c Config) GoString() string              { return redact.GoSprint(c) }
+func (c Config) Format(f fmt.State, verb rune) { redact.Format(f, verb, c) }
+func (c Config) LogValue() slog.Value          { return redact.LogValue(c) }
+func (c Config) MarshalJSON() ([]byte, error)  { return redact.JSON(c) }
 
 // validate enforces the minimum contract and normalizes enums/defaults.
 func (c *Config) validate() error {
@@ -60,6 +70,9 @@ func (c *Config) validate() error {
 	}
 	if strings.TrimSpace(c.From.Email) == "" {
 		return fmt.Errorf("%w: From.Email is required", ErrInvalidConfig)
+	}
+	if err := validEmail(c.From.Email); err != nil {
+		return fmt.Errorf("%w: From.Email: %w", ErrInvalidConfig, err)
 	}
 	if c.Port <= 0 {
 		c.Port = defaultPort

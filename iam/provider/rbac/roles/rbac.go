@@ -3,8 +3,8 @@
 package roles
 
 import (
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // PermissionMap maps role to resource to a list of allowed actions.

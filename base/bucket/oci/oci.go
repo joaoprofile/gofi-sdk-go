@@ -1,8 +1,7 @@
 // Package oci implements bucket.Store on top of OCI Object Storage.
 //
-// Build a Store with New. To select the backend from configuration at runtime,
-// use gofi's config.OpenBucket wiring instead of importing this package
-// directly.
+// Build a Store with New, or blank-import this package and call bucket.Open
+// to select the backend from configuration.
 package oci
 
 import (
@@ -10,61 +9,55 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/joaoprofile/gofi/base/bucket"
+	"github.com/gofi-labs/gofi-sdk-go/base/bucket"
+	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
 	"github.com/oracle/oci-go-sdk/v65/common"
-	"github.com/oracle/oci-go-sdk/v65/common/auth"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
+	"github.com/oracle/oci-go-sdk/v65/objectstorage/transfer"
 )
 
 // Config holds the settings required to reach a single OCI Object Storage
 // bucket.
 type Config struct {
-	// Bucket is the target bucket name. Required.
 	Bucket string
-	// Region is the OCI region identifier, e.g. "sa-saopaulo-1". Required.
-	Region string
 	// Namespace is the Object Storage namespace. When empty it is resolved
-	// automatically on first use.
+	// lazily with a GetNamespace call and cached.
 	Namespace string
-	// Endpoint optionally overrides the region-derived host (dedicated
-	// endpoints, emulators).
+	// Endpoint overrides the regional Object Storage endpoint.
 	Endpoint string
-
-	// AuthMode selects the credential source. Empty means API key.
-	AuthMode bucket.OCIAuthMode
-
-	// API-signing credentials. Required only when AuthMode is API key;
-	// ignored by the principal-based modes.
-	TenancyID   string
-	UserID      string
-	Fingerprint string
-	PrivateKey  string
-	// Passphrase is optional; set it only when PrivateKey is encrypted.
-	Passphrase string
+	// Credentials selects the principal and region (see base/cloud/oci).
+	Credentials cloudoci.Config
+	// PresignMaxTTL lowers the longest PAR validity; see bucket.PresignLimit.
+	PresignMaxTTL time.Duration
 }
 
 // Store is the OCI Object Storage implementation of bucket.Store. It targets a
 // single bucket and resolves the Object Storage namespace lazily on first use.
 type Store struct {
-	client objectstorage.ObjectStorageClient
-	bucket string
+	client  objectstorage.ObjectStorageClient
+	uploads *transfer.UploadManager
+	bucket  string
 	// parBaseURL is the scheme+host used to turn a PAR AccessUri (a path) into an
 	// absolute download URL.
 	parBaseURL string
+	presignMax time.Duration
 
-	nsOnce    sync.Once
+	nsMu      sync.Mutex
 	namespace string
-	nsErr     error
 }
 
 // compile-time guarantee that *Store satisfies the abstraction.
-var _ bucket.Store = (*Store)(nil)
+var (
+	_ bucket.Store  = (*Store)(nil)
+	_ bucket.Walker = (*Store)(nil)
+)
 
 // New builds an OCI-backed Store from cfg. It validates credentials and
 // constructs the SDK client but performs no network I/O; the namespace and
@@ -73,33 +66,35 @@ func New(cfg Config) (*Store, error) {
 	if cfg.Bucket == "" {
 		return nil, fmt.Errorf("%w: bucket is required", bucket.ErrInvalidConfig)
 	}
-	if cfg.Region == "" {
+	region := cfg.Credentials.Region
+	if region == "" {
 		return nil, fmt.Errorf("%w: region is required", bucket.ErrInvalidConfig)
 	}
 
-	provider, err := newConfigurationProvider(cfg)
+	provider, err := cloudoci.ConfigurationProvider(cfg.Credentials)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", bucket.ErrInvalidConfig, err)
 	}
 
 	client, err := objectstorage.NewObjectStorageClientWithConfigurationProvider(provider)
 	if err != nil {
 		return nil, fmt.Errorf("oci bucket: client init failed: %w", err)
 	}
-	client.SetRegion(cfg.Region)
+	client.SetRegion(region)
 	if cfg.Endpoint != "" {
 		client.Host = cfg.Endpoint
 	}
 
 	base := cfg.Endpoint
 	if base == "" {
-		base = fmt.Sprintf("https://objectstorage.%s.oraclecloud.com", cfg.Region)
+		base = fmt.Sprintf("https://objectstorage.%s.oraclecloud.com", region)
 	}
 
-	s := &Store{client: client, bucket: cfg.Bucket, parBaseURL: strings.TrimRight(base, "/")}
+	s := &Store{client: client, uploads: transfer.NewUploadManager(), bucket: cfg.Bucket, parBaseURL: strings.TrimRight(base, "/"),
+		presignMax: bucket.PresignLimit(cfg.PresignMaxTTL)}
 	if cfg.Namespace != "" {
 		// Pre-seed the namespace so the first call skips the lookup.
-		s.nsOnce.Do(func() { s.namespace = cfg.Namespace })
+		s.namespace = cfg.Namespace
 	}
 	return s, nil
 }
@@ -107,45 +102,27 @@ func New(cfg Config) (*Store, error) {
 // newConfigurationProvider selects the OCI credential source from cfg.AuthMode.
 // The SDK never auto-detects instance identity, so the principal is always named
 // explicitly here; an unknown mode is a configuration error.
-func newConfigurationProvider(cfg Config) (common.ConfigurationProvider, error) {
-	switch cfg.AuthMode {
-	case "", bucket.OCIAuthAPIKey:
-		return apiKeyProvider(cfg)
-	case bucket.OCIAuthInstancePrincipal:
-		return auth.InstancePrincipalConfigurationProvider()
-	case bucket.OCIAuthResourcePrincipal:
-		return auth.ResourcePrincipalConfigurationProvider()
-	case bucket.OCIAuthWorkloadIdentity:
-		return auth.OkeWorkloadIdentityConfigurationProvider()
-	default:
-		return nil, fmt.Errorf("%w: unsupported oci auth mode %q", bucket.ErrInvalidConfig, cfg.AuthMode)
-	}
+func init() {
+	bucket.Register(bucket.ProviderOCI, func(_ context.Context, bc bucket.Config) (bucket.Store, error) {
+		c := bc.OCICredentials
+		return New(Config{
+			Bucket:        bc.Name,
+			Namespace:     c.Namespace,
+			Endpoint:      bc.Endpoint,
+			PresignMaxTTL: bc.PresignMaxTTL,
+			Credentials: cloudoci.Config{
+				AuthMode:    cloudoci.AuthMode(c.AuthMode),
+				Region:      bc.Region,
+				TenancyID:   c.TenancyID,
+				UserID:      c.UserID,
+				Fingerprint: c.FingerPrint,
+				PrivateKey:  c.PrivateKey,
+				Passphrase:  c.Passphrase,
+			},
+		})
+	})
 }
 
-// apiKeyProvider builds a raw API-key provider, validating the signing fields
-// that only this mode consumes.
-func apiKeyProvider(cfg Config) (common.ConfigurationProvider, error) {
-	switch {
-	case cfg.TenancyID == "":
-		return nil, fmt.Errorf("%w: tenancy id is required", bucket.ErrInvalidConfig)
-	case cfg.UserID == "":
-		return nil, fmt.Errorf("%w: user id is required", bucket.ErrInvalidConfig)
-	case cfg.Fingerprint == "":
-		return nil, fmt.Errorf("%w: fingerprint is required", bucket.ErrInvalidConfig)
-	case cfg.PrivateKey == "":
-		return nil, fmt.Errorf("%w: private key is required", bucket.ErrInvalidConfig)
-	}
-
-	var passphrase *string
-	if cfg.Passphrase != "" {
-		passphrase = &cfg.Passphrase
-	}
-	return common.NewRawConfigurationProvider(
-		cfg.TenancyID, cfg.UserID, cfg.Region, cfg.Fingerprint, cfg.PrivateKey, passphrase,
-	), nil
-}
-
-// Put uploads an object, overwriting any existing object with the same key.
 func (s *Store) Put(ctx context.Context, in bucket.PutInput) error {
 	if in.Key == "" {
 		return fmt.Errorf("%w: key is required", bucket.ErrInvalidConfig)
@@ -158,19 +135,36 @@ func (s *Store) Put(ctx context.Context, in bucket.PutInput) error {
 		return err
 	}
 
+	var contentType *string
+	if in.ContentType != "" {
+		contentType = &in.ContentType
+	}
+	if in.Size < 0 {
+		// PutObject needs Content-Length; unknown sizes stream as multipart
+		// parts without buffering the whole object.
+		_, err := s.uploads.UploadStream(ctx, transfer.UploadStreamRequest{
+			UploadRequest: transfer.UploadRequest{
+				NamespaceName:       &ns,
+				BucketName:          &s.bucket,
+				ObjectName:          &in.Key,
+				ContentType:         contentType,
+				ObjectStorageClient: &s.client,
+			},
+			StreamReader: in.Body,
+		})
+		if err != nil {
+			return mapErr(fmt.Errorf("oci bucket: put %q: %w", in.Key, err))
+		}
+		return nil
+	}
 	req := objectstorage.PutObjectRequest{
 		NamespaceName: &ns,
 		BucketName:    &s.bucket,
 		ObjectName:    &in.Key,
 		PutObjectBody: io.NopCloser(in.Body),
+		ContentLength: &in.Size,
+		ContentType:   contentType,
 	}
-	if in.Size >= 0 {
-		req.ContentLength = &in.Size
-	}
-	if in.ContentType != "" {
-		req.ContentType = &in.ContentType
-	}
-
 	if _, err := s.client.PutObject(ctx, req); err != nil {
 		return mapErr(fmt.Errorf("oci bucket: put %q: %w", in.Key, err))
 	}
@@ -203,52 +197,56 @@ func (s *Store) Get(ctx context.Context, key string) (bucket.Object, io.ReadClos
 	return obj, resp.Content, nil
 }
 
-// List returns every object whose key starts with prefix, following the
-// backend's pagination until the listing is exhausted.
-func (s *Store) List(ctx context.Context, prefix string) ([]bucket.Object, error) {
-	ns, err := s.resolveNamespace(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	objects := make([]bucket.Object, 0)
-	var start *string
-	for {
-		req := objectstorage.ListObjectsRequest{
-			NamespaceName: &ns,
-			BucketName:    &s.bucket,
-			Start:         start,
-			Fields:        common.String("name,size,timeCreated"),
-		}
-		if prefix != "" {
-			req.Prefix = &prefix
-		}
-
-		resp, err := s.client.ListObjects(ctx, req)
+// All streams the listing page by page.
+func (s *Store) All(ctx context.Context, prefix string) iter.Seq2[bucket.Object, error] {
+	return func(yield func(bucket.Object, error) bool) {
+		ns, err := s.resolveNamespace(ctx)
 		if err != nil {
-			return nil, mapErr(fmt.Errorf("oci bucket: list %q: %w", prefix, err))
+			yield(bucket.Object{}, err)
+			return
 		}
-
-		for _, o := range resp.Objects {
-			obj := bucket.Object{}
-			if o.Name != nil {
-				obj.Key = *o.Name
+		var start *string
+		for {
+			req := objectstorage.ListObjectsRequest{
+				NamespaceName: &ns,
+				BucketName:    &s.bucket,
+				Start:         start,
+				Fields:        new("name,size,timeCreated"),
 			}
-			if o.Size != nil {
-				obj.Size = *o.Size
+			if prefix != "" {
+				req.Prefix = &prefix
 			}
-			if o.TimeCreated != nil {
-				obj.LastModified = o.TimeCreated.Time
+			resp, err := s.client.ListObjects(ctx, req)
+			if err != nil {
+				yield(bucket.Object{}, mapErr(fmt.Errorf("oci bucket: list %q: %w", prefix, err)))
+				return
 			}
-			objects = append(objects, obj)
+			for _, o := range resp.Objects {
+				obj := bucket.Object{}
+				if o.Name != nil {
+					obj.Key = *o.Name
+				}
+				if o.Size != nil {
+					obj.Size = *o.Size
+				}
+				if o.TimeCreated != nil {
+					obj.LastModified = o.TimeCreated.Time
+				}
+				if !yield(obj, nil) {
+					return
+				}
+			}
+			if resp.NextStartWith == nil || *resp.NextStartWith == "" {
+				return
+			}
+			start = resp.NextStartWith
 		}
-
-		if resp.NextStartWith == nil || *resp.NextStartWith == "" {
-			break
-		}
-		start = resp.NextStartWith
 	}
-	return objects, nil
+}
+
+// List returns every object whose key starts with prefix.
+func (s *Store) List(ctx context.Context, prefix string) ([]bucket.Object, error) {
+	return bucket.Collect(s.All(ctx, prefix))
 }
 
 // Delete removes an object. It is idempotent: a missing key is treated as a
@@ -274,10 +272,14 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 }
 
 // PresignGet issues a read-only Pre-Authenticated Request (PAR) scoped to a
-// single object and returns the absolute download URL valid for ttl.
+// single object and returns the absolute download URL valid for ttl. Each
+// call creates a PAR that lives until it expires, so ttl is capped.
 func (s *Store) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("%w: key is required", bucket.ErrInvalidConfig)
+	}
+	if err := bucket.CheckPresignTTL(ttl, s.presignMax); err != nil {
+		return "", err
 	}
 	ns, err := s.resolveNamespace(ctx)
 	if err != nil {
@@ -306,28 +308,31 @@ func (s *Store) PresignGet(ctx context.Context, key string, ttl time.Duration) (
 	return s.parBaseURL + *resp.AccessUri, nil
 }
 
-// resolveNamespace fetches the tenancy's Object Storage namespace once and
-// caches the result (or the failure) for subsequent calls.
+// resolveNamespace fetches the tenancy's Object Storage namespace and caches it;
+// failures are not cached, so the next call retries.
 func (s *Store) resolveNamespace(ctx context.Context) (string, error) {
-	s.nsOnce.Do(func() {
-		resp, err := s.client.GetNamespace(ctx, objectstorage.GetNamespaceRequest{})
-		if err != nil {
-			s.nsErr = fmt.Errorf("oci bucket: resolve namespace: %w", err)
-			return
-		}
-		if resp.Value != nil {
-			s.namespace = *resp.Value
-		}
-	})
-	return s.namespace, s.nsErr
+	s.nsMu.Lock()
+	defer s.nsMu.Unlock()
+	if s.namespace != "" {
+		return s.namespace, nil
+	}
+	// Detached from the caller so one canceled request cannot fail the lookup for others.
+	resp, err := s.client.GetNamespace(context.WithoutCancel(ctx), objectstorage.GetNamespaceRequest{})
+	if err != nil {
+		return "", fmt.Errorf("oci bucket: resolve namespace: %w", err)
+	}
+	if resp.Value != nil {
+		s.namespace = *resp.Value
+	}
+	return s.namespace, nil
 }
 
 // mapErr translates OCI 404 service errors into bucket.ErrNotFound while
 // preserving the original message via wrapping.
 func mapErr(err error) error {
-	var svc common.ServiceError
+	var svc common.ServiceError // not an error type, so errors.AsType does not apply
 	if errors.As(err, &svc) && svc.GetHTTPStatusCode() == http.StatusNotFound {
-		return fmt.Errorf("%w: %v", bucket.ErrNotFound, err)
+		return fmt.Errorf("%w: %w", bucket.ErrNotFound, err)
 	}
 	return err
 }

@@ -3,7 +3,7 @@ package criteria_test
 import (
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/criteria"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,26 +78,26 @@ func TestAsc_ReturnsValueNotPointer(t *testing.T) {
 // Interaction with Build
 
 func TestAsc_ProducesAscClause(t *testing.T) {
-	sql, _ := criteria.From("t", "").OrderBy(criteria.Asc("id")).Build(pgDialect{})
+	sql, _ := built(t)(criteria.From("t", "").OrderBy(criteria.Asc("id")).Build(pgDialect{}))
 	assert.Contains(t, sql, "ORDER BY id ASC")
 }
 
 func TestDesc_ProducesDescClause(t *testing.T) {
-	sql, _ := criteria.From("t", "").OrderBy(criteria.Desc("created_at")).Build(pgDialect{})
+	sql, _ := built(t)(criteria.From("t", "").OrderBy(criteria.Desc("created_at")).Build(pgDialect{}))
 	assert.Contains(t, sql, "ORDER BY created_at DESC")
 }
 
 func TestOrderBy_MixedAscDesc_InOrder(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		OrderBy(criteria.Asc("name"), criteria.Desc("id")).
-		Build(pgDialect{})
+		Build(pgDialect{}))
 	assert.Equal(t, "SELECT * FROM t ORDER BY name ASC, id DESC", sql)
 }
 
 func TestOrderBy_MultipleCalls_Accumulate(t *testing.T) {
-	sql, _ := criteria.From("t", "").
+	sql, _ := built(t)(criteria.From("t", "").
 		OrderBy(criteria.Asc("name")).
 		OrderBy(criteria.Desc("id")).
-		Build(pgDialect{})
+		Build(pgDialect{}))
 	assert.Contains(t, sql, "ORDER BY name ASC, id DESC")
 }

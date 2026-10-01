@@ -18,6 +18,7 @@ package mail
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/mail"
 	"strings"
 )
@@ -29,6 +30,7 @@ var (
 	ErrEmptyBody     = errors.New("mail: message has neither HTML nor text body")
 	ErrNotConfigured = errors.New("mail: SMTP is not configured (MAIL_HOST/MAIL_FROM_EMAIL)")
 	ErrInvalidConfig = errors.New("mail: invalid configuration")
+	ErrInvalidHeader = errors.New("mail: address or header contains invalid characters")
 )
 
 // Address is an e-mail address with an optional display name.
@@ -93,7 +95,67 @@ func (m *Message) validate() error {
 	if strings.TrimSpace(m.HTML) == "" && strings.TrimSpace(m.Text) == "" {
 		return ErrEmptyBody
 	}
+	return m.validateHeaders()
+}
+
+// validateHeaders blocks CR/LF so user input cannot inject extra headers or
+// recipients, and requires every address to be a bare RFC 5322 addr-spec.
+func (m *Message) validateHeaders() error {
+	for _, group := range [][]Address{{m.From}, m.To, m.Cc, m.Bcc} {
+		for _, a := range group {
+			if err := validateAddress(a); err != nil {
+				return err
+			}
+		}
+	}
+	for k, v := range m.Headers {
+		if !isHeaderName(k) || hasLineBreak(v) {
+			return fmt.Errorf("%w: header %q", ErrInvalidHeader, k)
+		}
+	}
+	for _, att := range m.Attachments {
+		if hasLineBreak(att.ContentType) {
+			return fmt.Errorf("%w: attachment %q content type", ErrInvalidHeader, att.Filename)
+		}
+	}
 	return nil
+}
+
+// validateAddress rejects line breaks in a and, when set, a non-bare email.
+func validateAddress(a Address) error {
+	if hasLineBreak(a.Email) || hasLineBreak(a.Name) {
+		return fmt.Errorf("%w: address %q", ErrInvalidHeader, a.Email)
+	}
+	if strings.TrimSpace(a.Email) == "" {
+		return nil // skipped by recipients; From is checked in validate
+	}
+	return validEmail(a.Email)
+}
+
+// validEmail accepts only a bare address (no display name, comments or
+// routing), as parsed by net/mail.
+func validEmail(email string) error {
+	e := strings.TrimSpace(email)
+	a, err := mail.ParseAddress(e)
+	if err != nil || a.Name != "" || a.Address != e {
+		return fmt.Errorf("%w: invalid address %q", ErrInvalidHeader, email)
+	}
+	return nil
+}
+
+func hasLineBreak(s string) bool { return strings.ContainsAny(s, "\r\n") }
+
+// isHeaderName reports whether k is a valid RFC 5322 field name.
+func isHeaderName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		if c := k[i]; c <= ' ' || c >= 127 || c == ':' {
+			return false
+		}
+	}
+	return true
 }
 
 // BulkError describes the failure of a single message within a bulk send.

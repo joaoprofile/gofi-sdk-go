@@ -2,7 +2,8 @@ package netx
 
 import (
 	"context"
-	"log"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -10,21 +11,29 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 )
 
 // Server timeouts applied when the matching WSConfig field is <= 0.
 const (
-	DefaultReadTimeout    = 10 * time.Second
-	DefaultWriteTimeout   = 15 * time.Second
+	DefaultReadTimeout = 10 * time.Second
+	// DefaultWriteTimeout exceeds DefaultRequestTimeout so handlers that use their
+	// whole budget can still write the response.
+	DefaultWriteTimeout   = 35 * time.Second
 	DefaultIdleTimeout    = 60 * time.Second
 	DefaultRequestTimeout = 30 * time.Second
+	// DefaultShutdownTimeout stays below Kubernetes' default 30s grace period.
+	DefaultShutdownTimeout = 25 * time.Second
+	// DefaultDrainDelay is applied when Health is enabled, so endpoints observe
+	// the failed readiness before connections close.
+	DefaultDrainDelay = 5 * time.Second
 
 	// readHeaderTimeout is not configurable: it is the Slowloris defense, and
 	// it must stay short even when a service relaxes ReadTimeout to accept
@@ -44,24 +53,66 @@ type HttpServer interface {
 	Use(middleware ...Middleware)
 	UseAuth(authMiddleware Middleware)
 	AddHandlers(handlers ...RouterHandler)
-	ListenAndServe()
+	// ListenAndServe serves until SIGINT/SIGTERM or Shutdown, then fails
+	// readiness, drains and stops gracefully. It returns nil on a clean stop.
+	ListenAndServe() error
+	// Shutdown stops a running ListenAndServe and waits for it to finish, or
+	// for ctx. Calling it before ListenAndServe makes ListenAndServe return.
+	Shutdown(ctx context.Context) error
+	// AddHealthCheck registers a readiness check (requires WSConfig.Health).
+	AddHealthCheck(name string, check func(ctx context.Context) error)
 }
 
 type httpServer struct {
 	config *WSConfig
 	auth   Middleware
 	router *chi.Mux
+	stress Middleware // concurrency limiter applied per route; nil disables it
+
+	cors       *corsPolicy                 // global CORS policy
+	preflights *routePreflights            // preflights of routes with their own CORS
+	csrf       *http.CrossOriginProtection // nil when disabled
+
+	ready     atomic.Bool
+	checksMu  sync.RWMutex
+	checks    map[string]func(ctx context.Context) error
+	readiness readinessCache
+
+	lifeMu sync.Mutex
+	stop   context.CancelFunc // cancels the running ListenAndServe
+	done   chan struct{}      // closed when ListenAndServe returns
+	closed bool               // Shutdown was requested
 }
 
+// NewServer builds the server. It panics on an invalid config; call
+// WSConfig.Validate first to get an error instead.
 func NewServer(config *WSConfig) HttpServer {
-	mux := chi.NewMux()
-
-	// CORS — global config, can be overridden per-route via corsConfig on RouteBuilder.
-	corsConfig := DefaultCORSConfig()
-	if len(config.AllowedOrigins) > 0 {
-		corsConfig.AllowedOrigins = config.AllowedOrigins
+	if err := config.Validate(); err != nil {
+		panic(err)
 	}
-	mux.Use(CORSMiddleware(corsConfig))
+	mux := chi.NewMux()
+	global := mustCORSPolicy(config.corsConfig())
+	ws := &httpServer{
+		config:     config,
+		router:     mux,
+		cors:       global,
+		preflights: newRoutePreflights(global),
+	}
+	if !config.DisableCrossOriginProtection {
+		ws.csrf = crossOriginProtection(global.trusted)
+	}
+
+	// Request ID first, so every log line, the panic handler included, has it.
+	// Security headers come next, so 429/503/preflight responses carry them.
+	mux.Use(requestContext(config.ExposeErrorCause))
+	mux.Use(SecurityHeadersWith(SecurityHeadersConfig{HSTS: config.HSTS, TrustedProxies: config.TrustedProxies}))
+	mux.Use(Recoverer)
+
+	// Resolve the client IP first so the rate limiter and logs use the same value.
+	mux.Use(ClientIPMiddleware(config.TrustedProxies))
+
+	// Global CORS; a route policy replaces it (registerRoute), preflights included.
+	mux.Use(corsMiddleware(global, ws.preflights.lookup))
 
 	// Rate limiter — applied only when the caller explicitly provides a config.
 	// Redis is never created internally; the caller is responsible for wiring
@@ -70,36 +121,26 @@ func NewServer(config *WSConfig) HttpServer {
 		mux.Use(NewRedisRateLimiter(*config.RateLimiter))
 	}
 
-	// chi built-ins: request ID propagation, real IP extraction, panic recovery.
-	mux.Use(middleware.RequestID)
-	mux.Use(middleware.RealIP)
-	mux.Use(middleware.Recoverer)
-
 	// Structured JSON request logging
 	mux.Use(LoggingMiddleware())
-
-	// Concurrency control — use caller-supplied config or fall back to defaults.
-	stressConfig := StressControlConfig{
-		DefaultMaxConcurrent: 50,
-		DefaultTimeout:       20 * time.Millisecond,
-	}
-	if config.StressControl != nil {
-		stressConfig = *config.StressControl
-	}
-	mux.Use(NewStressControlMiddleware(stressConfig))
 
 	// Global request timeout.
 	mux.Use(middleware.Timeout(orDefault(config.RequestTimeout, DefaultRequestTimeout)))
 
-	// Security hardening (headers, method blocking, body limit).
+	// Method blocking and body limit.
 	mux.Use(BlockUnsafeMethods)
-	mux.Use(SecurityHeaders)
 	mux.Use(LimitBodyWithMax(config.MaxBodyBytes))
 
-	return &httpServer{
-		config: config,
-		router: mux,
+	// Concurrency control wraps each route (see registerRoute), so the slot is
+	// taken after routing, rate limiting and the body-size check, and after a
+	// route's extended read deadline is in place for body buffering.
+	// Health probes are served ahead of the router, so they never wait here.
+	var stressConfig StressControlConfig
+	if config.StressControl != nil {
+		stressConfig = *config.StressControl
 	}
+	ws.stress = NewStressControlMiddleware(stressConfig)
+	return ws
 }
 
 func (ws *httpServer) Use(middlewares ...Middleware) {
@@ -170,73 +211,186 @@ func routeDeadlines(read, write time.Duration) Middleware {
 func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
 	var h http.Handler = http.HandlerFunc(route.handler)
 
-	// Per-route CORS: applies a route-specific CORS policy on top of the global
-	// one. The route-level middleware runs closer to the handler, so its
-	// Set() calls override the global headers for non-OPTIONS responses.
-	if route.corsConfig != nil {
-		h = CORSMiddleware(*route.corsConfig)(h)
+	// A root prefix ("/") would strip the leading slash chi requires.
+	path := strings.TrimPrefix(route.path, route.prefix)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
+	pattern := routePattern(route.prefix, path)
 
 	// Auth: only applied to private routes when an auth middleware is registered.
 	if route.authentication && ws.auth != nil {
 		h = ws.auth(h)
 	}
 
+	// CSRF and the route's CORS policy run before auth.
+	h = ws.crossOrigin(route, path, pattern, h)
+
+	// The concurrency slot covers auth and the handler.
+	if ws.stress != nil {
+		h = ws.stress(h)
+	}
+
 	// Per-route deadlines wrap outermost, so the extended budget is in place
-	// before auth or the handler touches the request body.
+	// before the stress limiter buffers, or auth or the handler reads, the body.
 	if route.readTimeout > 0 || route.writeTimeout > 0 {
 		h = routeDeadlines(route.readTimeout, route.writeTimeout)(h)
 	}
 
-	path := strings.TrimPrefix(route.path, route.prefix)
-	if path == "" {
-		path = "/"
-	}
+	// Outermost, so requests rejected by auth or deadlines are labeled too.
+	h = routeTelemetry(route.method, pattern)(h)
 
 	r.Method(route.method, path, h)
 }
 
-func (ws *httpServer) ListenAndServe() {
+// crossOrigin wraps h with the CSRF check and, when the route has its own
+// CORS policy, with that policy, which replaces the global one (preflights
+// included) and alone sets the origins trusted by the CSRF check.
+func (ws *httpServer) crossOrigin(route *Route, path, pattern string, h http.Handler) http.Handler {
+	if route.corsConfig == nil {
+		if ws.csrf != nil {
+			h = ws.csrf.Handler(h)
+		}
+		return h
+	}
+	policy := mustCORSPolicy(*route.corsConfig)
+	ws.preflights.add(pattern, route.method, policy)
+	if path == "/" && pattern != "/" {
+		ws.preflights.add(pattern+"/", route.method, policy) // chi serves both
+	}
+	if ws.csrf != nil {
+		h = crossOriginProtection(policy.trusted).Handler(h)
+	}
+	return routeCORS(policy)(h)
+}
+
+// routePattern joins prefix and path the way chi reports them: the root of a
+// group is the prefix itself ("/orders", not "/orders/").
+func routePattern(prefix, path string) string {
+	prefix = strings.TrimSuffix(prefix, "/")
+	if path == "/" && prefix != "" {
+		return prefix
+	}
+	return prefix + path
+}
+
+func (ws *httpServer) ListenAndServe() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ws.lifeMu.Lock()
+	if ws.closed {
+		ws.lifeMu.Unlock()
+		return nil
+	}
+	ws.stop, ws.done = stop, make(chan struct{})
+	done := ws.done
+	ws.lifeMu.Unlock()
+	defer close(done)
+
+	return ws.serve(ctx)
+}
+
+func (ws *httpServer) Shutdown(ctx context.Context) error {
+	ws.lifeMu.Lock()
+	ws.closed = true
+	stop, done := ws.stop, ws.done
+	ws.lifeMu.Unlock()
+	if stop == nil {
+		return nil
+	}
+	stop()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// serve runs until ctx is done, then fails readiness, waits DrainDelay and shuts
+// down gracefully within ShutdownTimeout.
+func (ws *httpServer) serve(ctx context.Context) error {
+	if ws.config.H2C && ws.config.TLS != nil {
+		return errors.New("netx: H2C and TLS are mutually exclusive (TLS already negotiates HTTP/2)")
+	}
+	tlsConfig, err := serverTLSConfig(ws.config.TLS)
+	if err != nil {
+		return err
+	}
+
+	ln, err := net.Listen("tcp", ws.config.ServerPort)
+	if err != nil {
+		return fmt.Errorf("netx: listen %s: %w", ws.config.ServerPort, err)
+	}
+
+	baseCtx, cancelBase := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelBase()
+
 	server := &http.Server{
-		Addr:              ws.config.ServerPort,
-		Handler:           ws.router,
+		Handler:           ws.instrumented(ws.handler()),
 		ReadTimeout:       orDefault(ws.config.ReadTimeout, DefaultReadTimeout),
 		ReadHeaderTimeout: readHeaderTimeout,
 		WriteTimeout:      orDefault(ws.config.WriteTimeout, DefaultWriteTimeout),
 		IdleTimeout:       orDefault(ws.config.IdleTimeout, DefaultIdleTimeout),
 		MaxHeaderBytes:    1 << 20,
-		ErrorLog:          log.New(os.Stderr, "http-server: ", log.LstdFlags),
-		BaseContext: func(_ net.Listener) context.Context {
-			return context.Background()
-		},
+		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
+		TLSConfig:         tlsConfig,
+	}
+	if ws.config.H2C {
+		var p http.Protocols
+		p.SetHTTP1(true)
+		p.SetUnencryptedHTTP2(true)
+		server.Protocols = &p
 	}
 
-	idleConnsClosed := make(chan struct{})
-
+	serveErr := make(chan error, 1)
 	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-		<-sig
-
-		log.Println("shutdown signal received")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("shutdown error: %v", err)
+		if tlsConfig != nil {
+			serveErr <- server.ServeTLS(ln, "", "")
+			return
 		}
-
-		close(idleConnsClosed)
+		serveErr <- server.Serve(ln)
 	}()
+	ws.ready.Store(true)
+	slog.InfoContext(ctx, "HTTP service started", slog.String("addr", ln.Addr().String()), slog.Bool("tls", tlsConfig != nil))
 
-	log.Printf("HTTP service started at %s", ws.config.ServerPort)
-
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server error: %v", err)
+	select {
+	case err := <-serveErr:
+		ws.ready.Store(false)
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("netx: serve: %w", err)
+	case <-ctx.Done():
 	}
 
-	<-idleConnsClosed
+	// Fail readiness first so load balancers stop routing before connections close.
+	ws.ready.Store(false)
+	if d := ws.drainDelay(); d > 0 {
+		slog.Info("HTTP service draining", slog.Duration("delay", d))
+		time.Sleep(d)
+	}
 
-	log.Println("HTTP service stopped gracefully")
+	shCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orDefault(ws.config.ShutdownTimeout, DefaultShutdownTimeout))
+	defer cancel()
+	err = server.Shutdown(shCtx)
+	cancelBase() // cancel in-flight handler contexts left after the deadline
+	if err != nil {
+		// Force-close the connections still open after the deadline.
+		return fmt.Errorf("netx: shutdown: %w", errors.Join(err, server.Close()))
+	}
+	slog.Info("HTTP service stopped gracefully")
+	return nil
+}
+
+func (ws *httpServer) drainDelay() time.Duration {
+	if ws.config.DrainDelay > 0 {
+		return ws.config.DrainDelay
+	}
+	if ws.config.Health != nil {
+		return DefaultDrainDelay
+	}
+	return 0
 }

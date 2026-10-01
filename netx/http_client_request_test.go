@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/base/common"
+	"github.com/gofi-labs/gofi-sdk-go/base/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -347,7 +347,7 @@ func TestHandleRateLimiting_ConcurrentCallers_NoDataRace(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			req := &Request[string]{Ctx: context.Background(), Client: client}
@@ -368,7 +368,7 @@ func TestHandleRateLimiting_ConcurrentCallers_RespectsLimit(t *testing.T) {
 	start := time.Now()
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			req := &Request[string]{Ctx: context.Background(), Client: client}
@@ -393,8 +393,8 @@ func TestHandleRetryAfterHeader_WithHeader_ReturnEarlyWithoutIncrements(t *testi
 	}
 	currentSleep := 2 * time.Second
 	req.handleRetryAfterHeader(resp, &currentSleep)
-	// Header present → returns early, currentSleep NOT incremented
-	assert.Equal(t, 2*time.Second, currentSleep)
+	// Header present → the next wait is exactly Retry-After (no extra sleep)
+	assert.Equal(t, time.Duration(0), currentSleep)
 }
 
 func TestHandleRetryAfterHeader_WithoutHeader_IncrementsBy5s(t *testing.T) {
@@ -482,9 +482,9 @@ func TestExecute_NoContentResponse(t *testing.T) {
 // "failed to unmarshal response body: EOF", got a fabricated 500 from FromError,
 // and drove 5 false transient retries. It must now succeed with (nil, nil).
 func TestExecute_EmptyJSONBody_TreatedAsNoContent(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.Header().Set("Content-Type", common.APPLICATION_JSON)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -495,13 +495,13 @@ func TestExecute_EmptyJSONBody_TreatedAsNoContent(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Nil(t, result)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&attempts), "empty 200 body must not trigger retries")
+	assert.Equal(t, int32(1), attempts.Load(), "empty 200 body must not trigger retries")
 }
 
 func TestExecute_ClientError_NoRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"message":"not found"}`))
 	}))
@@ -512,13 +512,13 @@ func TestExecute_ClientError_NoRetry(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&attempts), "4xx should not trigger retries")
+	assert.Equal(t, int32(1), attempts.Load(), "4xx should not trigger retries")
 }
 
 func TestExecute_500_RetryThenSuccess(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -534,7 +534,7 @@ func TestExecute_500_RetryThenSuccess(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, "ok", (*result)["result"])
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestExecute_500_MaxRetriesExceeded(t *testing.T) {
@@ -560,9 +560,9 @@ func TestExecute_500_MaxRetriesExceeded(t *testing.T) {
 }
 
 func TestExecute_429_RetryThenSuccess(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
@@ -577,7 +577,7 @@ func TestExecute_429_RetryThenSuccess(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestExecute_429_MaxRetriesExceeded(t *testing.T) {
@@ -595,11 +595,11 @@ func TestExecute_429_MaxRetriesExceeded(t *testing.T) {
 
 func TestExecute_BodySentCorrectlyOnRetry(t *testing.T) {
 	var lastBody string
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
 		lastBody = string(bodyBytes)
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -610,6 +610,7 @@ func TestExecute_BodySentCorrectlyOnRetry(t *testing.T) {
 	defer server.Close()
 
 	req := NewRequest[map[string]string](context.Background(), newTestClient(server, 2, time.Millisecond), http.MethodPost, "/test")
+	req.SetHeader("Idempotency-Key", "k-1") // POST retries require it
 	req.SetBody(map[string]string{"key": "value"})
 	result, err := req.Execute()
 
@@ -633,9 +634,9 @@ func TestExecute_NetworkError_RetryThenSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var attempts int32
+	var attempts atomic.Int32
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			return nil, errors.New("connection refused")
 		}
 		return server.Client().Transport.RoundTrip(req)
@@ -655,7 +656,7 @@ func TestExecute_NetworkError_RetryThenSuccess(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, "retried", (*result)["result"])
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 // Execute — unmarshalable body triggers prepareRequestBody error path
@@ -778,11 +779,11 @@ func TestExecute_SignatureError(t *testing.T) {
 
 func TestExecute_BytesBufferBody_RetainedOnRetry(t *testing.T) {
 	var lastBody string
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
 		lastBody = string(bodyBytes)
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -793,12 +794,13 @@ func TestExecute_BytesBufferBody_RetainedOnRetry(t *testing.T) {
 	defer server.Close()
 
 	req := NewRequest[map[string]string](context.Background(), newTestClient(server, 2, time.Millisecond), http.MethodPost, "/test")
+	req.SetHeader("Idempotency-Key", "k-1") // POST retries require it
 	req.SetBody(bytes.NewBufferString("raw buffer data"))
 	result, err := req.Execute()
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 	assert.Equal(t, "raw buffer data", lastBody, "bytes.Buffer body must be present on every retry attempt")
 }
 
@@ -807,12 +809,12 @@ func TestExecute_BytesBufferBody_RetainedOnRetry(t *testing.T) {
 func TestExecute_URLValuesBody_RetainedOnRetry(t *testing.T) {
 	var lastBody string
 	var contentType string
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
 		lastBody = string(bodyBytes)
 		contentType = r.Header.Get(common.CONTENT_TYPE)
-		if atomic.AddInt32(&attempts, 1) == 1 {
+		if attempts.Add(1) == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -827,12 +829,13 @@ func TestExecute_URLValuesBody_RetainedOnRetry(t *testing.T) {
 	form.Set("refresh_token", "rt-123")
 
 	req := NewRequest[map[string]string](context.Background(), newTestClient(server, 2, time.Millisecond), http.MethodPost, "/oauth/token")
+	req.SetHeader("Idempotency-Key", "k-1") // POST retries require it
 	req.SetBody(form)
 	result, err := req.Execute()
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 	assert.Equal(t, common.APPLICATION_URL_ENCODED, contentType)
 	assert.Contains(t, lastBody, "grant_type=refresh_token", "form body must survive the retry, not be sent empty")
 	assert.Contains(t, lastBody, "refresh_token=rt-123", "form body must survive the retry, not be sent empty")

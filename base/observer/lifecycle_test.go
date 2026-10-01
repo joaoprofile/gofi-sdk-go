@@ -30,9 +30,7 @@ func (f *fakeIOCloser) Close() error {
 	return f.err
 }
 
-type unknownCloser struct {
-	called bool
-}
+type unknownCloser struct{}
 
 // unknownCloser satisfies neither Closer nor io.Closer — must be silently skipped.
 
@@ -159,3 +157,26 @@ func TestCloseAllMultipleClosers(t *testing.T) {
 
 // Ensure fakeIOCloser satisfies io.Closer at compile time.
 var _ io.Closer = (*fakeIOCloser)(nil)
+
+type orderCloser struct {
+	name  string
+	order *[]string
+	err   error
+}
+
+func (o *orderCloser) Close() error { *o.order = append(*o.order, o.name); return o.err }
+
+func TestCloseAll_ReverseOrderAndJoinsErrors(t *testing.T) {
+	var order []string
+	e1, e2 := errors.New("first"), errors.New("second")
+	r := New()
+	r.Register(&orderCloser{name: "db", order: &order, err: e1}, &orderCloser{name: "http", order: &order, err: e2})
+
+	err := r.CloseAll(context.Background())
+	if want := []string{"http", "db"}; len(order) != 2 || order[0] != want[0] || order[1] != want[1] {
+		t.Fatalf("close order=%v, want %v", order, want)
+	}
+	if !errors.Is(err, e1) || !errors.Is(err, e2) {
+		t.Fatalf("both errors must be returned, got %v", err)
+	}
+}

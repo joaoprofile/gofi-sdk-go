@@ -3,11 +3,12 @@ package netx
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/joaoprofile/gofi/base/errs"
+	"github.com/gofi-labs/gofi-sdk-go/base/errs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -203,7 +204,7 @@ func TestRespondError_KindMapsToHTTPStatus(t *testing.T) {
 		{"validation", errs.RegisterValidation("rsp-validation", "invalid input"), http.StatusBadRequest},
 		{"operation", errs.RegisterOperation("rsp-operation", "operation failed"), http.StatusInternalServerError},
 		{"unknown", errs.Register("rsp-unknown", "unknown error"), http.StatusInternalServerError},
-		{"external", errs.RegisterExternalError("rsp-external", "external service failed"), http.StatusInternalServerError},
+		{"external", errs.RegisterExternalError("rsp-external", "external service failed"), http.StatusBadGateway},
 		{"unauthorized", errs.RegisterUnauthorized("rsp-unauthorized", "access denied"), http.StatusUnauthorized},
 	}
 
@@ -258,7 +259,59 @@ func TestRespondError_WrappedError_PreservesKindAndMessage(t *testing.T) {
 	assert.Contains(t, body.Message, "abc-123")
 	assert.Equal(t, "wrap-nf", body.ErrorCode)
 	assert.Equal(t, string(errs.KindNotFound), body.Kind)
-	assert.Equal(t, "db: no rows", body.Cause)
+	assert.Empty(t, body.Cause, "internal cause must stay in logs")
+	assert.NotContains(t, rec.Body.String(), "db: no rows")
+}
+
+// ExposeErrorCause is a server option carried by the request context, not a
+// process-wide variable.
+func TestRespondError_ExposeErrorCauseOptIn(t *testing.T) {
+	appErr := errs.RegisterNotFound("wrap-nf-expose", "person %s not found").Wrap(errors.New("db: no rows"), "abc")
+	for _, expose := range []bool{true, false} {
+		ws := NewServer(&WSConfig{ExposeErrorCause: expose}).(*httpServer)
+		ws.AddHandlers(routesFunc(func() []*Route {
+			return PublicRoutes("/", GET("/err").To(func(w http.ResponseWriter, r *http.Request) { RespondError(w, r, appErr) }))
+		}))
+		rec := httptest.NewRecorder()
+		ws.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/err", nil))
+
+		var body ErrorResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		if expose {
+			assert.Equal(t, "db: no rows", body.Cause)
+		} else {
+			assert.Empty(t, body.Cause)
+		}
+	}
+}
+
+// Regression: Error/ErrorDetails sent err.Error() to clients on 5xx.
+func TestError_ServerErrorsAreGeneric(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Error(rec, http.StatusInternalServerError, errors.New("pq: password authentication failed for user admin"))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "pq:")
+	assert.JSONEq(t, `{"code":500,"message":"internal server error"}`, rec.Body.String())
+
+	rec = httptest.NewRecorder()
+	ErrorDetails(rec, http.StatusBadGateway, "upstream 10.0.0.7 refused", map[string]string{"host": "10.0.0.7"})
+	assert.JSONEq(t, `{"code":502,"message":"bad gateway"}`, rec.Body.String())
+
+	rec = httptest.NewRecorder()
+	Error(rec, http.StatusBadRequest, nil)
+	assert.JSONEq(t, `{"code":400,"message":"bad request"}`, rec.Body.String())
+
+	rec = httptest.NewRecorder()
+	Error(rec, 599, errors.New("secret"))
+	assert.JSONEq(t, `{"code":599,"message":"error"}`, rec.Body.String())
+}
+
+func TestError_RequestErrorSetsStatusAndMessage(t *testing.T) {
+	err := &RequestError{Status: http.StatusUnsupportedMediaType, Message: "content type must be application/json", Err: errors.New("detail")}
+	rec := httptest.NewRecorder()
+	Error(rec, http.StatusBadRequest, fmt.Errorf("wrapped: %w", err))
+	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
+	assert.JSONEq(t, `{"code":415,"message":"content type must be application/json"}`, rec.Body.String())
 }
 
 func TestRespondError_WithDetails_DetailsPropagated(t *testing.T) {

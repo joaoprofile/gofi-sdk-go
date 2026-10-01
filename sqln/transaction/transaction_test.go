@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,20 +16,20 @@ import (
 func TestNewTransaction_DefaultIsolation(t *testing.T) {
 	tx := NewTransaction()
 	assert.NotNil(t, tx)
-	assert.Equal(t, sql.LevelDefault, tx.(*transaction).isolationLevel)
+	assert.Equal(t, sql.LevelDefault, tx.(*transaction).opts.Isolation)
 }
 
 func TestNewTransaction_SingleIsolation(t *testing.T) {
 	tx := NewTransaction(sql.LevelSerializable)
 	assert.NotNil(t, tx)
-	assert.Equal(t, sql.LevelSerializable, tx.(*transaction).isolationLevel)
+	assert.Equal(t, sql.LevelSerializable, tx.(*transaction).opts.Isolation)
 }
 
 func TestNewTransaction_MultipleIsolations_UsesFirst(t *testing.T) {
 	// When more than one level is passed the first is used and a warning is logged.
 	tx := NewTransaction(sql.LevelSerializable, sql.LevelReadCommitted)
 	assert.NotNil(t, tx)
-	assert.Equal(t, sql.LevelSerializable, tx.(*transaction).isolationLevel)
+	assert.Equal(t, sql.LevelSerializable, tx.(*transaction).opts.Isolation)
 }
 
 // Execute — success path (uses global connection)
@@ -66,7 +66,7 @@ func TestExecute_ContextContainsSqlTx(t *testing.T) {
 
 func TestExecute_FnError_Rollbacks(t *testing.T) {
 	db := rawDB(t, "ok")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	fnErr := errors.New("business error")
 	err := tr.executeTransaction(context.Background(), db, func(_ context.Context) error {
@@ -78,7 +78,7 @@ func TestExecute_FnError_Rollbacks(t *testing.T) {
 
 func TestExecute_FnError_RollbackFails_WrapsErrors(t *testing.T) {
 	db := rawDB(t, "fail-rollback")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	fnErr := errors.New("fn error")
 	err := tr.executeTransaction(context.Background(), db, func(_ context.Context) error {
@@ -88,13 +88,24 @@ func TestExecute_FnError_RollbackFails_WrapsErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fn error")
 	assert.Contains(t, err.Error(), "rollback failed")
+	assert.ErrorIs(t, err, fnErr, "callers must still match the domain error")
+}
+
+func TestExecute_BeginCanceled_PreservesContextError(t *testing.T) {
+	db := rawDB(t, "ok")
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := tr.executeTransaction(ctx, db, func(context.Context) error { return nil })
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 // Execute — begin fails
 
 func TestExecute_BeginFails_ReturnsError(t *testing.T) {
 	db := rawDB(t, "fail-begin")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	err := tr.executeTransaction(context.Background(), db, func(_ context.Context) error {
 		return nil
@@ -108,7 +119,7 @@ func TestExecute_BeginFails_ReturnsError(t *testing.T) {
 
 func TestExecute_CommitFails_ReturnsError(t *testing.T) {
 	db := rawDB(t, "fail-commit")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	err := tr.executeTransaction(context.Background(), db, func(_ context.Context) error {
 		return nil
@@ -122,7 +133,7 @@ func TestExecute_CommitFails_ReturnsError(t *testing.T) {
 
 func TestExecute_PanicInsideFn_RollbacksAndRepanics(t *testing.T) {
 	db := rawDB(t, "ok")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	assert.Panics(t, func() {
 		_ = tr.executeTransaction(context.Background(), db, func(_ context.Context) error {
@@ -135,7 +146,7 @@ func TestExecute_PanicInsideFn_RollbacksAndRepanics(t *testing.T) {
 
 func TestExecute_NestedContext_TxPropagated(t *testing.T) {
 	db := rawDB(t, "ok")
-	tr := &transaction{isolationLevel: sql.LevelDefault}
+	tr := &transaction{opts: Options{Isolation: sql.LevelDefault}}
 
 	var outerTx, innerTx *sql.Tx
 

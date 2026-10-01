@@ -1,6 +1,7 @@
 package netx
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,9 +11,17 @@ type Middleware func(http.Handler) http.Handler
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
 
+// CorsConfig is a CORS policy. A route policy (RouteBuilder.Cors) replaces
+// the global one for that route, preflights included.
 type CorsConfig struct {
-	AllowedOrigins   []string
-	AllowedMethods   []string
+	// AllowedOrigins are exact scheme://host[:port] origins, or AnyOrigin
+	// ("*", only with AllowCredentials=false).
+	AllowedOrigins []string
+	// AllowedMethods are checked against Access-Control-Request-Method;
+	// empty uses DefaultCORSConfig's.
+	AllowedMethods []string
+	// AllowedHeaders bound Access-Control-Allow-Headers; empty uses
+	// DefaultCORSAllowedHeaders.
 	AllowedHeaders   []string
 	ExposeHeaders    []string
 	AllowCredentials bool
@@ -46,11 +55,23 @@ type RouterHandler interface {
 }
 
 type WSConfig struct {
-	ServerPort     string
+	ServerPort string
+
+	// AllowedOrigins sets the origins of the global CORS policy, which is
+	// otherwise DefaultCORSConfig. Ignored when CORS is set.
 	AllowedOrigins []string
 
-	// StressControl overrides the default concurrency limits. When nil,
-	// sensible defaults (50 concurrent, 20 ms timeout) are applied.
+	// CORS replaces the global CORS policy, e.g. AnyOrigin without credentials.
+	CORS *CorsConfig
+
+	// TrustedProxies lists the CIDRs of load balancers allowed to set
+	// X-Forwarded-For. nil or empty trusts none: the TCP peer is the client.
+	// The entry TrustPrivateNetworks ("private") expands to PrivateNetworks().
+	TrustedProxies []string
+
+	// StressControl overrides the default concurrency limits. When nil, the
+	// defaults apply: DefaultMaxConcurrent() slots shared by all clients,
+	// DefaultStressTimeout wait, DefaultStressBufferBytes buffered per body.
 	StressControl *StressControlConfig
 
 	// RateLimiter configures per-client rate limiting. When nil, rate limiting
@@ -82,6 +103,64 @@ type WSConfig struct {
 	// RequestTimeout bounds the per-request context passed to handlers. A
 	// value <= 0 falls back to DefaultRequestTimeout.
 	RequestTimeout time.Duration
+
+	// ShutdownTimeout bounds graceful shutdown. A value <= 0 falls back to
+	// DefaultShutdownTimeout; keep it below the pod's termination grace period.
+	ShutdownTimeout time.Duration
+
+	// DrainDelay is waited after readiness fails and before shutdown starts.
+	// 0 uses DefaultDrainDelay when Health is enabled, otherwise no delay.
+	DrainDelay time.Duration
+
+	// Health enables /livez and /readyz; nil disables them.
+	Health *HealthConfig
+
+	// H2C serves HTTP/2 without TLS next to HTTP/1.1, for meshes and load
+	// balancers that speak HTTP/2 to the pod. It cannot be combined with TLS.
+	H2C bool
+
+	// TLS serves HTTPS (HTTP/2 and HTTP/1.1), optionally with mTLS; nil serves
+	// plain HTTP. Invalid settings make ListenAndServe fail.
+	TLS *TLSConfig
+
+	// DisableCrossOriginProtection turns off the CSRF check. By default every
+	// route rejects cross-origin unsafe requests (http.CrossOriginProtection,
+	// by Sec-Fetch-Site/Origin) except from the origins its CORS policy
+	// allows; same-origin requests and clients sending neither header pass.
+	DisableCrossOriginProtection bool
+
+	// HSTS configures Strict-Transport-Security; it is only sent over TLS or
+	// behind a trusted proxy reporting X-Forwarded-Proto: https.
+	HSTS HSTSConfig
+
+	// ExposeErrorCause returns wrapped error causes in ErrorResponse.Cause
+	// (RespondError). Keep false in production: causes may carry SQL or
+	// driver details.
+	ExposeErrorCause bool
+}
+
+// Validate reports the settings NewServer would panic on.
+func (c *WSConfig) Validate() error {
+	var errs []error
+	if err := c.corsConfig().Validate(); err != nil {
+		errs = append(errs, err)
+	}
+	if _, err := parsePrefixes(c.TrustedProxies); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// corsConfig is the global CORS policy.
+func (c *WSConfig) corsConfig() CorsConfig {
+	if c.CORS != nil {
+		return *c.CORS
+	}
+	cfg := DefaultCORSConfig()
+	if len(c.AllowedOrigins) > 0 {
+		cfg.AllowedOrigins = c.AllowedOrigins
+	}
+	return cfg
 }
 
 func (rb *RouteBuilder) Build() *Route {
@@ -125,6 +204,8 @@ func (rb *RouteBuilder) Timeouts(read, write time.Duration) *RouteBuilder {
 	return rb
 }
 
+// Cors gives the route its own CORS policy, replacing the global one;
+// AddHandlers panics when it is invalid (see CorsConfig.Validate).
 func (rb *RouteBuilder) Cors(config *CorsConfig) *RouteBuilder {
 	rb.corsConfig = config
 	return rb

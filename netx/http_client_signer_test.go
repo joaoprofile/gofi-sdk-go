@@ -9,94 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── NewHostAuthentication ─────────────────────────────────────────────────────
+type headerSigner struct{}
 
-func TestNewHostAuthentication_PopulatesFields(t *testing.T) {
-	auth := NewHostAuthentication("key-id", "secret", "us-east-1")
-
-	assert.Equal(t, "key-id", auth.IAMKeyId)
-	assert.Equal(t, "secret", auth.IAMSecretKey)
-	assert.Equal(t, "us-east-1", auth.Region)
+func (headerSigner) Sign(r *http.Request, body []byte) (*http.Request, error) {
+	r.Header.Set("X-Signed", string(body))
+	return r, nil
 }
 
-func TestNewHostAuthentication_ReturnsNonNil(t *testing.T) {
-	auth := NewHostAuthentication("", "", "")
-	assert.NotNil(t, auth)
-}
+func TestRequest_SignatureSeesBody(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Signed")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
 
-// ── NewAwsSigner ──────────────────────────────────────────────────────────────
-
-func TestNewAwsSigner_ReturnsNonNil(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "secret", "us-east-1")
-	signer := NewAwsSigner(auth)
-	assert.NotNil(t, signer)
-}
-
-func TestNewAwsSigner_ImplementsSignatureInterface(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "secret", "us-east-1")
-	var _ Signature = NewAwsSigner(auth)
-}
-
-// ── AwsSigner.Sign ────────────────────────────────────────────────────────────
-
-func TestAwsSigner_Sign_AddsAuthorizationHeader(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1")
-	signer := NewAwsSigner(auth)
-
-	req := httptest.NewRequest(http.MethodPost, "https://api.example.com/items", nil)
-	body := []byte(`{"key":"value"}`)
-
-	signed, err := signer.Sign(req, body)
+	req := &Request[struct{}]{Ctx: t.Context(), HttpMethod: http.MethodPost, Url: srv.URL, Body: map[string]int{"a": 1}}
+	req.SetSignature(headerSigner{})
+	hr, err := req.createHttpRequest(req.prepareRequestBody())
 	require.NoError(t, err)
-
-	assert.NotNil(t, signed)
-	assert.NotEmpty(t, signed.Header.Get("Authorization"), "Authorization header must be set by AWS signer")
-}
-
-func TestAwsSigner_Sign_SetsContentLength(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1")
-	signer := NewAwsSigner(auth)
-
-	body := []byte(`{"hello":"world"}`)
-	req := httptest.NewRequest(http.MethodPost, "https://api.example.com/items", nil)
-
-	signed, err := signer.Sign(req, body)
+	resp, err := http.DefaultClient.Do(hr)
 	require.NoError(t, err)
-
-	assert.Equal(t, int64(len(body)), signed.ContentLength)
-}
-
-func TestAwsSigner_Sign_ReplacesBody(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1")
-	signer := NewAwsSigner(auth)
-
-	body := []byte(`{"id":1}`)
-	req := httptest.NewRequest(http.MethodPut, "https://api.example.com/items/1", nil)
-
-	signed, err := signer.Sign(req, body)
-	require.NoError(t, err)
-
-	assert.NotNil(t, signed.Body, "body must be set after signing")
-}
-
-func TestAwsSigner_Sign_EmptyBody_DoesNotError(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1")
-	signer := NewAwsSigner(auth)
-
-	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/items", nil)
-
-	signed, err := signer.Sign(req, []byte{})
-	require.NoError(t, err)
-	assert.NotNil(t, signed)
-}
-
-func TestAwsSigner_Sign_ReturnsSameRequest(t *testing.T) {
-	auth := NewHostAuthentication("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1")
-	signer := NewAwsSigner(auth)
-
-	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/", nil)
-	signed, err := signer.Sign(req, nil)
-
-	require.NoError(t, err)
-	assert.Same(t, req, signed, "Sign must return the same request pointer it received")
+	resp.Body.Close()
+	assert.Equal(t, `{"a":1}`, got)
 }

@@ -3,9 +3,9 @@ package postgres
 import (
 	"database/sql"
 
+	"github.com/gofi-labs/gofi-sdk-go/sqln/migrate"
 	"github.com/golang-migrate/migrate/v4/database"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/joaoprofile/gofi/sqln/migrate"
+	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 )
 
 type MigrateDriver struct{}
@@ -15,7 +15,7 @@ func (MigrateDriver) Name() string {
 }
 
 func (MigrateDriver) Instance(db *sql.DB) (database.Driver, error) {
-	return postgres.WithInstance(db, &postgres.Config{})
+	return pgxmigrate.WithInstance(db, &pgxmigrate.Config{})
 }
 
 func init() {

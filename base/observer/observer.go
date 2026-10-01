@@ -1,22 +1,14 @@
 package observer
 
 import (
-	"log"
 	"log/slog"
-	"os"
-	"os/signal"
+	"slices"
 	"sync"
-	"syscall"
 	"time"
 )
 
 type Observer interface {
 	Close()
-}
-
-type subject interface {
-	attach(observer Observer)
-	notify()
 }
 
 type instanceObserver struct {
@@ -38,13 +30,6 @@ func Instance() *instanceObserver {
 		instance = &instanceObserver{
 			observers: make([]Observer, 0),
 		}
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGKILL, os.Interrupt)
-		go func() {
-			sig := <-ch
-			log.Printf("notify shutdown: %+v", sig)
-			instance.notify()
-		}()
 	})
 	return instance
 }
@@ -65,8 +50,8 @@ func (s *instanceObserver) notify() {
 	// Reverse (LIFO) order: resources registered later depend on those registered
 	// earlier. Kafka consumers attach after Build (after the DB/cache they use), so
 	// closing in reverse drains in-flight handlers before their DB/cache pool is shut.
-	for i := len(s.observers) - 1; i >= 0; i-- {
-		s.observers[i].Close()
+	for _, v := range slices.Backward(s.observers) {
+		v.Close()
 	}
 }
 

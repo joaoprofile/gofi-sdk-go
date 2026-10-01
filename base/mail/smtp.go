@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -19,6 +20,11 @@ type smtpMailer struct {
 }
 
 func newSMTPMailer(cfg Config) *smtpMailer { return &smtpMailer{cfg: cfg} }
+
+// Format keeps fmt from printing the unexported cfg (and its password) raw.
+func (s *smtpMailer) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "mail.Mailer{cfg:%+v}", s.cfg)
+}
 
 // Send delivers one message, retrying transient failures with backoff.
 func (s *smtpMailer) Send(ctx context.Context, msg *Message) error {
@@ -46,7 +52,8 @@ func (s *smtpMailer) SendBulk(ctx context.Context, msgs []*Message) (BulkResult,
 	if err != nil {
 		return res, err
 	}
-	defer s.quit(c)
+	// c changes on every reconnect: quit the current one, not the first.
+	defer func() { s.quit(c) }()
 
 	inBatch := 0
 	for i, m := range msgs {
@@ -54,15 +61,9 @@ func (s *smtpMailer) SendBulk(ctx context.Context, msgs []*Message) (BulkResult,
 			res.Failed = append(res.Failed, BulkError{Index: i, To: m.recipients(), Err: verr})
 			continue
 		}
-
-		// Proactively recycle the connection every PoolSize messages.
-		if s.cfg.PoolSize > 0 && inBatch >= s.cfg.PoolSize {
-			s.quit(c)
-			if c, err = s.connect(ctx); err != nil {
-				failRemaining(&res, msgs, i, err)
-				return res, nil
-			}
-			inBatch = 0
+		if c, err = s.recycle(ctx, c, &inBatch); err != nil {
+			failRemaining(&res, msgs, i, err)
+			return res, nil
 		}
 
 		if derr := s.deliver(c, m); derr != nil {
@@ -79,6 +80,17 @@ func (s *smtpMailer) SendBulk(ctx context.Context, msgs []*Message) (BulkResult,
 		}
 	}
 	return res, nil
+}
+
+// recycle replaces c with a fresh connection once PoolSize messages went
+// through it.
+func (s *smtpMailer) recycle(ctx context.Context, c *smtp.Client, inBatch *int) (*smtp.Client, error) {
+	if s.cfg.PoolSize <= 0 || *inBatch < s.cfg.PoolSize {
+		return c, nil
+	}
+	s.quit(c)
+	*inBatch = 0
+	return s.connect(ctx)
 }
 
 // connect dials and authenticates a fresh client.
@@ -99,21 +111,21 @@ func (s *smtpMailer) dial(ctx context.Context) (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
 	d := &net.Dialer{Timeout: s.cfg.Timeout}
 
-	var conn net.Conn
-	var err error
-	if s.cfg.Encryption == EncryptionTLS {
-		conn, err = tls.DialWithDialer(d, "tcp", addr, s.cfg.tlsConfig())
-	} else {
-		conn, err = d.DialContext(ctx, "tcp", addr)
-	}
+	raw, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-
-	if dl, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(s.cfg.Timeout))
+	ctxDeadline, _ := ctx.Deadline()
+	var conn net.Conn = &idleDeadlineConn{Conn: raw, timeout: s.cfg.Timeout, limit: ctxDeadline}
+	if s.cfg.Encryption == EncryptionTLS {
+		// TLS on top of the deadline wrapper: net/smtp only treats *tls.Conn as
+		// encrypted, which PLAIN auth requires for non-localhost servers.
+		tc := tls.Client(conn, s.cfg.tlsConfig())
+		if err := tc.HandshakeContext(ctx); err != nil {
+			_ = raw.Close()
+			return nil, err
+		}
+		conn = tc
 	}
 
 	c, err := smtp.NewClient(conn, s.cfg.Host)
@@ -140,15 +152,16 @@ func (s *smtpMailer) dial(ctx context.Context) (*smtp.Client, error) {
 	return c, nil
 }
 
-// authenticate runs SMTP AUTH when a mechanism + credentials are configured and
-// the server advertises AUTH.
+// authenticate runs SMTP AUTH when a mechanism is configured. A server that does
+// not advertise AUTH is an error: sending unauthenticated would hide a
+// misconfigured or spoofed relay.
 func (s *smtpMailer) authenticate(c *smtp.Client) error {
 	auth := s.cfg.smtpAuth()
 	if auth == nil {
 		return nil
 	}
 	if ok, _ := c.Extension("AUTH"); !ok {
-		return nil
+		return fmt.Errorf("%w: credentials are configured but the server does not advertise AUTH", ErrInvalidConfig)
 	}
 	return c.Auth(auth)
 }
@@ -167,12 +180,12 @@ func (s *smtpMailer) deliver(c *smtp.Client, m *Message) error {
 	if err != nil {
 		return err
 	}
-	raw, err := encodeMessage(m)
-	if err != nil {
+	bw := bufio.NewWriter(w)
+	if err := writeMessage(bw, m); err != nil {
 		_ = w.Close()
 		return err
 	}
-	if _, err := w.Write(raw); err != nil {
+	if err := bw.Flush(); err != nil {
 		_ = w.Close()
 		return err
 	}
@@ -204,7 +217,7 @@ func (s *smtpMailer) quit(c *smtp.Client) {
 func (s *smtpMailer) withRetry(ctx context.Context, fn func() error) error {
 	attempts := s.cfg.MaxRetries + 1
 	var lastErr error
-	for i := 0; i < attempts; i++ {
+	for i := range attempts {
 		if i > 0 {
 			backoff := time.Duration(1<<uint(i-1)) * 200 * time.Millisecond
 			select {
@@ -233,7 +246,7 @@ func (c Config) smtpAuth() smtp.Auth {
 	case AuthCRAMMD5:
 		return smtp.CRAMMD5Auth(c.Username, c.Password)
 	case AuthLogin:
-		return &loginAuth{username: c.Username, password: c.Password}
+		return &loginAuth{username: c.Username, password: c.Password, host: c.Host}
 	default:
 		return nil
 	}
@@ -245,8 +258,7 @@ func isRetryable(err error) bool {
 	if errors.Is(err, ErrInvalidConfig) {
 		return false
 	}
-	var tp *textproto.Error
-	if errors.As(err, &tp) {
+	if tp, ok := errors.AsType[*textproto.Error](err); ok {
 		return tp.Code >= 400 && tp.Code < 500
 	}
 	return true
@@ -258,14 +270,30 @@ func failRemaining(res *BulkResult, msgs []*Message, from int, err error) {
 	}
 }
 
+// errUnencryptedAuth mirrors net/smtp's PlainAuth refusal.
+var errUnencryptedAuth = fmt.Errorf("%w: refusing to send credentials over an unencrypted connection", ErrInvalidConfig)
+
 // loginAuth implements the SMTP LOGIN mechanism (not provided by net/smtp).
 type loginAuth struct {
 	username string
 	password string
+	host     string
 }
 
-func (a *loginAuth) Start(_ *smtp.ServerInfo) (string, []byte, error) {
+// Start refuses to send the cleartext password without TLS, except to
+// localhost, with the same rules as smtp.PlainAuth.
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, errUnencryptedAuth
+	}
+	if server.Name != a.host {
+		return "", nil, fmt.Errorf("%w: wrong host name %q", ErrInvalidConfig, server.Name)
+	}
 	return "LOGIN", nil, nil
+}
+
+func isLocalhost(name string) bool {
+	return name == "localhost" || name == "127.0.0.1" || name == "::1"
 }
 
 func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
@@ -280,4 +308,31 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("mail: unexpected LOGIN challenge %q", string(fromServer))
 	}
+}
+
+// idleDeadlineConn renews the deadline on every read/write so Timeout bounds each
+// SMTP exchange instead of the whole connection (bulk sends outlive a single Timeout).
+// A context deadline, when present, stays the hard limit.
+type idleDeadlineConn struct {
+	net.Conn
+	timeout time.Duration
+	limit   time.Time
+}
+
+func (c *idleDeadlineConn) extend() {
+	dl := time.Now().Add(c.timeout)
+	if !c.limit.IsZero() && c.limit.Before(dl) {
+		dl = c.limit
+	}
+	_ = c.Conn.SetDeadline(dl)
+}
+
+func (c *idleDeadlineConn) Read(p []byte) (int, error) {
+	c.extend()
+	return c.Conn.Read(p)
+}
+
+func (c *idleDeadlineConn) Write(p []byte) (int, error) {
+	c.extend()
+	return c.Conn.Write(p)
 }

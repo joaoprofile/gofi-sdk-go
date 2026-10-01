@@ -9,9 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
 )
 
 const testDriver = "query-testdriver"
@@ -67,26 +66,6 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 	dest[0] = "value"
 	return nil
 }
-
-// fakeConnDriver implements connection.Driver — used only for connection package tests
-// that need a Driver; the query package tests use *sql.DB directly.
-type fakeConnDriver struct{}
-
-func (d fakeConnDriver) Name() connection.DriverName    { return connection.DriverName(testDriver) }
-func (d fakeConnDriver) DSN(connection.Settings) string { return "" }
-func (d fakeConnDriver) Open(cfg connection.Config) (*sql.DB, error) {
-	return sql.Open(testDriver, cfg.DSN)
-}
-func (d fakeConnDriver) ParseError(err error) error   { return err }
-func (d fakeConnDriver) Dialect() sqln_driver.Dialect { return fakeDialect{} }
-
-type fakeDialect struct{}
-
-func (fakeDialect) Param(_ int) string                                     { return "?" }
-func (fakeDialect) Like(f, p string) string                                { return f + " LIKE " + p }
-func (fakeDialect) NotLike(f, p string) string                             { return f + " NOT LIKE " + p }
-func (fakeDialect) BuildPagination(q, _ string, _ uint16, _ uint64) string { return q }
-func (fakeDialect) BuildCount(q string) string                             { return "SELECT COUNT(*) FROM (" + q + ") t" }
 
 // Helpers
 

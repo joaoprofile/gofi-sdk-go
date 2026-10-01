@@ -1,15 +1,16 @@
 package sqln
 
 import (
-	"github.com/joaoprofile/gofi/sqln/criteria"
-	"github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 // BuildClause compiles a predicate slice into a SQL WHERE fragment and its bound parameters.
 // The fragment does NOT include the WHERE keyword — designed for embedding into an existing
 // base query (e.g., base + " AND ( " + clause + " )").
 // Adjacent predicates without an explicit And()/Or() connector are implicitly joined with AND.
-func BuildClause(predicates []Predicate, dialect driver.FilterDialect) (string, []any) {
+// It fails with criteria.ErrInvalidField when a field is not a column reference.
+func BuildClause(predicates []Predicate, dialect driver.FilterDialect) (string, []any, error) {
 	return criteria.BuildClause(predicates, dialect)
 }
 
@@ -32,8 +33,9 @@ func CriteriaFrom(table, alias string) *CriteriaQuery {
 
 // Order Helpers
 
-// Asc creates an ascending ORDER BY expression for criteria queries.
+// Asc creates an ascending ORDER BY expression for criteria queries; a field
+// that is not a column reference fails the build unless marked Raw.
 func Asc(field string) CriteriaOrder { return criteria.Asc(field) }
 
-// Desc creates a descending ORDER BY expression for criteria queries.
+// Desc creates a descending ORDER BY expression for criteria queries; see Asc.
 func Desc(field string) CriteriaOrder { return criteria.Desc(field) }

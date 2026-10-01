@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/criteria"
-	"github.com/joaoprofile/gofi/sqln/pagination"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/criteria"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/pagination"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -145,6 +145,29 @@ func TestResolveFromCriteria_WithPage_UsesBuildBase(t *testing.T) {
 	assert.NotNil(t, result)
 }
 
+// A request-supplied criteria field that is not a column fails every execution
+// path before any SQL reaches the database.
+func TestFindFromCriteria_InvalidFieldFailsWithoutQuerying(t *testing.T) {
+	setupGlobal(t, "struct-rows")
+	resetRecordedQueries(t)
+	ctx := context.Background()
+	payload := "id; DROP TABLE users"
+	bad := func() *CriteriaQuery { return CriteriaFrom("t", "").Where(criteria.Eq(payload, 1)) }
+
+	_, err := FindFromCriteria[mappedItem](ctx, bad()).List()
+	assert.ErrorIs(t, err, criteria.ErrInvalidField)
+	_, err = FindFromCriteria[mappedItem](ctx, bad()).UniqueResult()
+	assert.ErrorIs(t, err, criteria.ErrInvalidField)
+	_, err = FindFromCriteria[mappedItem](ctx, bad()).WithPage(NewPageRequest(0, 10, nil)).PagedList()
+	assert.ErrorIs(t, err, criteria.ErrInvalidField)
+	_, err = FindFromCriteria[mappedItem](ctx, CriteriaFrom("t", "").OrderBy(Asc(payload))).List()
+	assert.ErrorIs(t, err, criteria.ErrInvalidField)
+	for _, err := range FindFromCriteria[mappedItem](ctx, bad()).All() {
+		assert.ErrorIs(t, err, criteria.ErrInvalidField)
+	}
+	assert.Empty(t, recorded(t), "no query may reach the database")
+}
+
 // Re-export smoke tests — one call each confirms the wrapper is wired
 func TestReExports_Statement(t *testing.T) {
 	setupGlobal(t, "ok")
@@ -166,7 +189,8 @@ func TestReExports_Pagination(t *testing.T) {
 	pr := NewPageRequest(1, 10, []Sort{s})
 	assert.Equal(t, uint16(1), pr.Page)
 
-	pr2 := NewPageRequestFilter(nil)
+	pr2, err := NewPageRequestFilter(nil, nil)
+	assert.NoError(t, err)
 	assert.NotNil(t, pr2)
 }
 
@@ -183,18 +207,22 @@ func TestReExports_Filter(t *testing.T) {
 	fs := NewFilters()
 	assert.NotNil(t, fs)
 
-	// NewQueryBuild resolves the dialect from the active global connection.
+	// A nil dialect resolves from the active global connection.
 	setupGlobal(t, "ok")
-	qp := NewQueryBuild("SELECT 1", fs)
+	qp, err := BuildQuery("SELECT 1", nil, fs, nil, nil)
+	assert.NoError(t, err)
 	assert.NotNil(t, qp)
 }
 
-func TestReExports_NewQueryBuildWithDialect(t *testing.T) {
+func TestReExports_BuildQuery(t *testing.T) {
 	setupGlobal(t, "ok")
 	fs := NewFilters().Add(NewFilter("status", Eq, "active"))
-	qp := NewQueryBuildWithDialect("SELECT 1 WHERE 1=1", fs, fakeDialect{})
-	assert.NotNil(t, qp)
+	qp, err := BuildQuery("SELECT 1 WHERE 1=1", nil, fs, AllowColumns("status"), fakeDialect{})
+	require.NoError(t, err)
 	assert.Contains(t, qp.Query, "status")
+
+	_, err = BuildQuery("SELECT 1 WHERE 1=1", nil, fs, FilterMapping{}, fakeDialect{})
+	assert.ErrorIs(t, err, ErrInvalidFilter)
 }
 
 func TestReExports_Cache(t *testing.T) {
@@ -211,7 +239,7 @@ func TestReExports_Cache(t *testing.T) {
 
 func TestReExports_BuildClause(t *testing.T) {
 	predicates := []Predicate{criteria.Eq("id", 1)}
-	clause, params := BuildClause(predicates, fakeDialect{})
+	clause, params := built(t)(BuildClause(predicates, fakeDialect{}))
 	assert.NotEmpty(t, clause)
 	assert.Len(t, params, 1)
 }
@@ -231,10 +259,16 @@ func TestNewPageRequestFilter_WithNonNilParams(t *testing.T) {
 	fs.Params.SortField = "name"
 	fs.Params.SortDirection = "DESC"
 
-	pr := NewPageRequestFilter(fs)
-	require.NotNil(t, pr)
+	m := FilterMapping{"name": {Column: "c.full_name", Sortable: true}}
+	pr, err := NewPageRequestFilter(fs, m)
+	require.NoError(t, err)
 	assert.Equal(t, uint16(2), pr.Page)
 	assert.Equal(t, uint16(20), pr.Limit)
+	assert.Equal(t, "c.full_name DESC", pr.GetOrder(), "sort field resolved through the mapping")
+
+	fs.Params.SortField = "password_hash"
+	_, err = NewPageRequestFilter(fs, m)
+	assert.ErrorIs(t, err, ErrInvalidFilter, "unmapped sort fields are rejected")
 }
 
 // List / Execute / UniqueResult — nil conn branch is dead code

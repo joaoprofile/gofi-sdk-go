@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/cache"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	"github.com/joaoprofile/gofi/sqln/filter"
-	"github.com/joaoprofile/gofi/sqln/pagination"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/filter"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/pagination"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

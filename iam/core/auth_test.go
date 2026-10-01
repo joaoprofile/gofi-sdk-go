@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,9 +54,11 @@ type stubTokenPort struct {
 	tokenErr    error
 	claims      *types.Claims
 	parseErr    error
+	issued      []types.Claims
 }
 
-func (s *stubTokenPort) IssueAccessToken(_ types.Claims) (string, error) {
+func (s *stubTokenPort) IssueAccessToken(c types.Claims) (string, error) {
+	s.issued = append(s.issued, c)
 	return s.accessToken, s.tokenErr
 }
 func (s *stubTokenPort) IssueRefreshToken(_ types.Claims) (string, error) {
@@ -77,6 +79,7 @@ func buildLocalAuth(
 		accessTokenTTL:  15 * time.Minute,
 		refreshTokenTTL: 7 * 24 * time.Hour,
 		issuer:          "test-issuer",
+		ticketKey:       ticketKey,
 	}
 	auth := NewLocalAuth(LocalAuthConfig{
 		User:    user,
@@ -152,7 +155,7 @@ func TestLocalAuth_SelectTenant_Success(t *testing.T) {
 	auth, sess := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID:   "u1",
+		UserID: "u1", Ticket: testTicket("u1"),
 		TenantID: "t1",
 		Module:   "mod",
 	})
@@ -182,22 +185,24 @@ func TestLocalAuth_SelectTenant_PropagatesExtra(t *testing.T) {
 	auth, sess := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID:   "u1",
-		TenantID: "t1",
-		Module:   "mod",
-		Extra: map[string]string{
-			"name":      "Joao",
-			"managerId": "mgr-42",
-			"role":      "ADMIN",
-		},
+		UserID: "u1", Ticket: testTicket("u1"),
+		TenantID:     "t1",
+		Module:       "mod",
+		ClaimsExtra:  map[string]string{"managerId": "mgr-42", "role": "ADMIN"},
+		SessionExtra: map[string]string{"extToken": "secret-org-token"},
 	})
 	require.NoError(t, err)
 
 	stored, err := sess.Get(context.Background(), session.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "Joao", stored.Extra["name"])
-	assert.Equal(t, "mgr-42", stored.Extra["managerId"])
-	assert.Equal(t, "ADMIN", stored.Extra["role"])
+	assert.Equal(t, "mgr-42", stored.ClaimsExtra["managerId"])
+	assert.Equal(t, "ADMIN", stored.ClaimsExtra["role"])
+	assert.Equal(t, "secret-org-token", stored.SessionExtra["extToken"])
+
+	// Only ClaimsExtra reaches the token: SessionExtra is readable by no bearer.
+	issued := token.issued[len(token.issued)-1]
+	assert.Equal(t, map[string]any{"managerId": "mgr-42", "role": "ADMIN"}, issued.Extra)
+	assert.NotContains(t, issued.Extra, "extToken")
 }
 
 func TestLocalAuth_SelectTenant_AccessDenied(t *testing.T) {
@@ -207,7 +212,7 @@ func TestLocalAuth_SelectTenant_AccessDenied(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, token)
 
 	_, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID:   "u1",
+		UserID: "u1", Ticket: testTicket("u1"),
 		TenantID: "t1",
 	})
 	assert.ErrorIs(t, err, ErrTenantAccessDenied)
@@ -222,7 +227,7 @@ func TestLocalAuth_SelectTenant_TokenIssueError(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, token)
 
 	_, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID:   "u1",
+		UserID: "u1", Ticket: testTicket("u1"),
 		TenantID: "t1",
 	})
 	assert.Error(t, err)
@@ -235,7 +240,7 @@ func TestLocalAuth_Logout_Success(t *testing.T) {
 	auth, sess := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -264,7 +269,7 @@ func TestLocalAuth_RefreshToken_Success(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -283,7 +288,7 @@ func TestLocalAuth_RefreshToken_RevokedSession(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -304,13 +309,14 @@ func TestLocalAuth_RefreshToken_ExpiredSession(t *testing.T) {
 		accessTokenTTL:  15 * time.Minute,
 		refreshTokenTTL: -1 * time.Second, // already expired
 		issuer:          "test",
+		ticketKey:       ticketKey,
 	}
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: token, Session: sess, Cfg: cfg,
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -335,7 +341,7 @@ func TestLocalAuth_RefreshToken_HashMismatch(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, token)
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -349,7 +355,7 @@ func TestLocalAuth_ValidateToken_Success(t *testing.T) {
 	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
 	tenant := &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}}}}
 	sess := newMemSession()
-	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, issuer: "test"}
+	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, issuer: "test", ticketKey: ticketKey}
 
 	tokenPort := &captureSessionIDTokenPort{accessToken: "my-access-token"}
 	auth := NewLocalAuth(LocalAuthConfig{
@@ -357,7 +363,7 @@ func TestLocalAuth_ValidateToken_Success(t *testing.T) {
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -422,14 +428,14 @@ func TestLocalAuth_ValidateToken_RevokedSession(t *testing.T) {
 	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
 	tenant := &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}}}}
 	sess := newMemSession()
-	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, issuer: "test"}
+	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, issuer: "test", ticketKey: ticketKey}
 	tokenPort := &captureSessionIDTokenPort{accessToken: "tok"}
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: tokenPort, Session: sess, Cfg: cfg,
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -438,6 +444,7 @@ func TestLocalAuth_ValidateToken_RevokedSession(t *testing.T) {
 
 	tokenPort.parseClaims = &types.Claims{
 		UserID:    "u1",
+		TenantID:  "t1",
 		SessionID: session.ID,
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
@@ -450,19 +457,20 @@ func TestLocalAuth_ValidateToken_ExpiredSession(t *testing.T) {
 	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
 	tenant := &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}}}}
 	sess := newMemSession()
-	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: -time.Second, issuer: "test"}
+	cfg := AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: -time.Second, issuer: "test", ticketKey: ticketKey}
 	tokenPort := &captureSessionIDTokenPort{accessToken: "tok"}
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: tokenPort, Session: sess, Cfg: cfg,
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
 	tokenPort.parseClaims = &types.Claims{
 		UserID:    "u1",
+		TenantID:  "t1",
 		SessionID: session.ID,
 		ExpiresAt: time.Now().Add(time.Hour),
 	}

@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipUnderRace works around a benign upstream race in golang-migrate timing fields.
+func skipUnderRace(t *testing.T) {
+	t.Helper()
+	if raceEnabled {
+		t.Skip("golang-migrate upstream data race on Migration timing fields")
+	}
+}
+
 // Embedded test migrations (used by runEmbedded tests)
 
 //go:embed testdata/migrations
@@ -39,10 +47,11 @@ type fakeDatabaseDriver struct {
 	dirty      bool
 	versionErr error
 	runErr     error
+	closed     bool
 }
 
 func (f *fakeDatabaseDriver) Open(_ string) (database.Driver, error) { return f, nil }
-func (f *fakeDatabaseDriver) Close() error                           { return nil }
+func (f *fakeDatabaseDriver) Close() error                           { f.closed = true; return nil }
 func (f *fakeDatabaseDriver) Lock() error                            { return nil }
 func (f *fakeDatabaseDriver) Unlock() error                          { return nil }
 func (f *fakeDatabaseDriver) Drop() error                            { return nil }
@@ -125,18 +134,31 @@ func TestRun_InstanceError_ReturnsError(t *testing.T) {
 	assert.ErrorIs(t, err, instanceErr)
 }
 
-func TestRun_WithRegisteredDriver_CallsRunFilesystem(t *testing.T) {
-	// Run always delegates to runFilesystem because the FS self-comparison
-	// (cfg.FS != cfg.FS) is always false. A missing migration directory is
-	// enough to confirm the delegation path was reached.
+func TestRun_FilesystemPath(t *testing.T) {
+	skipUnderRace(t)
 	dir := writeMigrationFiles(t)
-	fakeDB := &fakeDatabaseDriver{version: database.NilVersion}
-	d := &fakeMigrateDriver{name: "driver-run-filesystem", instanceDB: fakeDB}
+	d := &fakeMigrateDriver{name: "driver-run-filesystem", instanceDB: &fakeDatabaseDriver{version: database.NilVersion}}
 	RegisterDriver(d)
 
-	cfg := Config{Path: dir}
-	err := Run(&sql.DB{}, "driver-run-filesystem", cfg)
-	require.NoError(t, err)
+	require.NoError(t, Run(&sql.DB{}, "driver-run-filesystem", Config{Path: dir}))
+}
+
+func TestRun_UsesEmbeddedFS(t *testing.T) {
+	skipUnderRace(t)
+	t.Chdir(t.TempDir()) // the path now exists only inside the embedded FS
+	d := &fakeMigrateDriver{name: "driver-run-embedded", instanceDB: &fakeDatabaseDriver{version: database.NilVersion}}
+	RegisterDriver(d)
+
+	require.NoError(t, Run(&sql.DB{}, "driver-run-embedded", Config{FS: testMigrationsFS, Path: "testdata/migrations"}))
+}
+
+func TestRun_EmbeddedFSWithoutPathFallsBackToFilesystem(t *testing.T) {
+	skipUnderRace(t)
+	dir := writeMigrationFiles(t)
+	d := &fakeMigrateDriver{name: "driver-run-fallback", instanceDB: &fakeDatabaseDriver{version: database.NilVersion}}
+	RegisterDriver(d)
+
+	require.NoError(t, Run(&sql.DB{}, "driver-run-fallback", Config{FS: testMigrationsFS, Path: dir}))
 }
 
 // filesystem.go — runFilesystem
@@ -149,6 +171,7 @@ func TestRunFilesystem_NonExistentPath_ReturnsError(t *testing.T) {
 }
 
 func TestRunFilesystem_Success(t *testing.T) {
+	skipUnderRace(t)
 	dir := writeMigrationFiles(t)
 	fakeDB := &fakeDatabaseDriver{version: database.NilVersion}
 	err := runFilesystem("test-db", Config{Path: dir}, fakeDB)
@@ -202,6 +225,7 @@ func TestRunEmbedded_EmptyFS_ReturnsError(t *testing.T) {
 }
 
 func TestRunEmbedded_Success(t *testing.T) {
+	skipUnderRace(t)
 	cfg := Config{FS: testMigrationsFS, Path: "testdata/migrations"}
 	fakeDB := &fakeDatabaseDriver{version: database.NilVersion}
 	err := runEmbedded(nil, "test-db", cfg, fakeDB)

@@ -4,18 +4,60 @@ import (
 	"context"
 	"strings"
 
-	"github.com/joaoprofile/gofi/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
+// GRPCOption configures the auth interceptors.
+type GRPCOption func(*grpcOptions)
+
+type grpcOptions struct {
+	publicPrefixes []string
+}
+
+// WithPublicReflection lets server reflection through without a token. Off by
+// default: reflection lists every service and method to anyone.
+func WithPublicReflection() GRPCOption {
+	return WithPublicMethods("/grpc.reflection.")
+}
+
+// WithPublicMethods lets full method names with any of the prefixes through
+// without a token (e.g. "/pkg.Service/Method" or "/pkg.Service/").
+func WithPublicMethods(prefixes ...string) GRPCOption {
+	return func(o *grpcOptions) { o.publicPrefixes = append(o.publicPrefixes, prefixes...) }
+}
+
+func newGRPCOptions(opts []GRPCOption) *grpcOptions {
+	// Health checks (Kubernetes gRPC probes) are always public.
+	o := &grpcOptions{publicPrefixes: []string{"/grpc.health.v1.Health/"}}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o
+}
+
+func (o *grpcOptions) isPublic(fullMethod string) bool {
+	for _, p := range o.publicPrefixes {
+		if strings.HasPrefix(fullMethod, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // AuthInterceptor is the gRPC equivalent of AuthMiddleware for unary RPCs.
 // Validates the token from the "authorization: Bearer" metadata entry.
 // Injects the claims into the context for use in gRPC handlers.
-func AuthInterceptor(svc *core.IAMService) grpc.UnaryServerInterceptor {
+// Only health checks are public unless opts add more (see WithPublicReflection).
+func AuthInterceptor(svc *core.IAMService, opts ...GRPCOption) grpc.UnaryServerInterceptor {
+	o := newGRPCOptions(opts)
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if o.isPublic(info.FullMethod) {
+			return handler(ctx, req)
+		}
 		ctx, err := authenticateGRPC(ctx, svc)
 		if err != nil {
 			return nil, err
@@ -25,8 +67,12 @@ func AuthInterceptor(svc *core.IAMService) grpc.UnaryServerInterceptor {
 }
 
 // AuthStreamInterceptor is the gRPC equivalent of AuthMiddleware for streaming RPCs.
-func AuthStreamInterceptor(svc *core.IAMService) grpc.StreamServerInterceptor {
+func AuthStreamInterceptor(svc *core.IAMService, opts ...GRPCOption) grpc.StreamServerInterceptor {
+	o := newGRPCOptions(opts)
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if o.isPublic(info.FullMethod) {
+			return handler(srv, ss)
+		}
 		ctx, err := authenticateGRPC(ss.Context(), svc)
 		if err != nil {
 			return err

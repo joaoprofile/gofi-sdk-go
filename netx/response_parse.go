@@ -1,12 +1,14 @@
 package netx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
-	"github.com/joaoprofile/gofi/base/errs"
+	"github.com/gofi-labs/gofi-sdk-go/base/errs"
 )
 
 var (
@@ -57,6 +59,10 @@ func RespondError(w http.ResponseWriter, r *http.Request, appErr errs.AppError) 
 		status = http.StatusBadRequest
 	case appErr.IsUnauthorized():
 		status = http.StatusUnauthorized
+	case appErr.IsForbidden():
+		status = http.StatusForbidden
+	case appErr.IsExternalError():
+		status = http.StatusBadGateway
 	default:
 		status = http.StatusInternalServerError
 	}
@@ -68,11 +74,16 @@ func RespondError(w http.ResponseWriter, r *http.Request, appErr errs.AppError) 
 		Kind:       string(appErr.Kind),
 		Details:    appErr.Details,
 	}
-	if appErr.Err != nil {
-		response.Cause = appErr.Err.Error()
-	}
 
-	logAppError(r, status, appErr, response.Cause)
+	// The wrapped cause may hold SQL or driver details; it is always logged.
+	var cause string
+	if appErr.Err != nil {
+		cause = appErr.Err.Error()
+	}
+	if exposeCause(r) {
+		response.Cause = cause
+	}
+	logAppError(r, status, appErr, cause)
 
 	payload, marshalErr := json.Marshal(response)
 	if marshalErr != nil {
@@ -95,7 +106,9 @@ func logAppError(r *http.Request, status int, appErr errs.AppError, cause string
 	if cause != "" {
 		attrs = append(attrs, slog.String("cause", cause))
 	}
+	ctx := context.Background()
 	if r != nil {
+		ctx = r.Context()
 		attrs = append(attrs,
 			slog.String("http.method", r.Method),
 			slog.String("http.path", r.URL.Path),
@@ -106,10 +119,10 @@ func logAppError(r *http.Request, status int, appErr errs.AppError, cause string
 	if status >= http.StatusInternalServerError {
 		level = slog.LevelError
 	}
-	slog.Default().Log(nil, level, "http error response", attrs...)
+	slog.Default().Log(ctx, level, "http error response", attrs...)
 }
 
-func Response(w http.ResponseWriter, statusCode int, data interface{}) {
+func Response(w http.ResponseWriter, statusCode int, data any) {
 	setJSONHeader(w)
 
 	payload, err := json.Marshal(data)
@@ -122,18 +135,36 @@ func Response(w http.ResponseWriter, statusCode int, data interface{}) {
 	safeWrite(w, payload)
 }
 
+// Error writes err as an ErrorResponse. A *RequestError (ParseRequestBody,
+// BindQueryParamsToStruct) sets its own status and client-safe message. For
+// status >= 500 the client gets a generic message and err is only logged.
 func Error(w http.ResponseWriter, statusCode int, err error) {
 	writeError(w, statusCode, err, nil)
 }
 
+// ErrorDetails writes message and details; for status >= 500 both are
+// replaced by a generic message and logged.
 func ErrorDetails(w http.ResponseWriter, statusCode int, message string, details any) {
 	writeError(w, statusCode, errors.New(message), details)
 }
 
 func writeError(w http.ResponseWriter, statusCode int, err error, details any) {
+	message := genericMessage(statusCode)
+	var reqErr *RequestError
+	switch {
+	case errors.As(err, &reqErr):
+		statusCode, message = reqErr.Status, reqErr.Message
+	case err != nil:
+		message = err.Error()
+	}
+	if statusCode >= http.StatusInternalServerError {
+		slog.Error("http error response", slog.Int("http.status", statusCode), slog.Any("error", err))
+		message, details = genericMessage(statusCode), nil
+	}
+
 	response := ErrorResponse{
 		StatusCode: statusCode,
-		Message:    err.Error(),
+		Message:    message,
 		Details:    details,
 	}
 
@@ -146,6 +177,14 @@ func writeError(w http.ResponseWriter, statusCode int, err error, details any) {
 	setJSONHeader(w)
 	w.WriteHeader(statusCode)
 	safeWrite(w, payload)
+}
+
+// genericMessage is the lower-case status text, e.g. "internal server error".
+func genericMessage(status int) string {
+	if text := http.StatusText(status); text != "" {
+		return strings.ToLower(text)
+	}
+	return "error"
 }
 
 func internalError(w http.ResponseWriter) {

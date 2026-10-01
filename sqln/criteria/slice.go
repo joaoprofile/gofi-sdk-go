@@ -1,7 +1,9 @@
 package criteria
 
-// toSlice normalises the common typed-slice variants into []any.
-// Returns (nil, false) when value is not a recognised slice type.
+import "reflect"
+
+// toSlice normalises any slice (except []byte, a scalar) into []any; common
+// types skip reflection. Returns (nil, false) for non-slices.
 func toSlice(value any) ([]any, bool) {
 	switch v := value.(type) {
 
@@ -44,5 +46,13 @@ func toSlice(value any) ([]any, bool) {
 		return out, true
 	}
 
-	return nil, false
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Slice || rv.Type().Elem().Kind() == reflect.Uint8 {
+		return nil, false
+	}
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out, true
 }

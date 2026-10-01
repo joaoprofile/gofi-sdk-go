@@ -2,10 +2,13 @@ package netx
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/time/rate"
 )
 
@@ -22,6 +25,42 @@ const (
 	defaultRateLimit  = 10              // request per second
 )
 
+// Client limits applied when the matching field is <= 0.
+const (
+	// DefaultMaxResponseBytes caps a decoded success body.
+	DefaultMaxResponseBytes int64 = 10 << 20
+	// DefaultMaxRetryAfter caps the wait a server can impose via Retry-After.
+	DefaultMaxRetryAfter = 30 * time.Second
+	// maxErrorBodyBytes is how much of an error body is kept in HttpError.Err.
+	maxErrorBodyBytes = 64 << 10
+	// maxBufferedRequestBytes is how much of an io.Reader body is buffered so
+	// it can be retried and signed; larger bodies stream without retries.
+	maxBufferedRequestBytes = 1 << 20
+	// maxRedirects matches net/http's default.
+	maxRedirects = 10
+)
+
+// ErrRedirectBlocked is returned when a server redirects to another scheme or
+// host: following it would resend custom credential headers (X-API-Key,
+// X-Amz-Security-Token, ...) to a third party. Same-origin redirects and the
+// http→https upgrade on the same host are followed.
+var ErrRedirectBlocked = errors.New("netx: redirect to a different origin blocked")
+
+// sameOriginRedirect is the http.Client CheckRedirect installed by NewClient.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("netx: stopped after %d redirects", maxRedirects)
+	}
+	from, to := via[0].URL, req.URL
+	upgrade := from.Scheme == "http" && to.Scheme == "https"
+	if !strings.EqualFold(from.Hostname(), to.Hostname()) ||
+		(to.Scheme != from.Scheme && !upgrade) ||
+		(to.Port() != from.Port() && !upgrade) {
+		return fmt.Errorf("%w: %s -> %s://%s", ErrRedirectBlocked, from.Host, to.Scheme, to.Host)
+	}
+	return nil
+}
+
 type HttpClientConfig struct {
 	Name       string
 	BaseURL    string
@@ -35,6 +74,12 @@ type HttpClientConfig struct {
 	// retrying in place holds the worker for the whole backoff and issues requests
 	// the limiter never authorized, which fights the limiter instead of helping it.
 	DisableRetryOn429 bool
+	// MaxResponseBytes caps a success body; larger ones fail with
+	// ErrResponseTooLarge. <= 0 uses DefaultMaxResponseBytes.
+	MaxResponseBytes int64
+	// MaxRetryAfter caps the Retry-After wait of a 429. <= 0 uses
+	// DefaultMaxRetryAfter.
+	MaxRetryAfter time.Duration
 }
 
 type HttpClient struct {
@@ -45,10 +90,11 @@ type HttpClient struct {
 	DisableRetryOn429 bool
 	Client            *http.Client
 	RateLimit         int
-	limiter           *rate.Limiter
-	limiterOnce       sync.Once
-	cb                any
-	// *circuitbreaker.CircuitBreaker
+	// MaxResponseBytes and MaxRetryAfter: see HttpClientConfig.
+	MaxResponseBytes int64
+	MaxRetryAfter    time.Duration
+	limiter          *rate.Limiter
+	limiterOnce      sync.Once
 }
 
 func (c *HttpClient) rateLimiter() *rate.Limiter {
@@ -88,8 +134,10 @@ func NewClient(config *HttpClientConfig) (*HttpClient, error) {
 	transport.IdleConnTimeout = 90 * time.Second
 
 	client := &http.Client{
-		Timeout:   config.Timeout,
-		Transport: transport,
+		Timeout:       config.Timeout,
+		CheckRedirect: sameOriginRedirect,
+		// Propagates traceparent and records client spans/metrics.
+		Transport: otelhttp.NewTransport(transport),
 	}
 
 	if config.RateLimit == 0 {
@@ -104,6 +152,8 @@ func NewClient(config *HttpClientConfig) (*HttpClient, error) {
 		DisableRetryOn429: config.DisableRetryOn429,
 		Client:            client,
 		RateLimit:         config.RateLimit,
+		MaxResponseBytes:  config.MaxResponseBytes,
+		MaxRetryAfter:     config.MaxRetryAfter,
 		limiter:           rate.NewLimiter(rate.Limit(config.RateLimit), config.RateLimit),
 	}, nil
 }

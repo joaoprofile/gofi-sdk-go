@@ -3,6 +3,7 @@ package timezone
 import (
 	"fmt"
 	"time"
+	_ "time/tzdata" // IANA database for images without /usr/share/zoneinfo
 )
 
 // BrazilName is the IANA name for Brazil's primary timezone and the default
@@ -12,31 +13,25 @@ const BrazilName = "America/Sao_Paulo"
 // Config configures the process-wide local timezone.
 type Config struct {
 	// Name is the IANA timezone name (e.g. "America/Sao_Paulo"). When empty,
-	// BrazilName is used.
+	// UTC is used.
 	Name string
 }
 
-// Apply sets time.Local from the configured timezone.
-//
-// When Name is empty (or BrazilName) it defaults to Brazil; if Brazil's tzdata
-// cannot be loaded it falls back to a fixed UTC-3 zone and returns nil. A
-// non-empty but invalid Name returns an error and leaves time.Local untouched.
+// Apply sets time.Local from the configured timezone. An empty Name selects
+// UTC; an invalid Name returns an error and leaves time.Local untouched. The
+// IANA database is embedded, so names resolve in scratch/distroless images.
 func Apply(cfg Config) error {
-	name := cfg.Name
-	if name == "" || name == BrazilName {
-		loc, err := time.LoadLocation(BrazilName)
-		if err != nil {
-			time.Local = time.FixedZone("UTC-3", -3*60*60)
-			return nil
+	loc := time.UTC
+	if cfg.Name != "" && cfg.Name != "UTC" {
+		var err error
+		if loc, err = time.LoadLocation(cfg.Name); err != nil {
+			return fmt.Errorf("invalid timezone: %w", err)
 		}
+	}
+	// time.Local is read by every time.Now: only write it when it changes, so a
+	// repeated Apply does not race with running goroutines.
+	if time.Local.String() != loc.String() {
 		time.Local = loc
-		return nil
 	}
-
-	loc, err := time.LoadLocation(name)
-	if err != nil {
-		return fmt.Errorf("invalid timezone: %w", err)
-	}
-	time.Local = loc
 	return nil
 }

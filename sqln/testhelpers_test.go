@@ -8,11 +8,12 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/joaoprofile/gofi/sqln/cache"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 const testDriverName = "sqln-manager-testdriver"
@@ -43,6 +44,17 @@ func (d *fakeDriver) Open(name string) (driver.Conn, error) {
 			cols: []string{"id", "name"},
 			rows: [][]driver.Value{{int64(1), "Emilia"}},
 		}, nil
+	case "slow-rows":
+		return &fakeConn{
+			cols:  []string{"id", "name"},
+			rows:  [][]driver.Value{{int64(1), "a"}},
+			delay: 50 * time.Millisecond,
+		}, nil
+	case "multi-rows":
+		return &fakeConn{
+			cols: []string{"id", "name"},
+			rows: [][]driver.Value{{int64(1), "a"}, {int64(2), "b"}, {int64(3), "c"}},
+		}, nil
 	case "count-rows":
 		// Returns a single int64 column — used for both COUNT queries (pageTotal)
 		// and scalar list queries (fetchPagedList with scalarItem = int64).
@@ -50,26 +62,39 @@ func (d *fakeDriver) Open(name string) (driver.Conn, error) {
 			cols: []string{"count"},
 			rows: [][]driver.Value{{int64(5)}},
 		}, nil
+	case "block":
+		return &blockingConn{}, nil
 	default: // "ok", "no-rows", etc.
 		return &fakeConn{cols: []string{"id"}, rows: nil}, nil
 	}
 }
 
 type fakeConn struct {
-	cols []string
-	rows [][]driver.Value
+	cols  []string
+	rows  [][]driver.Value
+	delay time.Duration
 }
 
 func (c *fakeConn) Prepare(query string) (driver.Stmt, error) {
 	recordQuery(query)
-	return &fakeStmt{cols: c.cols, rows: c.rows}, nil
+	return &fakeStmt{cols: c.cols, rows: c.rows, delay: c.delay}, nil
 }
 func (c *fakeConn) Close() error              { return nil }
 func (c *fakeConn) Begin() (driver.Tx, error) { return &fakeTx{}, nil }
 
+// blockingConn answers queries only when their context ends, like a query
+// stuck on a lock; pings succeed.
+type blockingConn struct{ fakeConn }
+
+func (c *blockingConn) QueryContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 type fakeStmt struct {
-	cols []string
-	rows [][]driver.Value
+	cols  []string
+	rows  [][]driver.Value
+	delay time.Duration
 }
 
 func (s *fakeStmt) Close() error  { return nil }
@@ -78,6 +103,7 @@ func (s *fakeStmt) Exec(_ []driver.Value) (driver.Result, error) {
 	return driver.RowsAffected(1), nil
 }
 func (s *fakeStmt) Query(_ []driver.Value) (driver.Rows, error) {
+	time.Sleep(s.delay)
 	return &fakeRows{cols: s.cols, rows: s.rows}, nil
 }
 
@@ -235,4 +261,15 @@ func txContext(t *testing.T, db *sql.DB) context.Context {
 	ctx := context.WithValue(context.Background(), SqlTxContextKey, tx)
 	t.Cleanup(func() { _ = tx.Rollback() })
 	return ctx
+}
+
+// built fails the test on a build error and returns the SQL and its parameters.
+func built(t testing.TB) func(string, []any, error) (string, []any) {
+	return func(sql string, params []any, err error) (string, []any) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		return sql, params
+	}
 }

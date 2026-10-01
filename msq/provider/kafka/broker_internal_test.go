@@ -4,12 +4,14 @@ package kafka
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +62,7 @@ func (m *mockClaim) Messages() <-chan *sarama.ConsumerMessage { return m.message
 
 type mockSession struct {
 	markedCount int
+	ctx         context.Context
 }
 
 func (m *mockSession) Claims() map[string][]int32                       { return nil }
@@ -69,13 +72,19 @@ func (m *mockSession) MarkOffset(_ string, _ int32, _ int64, _ string)  {}
 func (m *mockSession) Commit()                                          {}
 func (m *mockSession) ResetOffset(_ string, _ int32, _ int64, _ string) {}
 func (m *mockSession) MarkMessage(_ *sarama.ConsumerMessage, _ string)  { m.markedCount++ }
-func (m *mockSession) Context() context.Context                         { return context.Background() }
+func (m *mockSession) Context() context.Context {
+	if m.ctx != nil {
+		return m.ctx
+	}
+	return context.Background()
+}
 
 // Mock: sarama.ConsumerGroup
 
 type mockConsumerGroup struct {
 	consumeErr error
 	closed     bool
+	pausedAll  atomic.Bool
 }
 
 func (m *mockConsumerGroup) Consume(ctx context.Context, _ []string, _ sarama.ConsumerGroupHandler) error {
@@ -86,35 +95,35 @@ func (m *mockConsumerGroup) Errors() <-chan error        { return nil }
 func (m *mockConsumerGroup) Close() error                { m.closed = true; return nil }
 func (m *mockConsumerGroup) Pause(_ map[string][]int32)  {}
 func (m *mockConsumerGroup) Resume(_ map[string][]int32) {}
-func (m *mockConsumerGroup) PauseAll()                   {}
-func (m *mockConsumerGroup) ResumeAll()                  {}
+func (m *mockConsumerGroup) PauseAll()                   { m.pausedAll.Store(true) }
+func (m *mockConsumerGroup) ResumeAll()                  { m.pausedAll.Store(false) }
 
 // Producer tests
 
 func TestKafkaProducerSendMessage(t *testing.T) {
 	p := &kafkaProducer{producer: &mockSyncProducer{}}
-	msg := types.NewMessageWithTopic("topic", "data")
+	msg := testMessageWithTopic("topic", "data")
 	assert.NoError(t, p.SendMessage(context.Background(), msg))
 }
 
 func TestKafkaProducerSendMessageError(t *testing.T) {
 	p := &kafkaProducer{producer: &mockSyncProducer{sendErr: errors.New("send failed")}}
-	msg := types.NewMessageWithTopic("topic", "data")
+	msg := testMessageWithTopic("topic", "data")
 	assert.Error(t, p.SendMessage(context.Background(), msg))
 }
 
 func TestKafkaProducerSendMessagesBatch(t *testing.T) {
 	p := &kafkaProducer{producer: &mockSyncProducer{}}
 	msgs := []*types.Message{
-		types.NewMessageWithTopic("topic", "a"),
-		types.NewMessageWithTopic("topic", "b"),
+		testMessageWithTopic("topic", "a"),
+		testMessageWithTopic("topic", "b"),
 	}
 	assert.NoError(t, p.SendMessagesBatch(context.Background(), msgs))
 }
 
 func TestKafkaProducerSendMessagesBatchError(t *testing.T) {
 	p := &kafkaProducer{producer: &mockSyncProducer{batchErr: errors.New("batch failed")}}
-	msgs := []*types.Message{types.NewMessageWithTopic("topic", "a")}
+	msgs := []*types.Message{testMessageWithTopic("topic", "a")}
 	assert.Error(t, p.SendMessagesBatch(context.Background(), msgs))
 }
 
@@ -123,46 +132,80 @@ func TestKafkaProducerClose(t *testing.T) {
 	assert.NoError(t, p.Close())
 }
 
+func headerMap(hs []sarama.RecordHeader) map[string]string {
+	out := map[string]string{}
+	for _, h := range hs {
+		out[string(h.Key)] = string(h.Value)
+	}
+	return out
+}
+
 func TestKafkaProducerSendMessagePropagatesHeaders(t *testing.T) {
 	mock := &mockSyncProducer{}
 	p := &kafkaProducer{producer: mock}
-	msg := types.NewMessageWithTopic("topic", "data").
+	msg := testMessageWithTopic("topic", "data").
 		WithHeader("trace-id", "abc123").
 		WithHeader("batch_id", "uuid-xyz")
 
 	require.NoError(t, p.SendMessage(context.Background(), msg))
 	require.NotNil(t, mock.lastMessage)
-	require.Len(t, mock.lastMessage.Headers, 2)
-
-	got := map[string]string{}
-	for _, h := range mock.lastMessage.Headers {
-		got[string(h.Key)] = string(h.Value)
-	}
+	got := headerMap(mock.lastMessage.Headers)
 	assert.Equal(t, "abc123", got["trace-id"])
 	assert.Equal(t, "uuid-xyz", got["batch_id"])
 }
 
-func TestKafkaProducerSendMessageNilHeadersSendsNilSlice(t *testing.T) {
+func TestKafkaProducerWritesCloudEventsBinary(t *testing.T) {
 	mock := &mockSyncProducer{}
 	p := &kafkaProducer{producer: mock}
-	msg := &types.Message{Topic: "topic", Value: []byte(`"v"`)}
+	msg := testMessageWithTopic("topic", "data")
+	msg.Type = "order.created"
 
 	require.NoError(t, p.SendMessage(context.Background(), msg))
-	require.NotNil(t, mock.lastMessage)
-	assert.Nil(t, mock.lastMessage.Headers)
+	got := headerMap(mock.lastMessage.Headers)
+	assert.Equal(t, "1.0", got["ce_specversion"])
+	assert.Equal(t, msg.Id.String(), got["ce_id"])
+	assert.Equal(t, "order.created", got["ce_type"])
+	assert.Equal(t, "application/json", got["content-type"])
+	assert.Nil(t, mock.lastMessage.Key, "empty key keeps round-robin partitioning")
+}
+
+func TestKafkaRoundTripPreservesMessage(t *testing.T) {
+	mock := &mockSyncProducer{}
+	p := &kafkaProducer{producer: mock}
+	in := testMessageWithTopic("topic", "data").WithKey("k").WithHeader("tenant", "a")
+	require.NoError(t, p.SendMessage(context.Background(), in))
+
+	pm := mock.lastMessage
+	value, _ := pm.Value.Encode()
+	key, _ := pm.Key.Encode()
+	out := decode(&sarama.ConsumerMessage{Topic: pm.Topic, Key: key, Value: value, Headers: sliceToPtrs(pm.Headers)})
+
+	assert.Equal(t, in.Id, out.Id)
+	assert.Equal(t, "k", out.Key)
+	assert.JSONEq(t, string(in.Value), string(out.Value))
+	assert.True(t, in.Timestamp.Equal(out.Timestamp))
+	assert.Equal(t, map[string]string{"tenant": "a"}, out.Headers)
+}
+
+func TestKafkaDecodeRecordWithoutCloudEvents(t *testing.T) {
+	ts := time.Now()
+	out := decode(&sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"v"`), Timestamp: ts,
+		Headers: []*sarama.RecordHeader{{Key: []byte("x"), Value: []byte("1")}}})
+	assert.NotEqual(t, uuid.Nil, out.Id)
+	assert.Equal(t, ts, out.Timestamp)
+	assert.Equal(t, "1", out.Headers["x"])
 }
 
 func TestKafkaProducerSendMessagesBatchPropagatesHeaders(t *testing.T) {
 	mock := &mockSyncProducer{}
 	p := &kafkaProducer{producer: mock}
-	first := types.NewMessageWithTopic("topic", "a").WithHeader("batch_id", "B1")
-	second := types.NewMessageWithTopic("topic", "b").WithHeader("batch_id", "B2")
+	first := testMessageWithTopic("topic", "a").WithHeader("batch_id", "B1")
+	second := testMessageWithTopic("topic", "b").WithHeader("batch_id", "B2")
 
 	require.NoError(t, p.SendMessagesBatch(context.Background(), []*types.Message{first, second}))
 	require.Len(t, mock.lastBatch, 2)
-	require.Len(t, mock.lastBatch[0].Headers, 1)
-	assert.Equal(t, "B1", string(mock.lastBatch[0].Headers[0].Value))
-	assert.Equal(t, "B2", string(mock.lastBatch[1].Headers[0].Value))
+	assert.Equal(t, "B1", headerMap(mock.lastBatch[0].Headers)["batch_id"])
+	assert.Equal(t, "B2", headerMap(mock.lastBatch[1].Headers)["batch_id"])
 }
 
 func TestGroupHandlerConsumeClaimPropagatesHeaders(t *testing.T) {
@@ -184,7 +227,7 @@ func TestGroupHandlerConsumeClaimPropagatesHeaders(t *testing.T) {
 		captured = m
 		return types.Ack, nil
 	})
-	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic", AutoCommit: true}}
+	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic"}}
 
 	require.NoError(t, h.ConsumeClaim(&mockSession{}, claim))
 	require.NotNil(t, captured)
@@ -206,7 +249,7 @@ func TestGroupHandlerConsumeClaimWithoutHeaders(t *testing.T) {
 		captured = m
 		return types.Ack, nil
 	})
-	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic", AutoCommit: true}}
+	h := &groupHandler{handler: handler, cfg: types.ConsumeConfig{Topic: "topic"}}
 
 	require.NoError(t, h.ConsumeClaim(&mockSession{}, claim))
 	require.NotNil(t, captured)
@@ -260,7 +303,7 @@ func TestGroupHandlerConsumeClaimAck(t *testing.T) {
 	session := &mockSession{}
 	claim := &mockClaim{messages: ch}
 	h := &groupHandler{
-		cfg: types.ConsumeConfig{AutoCommit: false},
+		cfg: types.ConsumeConfig{},
 		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
 			return types.Ack, nil
 		}),
@@ -269,63 +312,76 @@ func TestGroupHandlerConsumeClaimAck(t *testing.T) {
 	assert.Equal(t, 1, session.markedCount)
 }
 
-func TestGroupHandlerConsumeClaimNack(t *testing.T) {
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
+// A Nack must never be committed: the record is redelivered in place until it
+// settles, and the records behind it wait (per-partition order).
+func TestGroupHandlerConsumeClaimNackIsRedeliveredInPlace(t *testing.T) {
+	ch := make(chan *sarama.ConsumerMessage, 2)
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 1, Value: []byte(`"first"`)}
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 2, Value: []byte(`"second"`)}
 	close(ch)
 
-	session := &mockSession{}
-	claim := &mockClaim{messages: ch}
-	h := &groupHandler{
-		cfg: types.ConsumeConfig{MaxRetries: 0},
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			return types.Nack, errors.New("processing error")
-		}),
-	}
-	require.NoError(t, h.ConsumeClaim(session, claim))
-	// Kafka cannot redeliver a single record: the offset advances anyway.
-	assert.Equal(t, 1, session.markedCount)
-}
-
-// (Nack, nil) must retry: keying the retry loop on err would break on the
-// first attempt and commit the record unprocessed.
-func TestGroupHandlerConsumeClaimNackWithoutError(t *testing.T) {
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-	close(ch)
-
-	attempts := 0
+	var seen []string
 	session := &mockSession{}
 	h := &groupHandler{
-		cfg: types.ConsumeConfig{MaxRetries: 2, RetryBackoff: time.Nanosecond},
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			attempts++
-			return types.Nack, nil
+		cfg: types.ConsumeConfig{RetryBackoff: time.Millisecond},
+		handler: port.MessageHandlerFunc(func(_ context.Context, m *types.Message) (types.Result, error) {
+			seen = append(seen, string(m.Value))
+			if len(seen) < 3 {
+				return types.Nack, errors.New("processing error")
+			}
+			return types.Ack, nil
 		}),
 	}
 	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
-	assert.Equal(t, 3, attempts) // initial attempt + MaxRetries
-	assert.Equal(t, 1, session.markedCount)
+	assert.Equal(t, []string{`"first"`, `"first"`, `"first"`, `"second"`}, seen)
+	assert.Equal(t, 2, session.markedCount)
 }
 
-// Ignore stops the retry loop and commits — it is a deliberate discard.
-func TestGroupHandlerConsumeClaimIgnoreDoesNotRetry(t *testing.T) {
+// A record that keeps failing (e.g. the dead-letter publish fails) stays
+// unmarked when the partition is revoked; nothing behind it is processed.
+func TestGroupHandlerConsumeClaimPersistentNackIsNeverMarked(t *testing.T) {
+	ch := make(chan *sarama.ConsumerMessage, 2)
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 1, Value: []byte(`"poison"`)}
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 2, Value: []byte(`"next"`)}
+	close(ch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls atomic.Int32
+	session := &mockSession{ctx: ctx}
+	h := &groupHandler{
+		cfg: types.ConsumeConfig{RetryBackoff: time.Millisecond},
+		handler: port.MessageHandlerFunc(func(_ context.Context, m *types.Message) (types.Result, error) {
+			if string(m.Value) != `"poison"` {
+				t.Error("a record behind an unsettled one was processed")
+			}
+			if calls.Add(1) == 5 {
+				cancel() // rebalance
+			}
+			return types.Nack, errors.New("dead-letter publish failed")
+		}),
+	}
+	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
+	assert.Equal(t, int32(5), calls.Load())
+	assert.Equal(t, 0, session.markedCount)
+}
+
+// A Nack while the partition is being revoked leaves the record unmarked so
+// the next owner reprocesses it.
+func TestGroupHandlerConsumeClaimNackOnRevokeIsNotMarked(t *testing.T) {
 	ch := make(chan *sarama.ConsumerMessage, 1)
 	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
 	close(ch)
 
-	attempts := 0
-	session := &mockSession{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	session := &mockSession{ctx: ctx}
 	h := &groupHandler{
-		cfg: types.ConsumeConfig{MaxRetries: 3, RetryBackoff: time.Nanosecond},
 		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			attempts++
-			return types.Ignore, nil
+			return types.Nack, context.Canceled
 		}),
 	}
 	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
-	assert.Equal(t, 1, attempts)
-	assert.Equal(t, 1, session.markedCount)
+	assert.Equal(t, 0, session.markedCount)
 }
 
 func TestGroupHandlerConsumeClaimIgnore(t *testing.T) {
@@ -344,91 +400,6 @@ func TestGroupHandlerConsumeClaimIgnore(t *testing.T) {
 	require.NoError(t, h.ConsumeClaim(session, claim))
 }
 
-func TestGroupHandlerConsumeClaimWithDLQ(t *testing.T) {
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-	close(ch)
-
-	claim := &mockClaim{messages: ch}
-	session := &mockSession{}
-	h := &groupHandler{
-		cfg: types.ConsumeConfig{
-			MaxRetries:      0,
-			DeadLetterTopic: "dlq-topic",
-		},
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			return types.Nack, errors.New("always fails")
-		}),
-	}
-	// Should log DLQ error but not return error.
-	require.NoError(t, h.ConsumeClaim(session, claim))
-}
-
-func TestGroupHandlerConsumeClaimWithRetry(t *testing.T) {
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-	close(ch)
-
-	claim := &mockClaim{messages: ch}
-	session := &mockSession{}
-
-	attempts := 0
-	h := &groupHandler{
-		cfg: types.ConsumeConfig{
-			MaxRetries:   1,
-			RetryBackoff: time.Nanosecond, // fast retry
-		},
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			attempts++
-			if attempts < 2 {
-				return types.Nack, errors.New("temporary")
-			}
-			return types.Ack, nil
-		}),
-	}
-	require.NoError(t, h.ConsumeClaim(session, claim))
-	assert.Equal(t, 2, attempts)
-}
-
-// Marking is required in both modes: Sarama's auto-commit only flushes marked
-// offsets, so gating MarkMessage on AutoCommit meant never committing at all.
-func TestGroupHandlerConsumeClaimAutoCommit(t *testing.T) {
-	for _, autoCommit := range []bool{true, false} {
-		ch := make(chan *sarama.ConsumerMessage, 1)
-		ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-		close(ch)
-
-		session := &mockSession{}
-		h := &groupHandler{
-			cfg: types.ConsumeConfig{AutoCommit: autoCommit},
-			handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-				return types.Ack, nil
-			}),
-		}
-		require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
-		assert.Equal(t, 1, session.markedCount, "AutoCommit=%v", autoCommit)
-	}
-}
-
-func TestGroupHandlerConsumeClaimDefaultRetryBackoff(t *testing.T) {
-	// RetryBackoff <= 0 defaults to 1s — test that the branch is hit without
-	// actually sleeping 1s by limiting MaxRetries to 0 and using Ignore result
-	// so we only go through the retry loop once.
-	ch := make(chan *sarama.ConsumerMessage, 1)
-	ch <- &sarama.ConsumerMessage{Topic: "topic", Value: []byte(`"data"`)}
-	close(ch)
-
-	claim := &mockClaim{messages: ch}
-	session := &mockSession{}
-	h := &groupHandler{
-		cfg: types.ConsumeConfig{MaxRetries: 0, RetryBackoff: 0},
-		handler: port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
-			return types.Ack, nil // break on first attempt
-		}),
-	}
-	require.NoError(t, h.ConsumeClaim(session, claim))
-}
-
 // kafkaConsumer tests
 
 func TestKafkaConsumerConsumeWithCancelledContext(t *testing.T) {
@@ -437,9 +408,8 @@ func TestKafkaConsumerConsumeWithCancelledContext(t *testing.T) {
 
 	mock := &mockConsumerGroup{}
 	c := &kafkaConsumer{
-		cfg:         types.ConsumeConfig{Topic: "topic"},
-		concurrency: 1,
-		newGroup:    func() (sarama.ConsumerGroup, error) { return mock, nil },
+		cfg:      types.ConsumeConfig{Topic: "topic"},
+		newGroup: func() (sarama.ConsumerGroup, error) { return mock, nil },
 	}
 	err := c.Consume(ctx, port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
 		return types.Ack, nil
@@ -453,9 +423,8 @@ func TestKafkaConsumerConsumeGroupErrorIsLogged(t *testing.T) {
 
 	mock := &mockConsumerGroup{consumeErr: errors.New("group error")}
 	c := &kafkaConsumer{
-		cfg:         types.ConsumeConfig{Topic: "topic"},
-		concurrency: 1,
-		newGroup:    func() (sarama.ConsumerGroup, error) { return mock, nil },
+		cfg:      types.ConsumeConfig{Topic: "topic"},
+		newGroup: func() (sarama.ConsumerGroup, error) { return mock, nil },
 	}
 
 	go func() {
@@ -476,25 +445,34 @@ func TestKafkaConsumerClose(t *testing.T) {
 	require.NoError(t, c.Close())
 }
 
-func TestKafkaConsumerConsumeGroupCreateErrorIsHandled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
+func TestKafkaConsumerConsumeGroupCreateErrorIsReturned(t *testing.T) {
 	c := &kafkaConsumer{
-		cfg:         types.ConsumeConfig{Topic: "topic"},
-		concurrency: 1,
-		newGroup:    func() (sarama.ConsumerGroup, error) { return nil, errors.New("dial failed") },
+		cfg:      types.ConsumeConfig{Topic: "topic"},
+		newGroup: func() (sarama.ConsumerGroup, error) { return nil, errors.New("dial failed") },
 	}
-	err := c.Consume(ctx, port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
+	err := c.Consume(context.Background(), port.MessageHandlerFunc(func(_ context.Context, _ *types.Message) (types.Result, error) {
 		return types.Ack, nil
 	}))
-	assert.NoError(t, err, "falha de criação de group num worker não derruba Consume")
+	assert.ErrorContains(t, err, "dial failed")
 }
 
 func TestKafkaConsumerPauseAndResume(t *testing.T) {
-	c := &kafkaConsumer{}
-	assert.NoError(t, c.Pause())
-	assert.NoError(t, c.Resume())
+	mock := &mockConsumerGroup{}
+	c := &kafkaConsumer{cfg: types.ConsumeConfig{Topic: "topic"}, newGroup: func() (sarama.ConsumerGroup, error) { return mock, nil }}
+	require.NoError(t, c.Pause(), "pause before Consume is remembered")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = c.Consume(ctx, port.MessageHandlerFunc(func(context.Context, *types.Message) (types.Result, error) { return types.Ack, nil }))
+	}()
+	require.Eventually(t, func() bool { return mock.pausedAll.Load() }, time.Second, time.Millisecond)
+
+	require.NoError(t, c.Resume())
+	assert.False(t, mock.pausedAll.Load())
+	cancel()
+	<-done
 }
 
 // Broker.Setup tests
@@ -584,24 +562,11 @@ func TestBrokerSetupAdminFactoryError(t *testing.T) {
 
 func TestBrokerSetupDefaultPartitionsAndReplication(t *testing.T) {
 	var capturedDetail *sarama.TopicDetail
-	admin := &mockClusterAdmin{}
-	// Override CreateTopic to capture the detail.
-	type capturingAdmin struct {
-		*mockClusterAdmin
-		detail *sarama.TopicDetail
-	}
-
-	capturing := &struct {
-		mockClusterAdmin
-		detail *sarama.TopicDetail
-	}{}
 	b := &Broker{
 		brokers: []string{"localhost:9092"},
 		config:  sarama.NewConfig(),
 		topics:  []TopicConfig{{Name: "t", Partitions: 0, ReplicationFactor: 0}},
 		adminFactory: func(_ []string, _ *sarama.Config) (clusterAdmin, error) {
-			_ = capturing
-			_ = admin
 			return &capturingClusterAdmin{detail: &capturedDetail}, nil
 		},
 	}
@@ -624,4 +589,35 @@ func (c *capturingClusterAdmin) CreateTopic(_ string, detail *sarama.TopicDetail
 func (c *capturingClusterAdmin) Close() error {
 	c.closed = true
 	return nil
+}
+
+// Each in-place redelivery is a delivery: the pipeline sees the count grow and
+// its Reject (delivery limit reached) settles the record so the partition moves on.
+func TestGroupHandlerConsumeClaimCountsDeliveriesAndSettlesReject(t *testing.T) {
+	ch := make(chan *sarama.ConsumerMessage, 2)
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 1, Value: []byte(`"poison"`)}
+	ch <- &sarama.ConsumerMessage{Topic: "topic", Offset: 2, Value: []byte(`"next"`)}
+	close(ch)
+
+	var counts []int
+	var ids []string
+	session := &mockSession{}
+	h := &groupHandler{
+		cfg: types.ConsumeConfig{RetryBackoff: time.Millisecond, MaxDeliveries: 3},
+		handler: port.MessageHandlerFunc(func(_ context.Context, m *types.Message) (types.Result, error) {
+			if string(m.Value) == `"next"` {
+				return types.Ack, nil
+			}
+			counts = append(counts, m.DeliveryCount)
+			ids = append(ids, m.Id.String())
+			if m.DeliveryCount >= 3 {
+				return types.Reject, errors.New("poison")
+			}
+			return types.Nack, errors.New("poison")
+		}),
+	}
+	require.NoError(t, h.ConsumeClaim(session, &mockClaim{messages: ch}))
+	assert.Equal(t, []int{1, 2, 3}, counts)
+	assert.Equal(t, ids[0], ids[2], "the Id is stable across redeliveries")
+	assert.Equal(t, 2, session.markedCount, "a rejected record is committed")
 }

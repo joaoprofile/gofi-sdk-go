@@ -1,9 +1,10 @@
 package sqln
 
 import (
+	"context"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/cache"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/cache"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -24,3 +25,9 @@ func InstanceRedis() redis.UniversalClient {
 func NewCacheRedis() {
 	cache.NewCacheRedis()
 }
+
+// PingRedis checks the shared cache client.
+func PingRedis(ctx context.Context) error { return cache.Ping(ctx) }
+
+// CloseRedis closes the shared cache client created by InstanceRedis.
+func CloseRedis() error { return cache.Close() }

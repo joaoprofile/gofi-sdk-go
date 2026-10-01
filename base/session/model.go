@@ -70,13 +70,17 @@ func (e *Entry) Set(key string, value any) *Entry {
 type Config struct {
 	TTL    time.Duration
 	Prefix string
+	// LockTTL bounds how long a lock is held if its owner never releases it;
+	// keep it above the longest critical section. Default: 10 s.
+	LockTTL time.Duration
 }
 
 // DefaultSessionConfig returns a Config with sensible defaults
-// (10-minute TTL, "session" prefix).
+// (10-minute TTL, "session" prefix, 10-second lock TTL).
 func DefaultSessionConfig() *Config {
 	return &Config{
-		TTL:    defaultSessionTTL,
-		Prefix: defaultPrefix,
+		TTL:     defaultSessionTTL,
+		Prefix:  defaultPrefix,
+		LockTTL: defaultLockTTL,
 	}
 }

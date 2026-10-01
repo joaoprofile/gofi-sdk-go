@@ -99,10 +99,10 @@ func TestGenerateState_DifferentCallsReturnDifferentValues(t *testing.T) {
 	assert.NotEqual(t, a, b)
 }
 
-func TestGenerateNonce_ReturnsNonEmptyString(t *testing.T) {
-	nonce, err := generateNonce()
-	require.NoError(t, err)
-	assert.NotEmpty(t, nonce)
+func TestNonceForState(t *testing.T) {
+	assert.Equal(t, NonceForState("s1"), NonceForState("s1"))
+	assert.NotEqual(t, NonceForState("s1"), NonceForState("s2"))
+	assert.NotContains(t, NonceForState("s1"), "s1")
 }
 
 func TestBuildRefreshToken_ContainsSessionID(t *testing.T) {

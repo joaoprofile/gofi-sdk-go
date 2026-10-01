@@ -77,20 +77,113 @@ type samplePayload struct {
 	Age  int    `json:"age"`
 }
 
+func jsonRequest(body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/", newJSONBody(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
 func TestParseRequestBody_ValidJSON_PopulatesStruct(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", newJSONBody(`{"name":"Emilia","age":30}`))
-	var out samplePayload
-	err := ParseRequestBody(httptest.NewRecorder(), req, &out)
-	require.NoError(t, err)
-	assert.Equal(t, "Emilia", out.Name)
-	assert.Equal(t, 30, out.Age)
+	for _, ct := range []string{"application/json", "application/json; charset=utf-8", "Application/JSON", "application/merge-patch+json"} {
+		req := jsonRequest(`{"name":"Emilia","age":30}`)
+		req.Header.Set("Content-Type", ct)
+		var out samplePayload
+		require.NoError(t, ParseRequestBody(httptest.NewRecorder(), req, &out), ct)
+		assert.Equal(t, "Emilia", out.Name)
+		assert.Equal(t, 30, out.Age)
+	}
 }
 
 func TestParseRequestBody_InvalidJSON_ReturnsError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", newJSONBody(`{not valid`))
 	var out samplePayload
-	err := ParseRequestBody(httptest.NewRecorder(), req, &out)
+	err := ParseRequestBody(httptest.NewRecorder(), jsonRequest(`{not valid`), &out)
 	assert.Error(t, err)
+}
+
+func assertRequestError(t *testing.T, err error, status int, kind error, message string) {
+	t.Helper()
+	var re *RequestError
+	require.ErrorAs(t, err, &re)
+	assert.Equal(t, status, re.Status)
+	assert.Equal(t, message, re.Error())
+	assert.ErrorIs(t, err, kind)
+}
+
+// Regression: no Content-Type check, unknown fields and trailing data
+// accepted, raw encoding/json errors (Go type and field names) returned.
+func TestParseRequestBody_Strict(t *testing.T) {
+	type payload struct {
+		Name  string `json:"name"`
+		Admin bool   `json:"-"`
+		Age   int8   `json:"age"`
+	}
+	cases := []struct {
+		name, contentType, body string
+		status                  int
+		kind                    error
+		message                 string
+	}{
+		{"missing content type", "", `{"name":"a"}`, 415, ErrUnsupportedMediaType, "content type must be application/json"},
+		{"form content type", "application/x-www-form-urlencoded", `{"name":"a"}`, 415, ErrUnsupportedMediaType, "content type must be application/json"},
+		{"text/json", "text/json", `{"name":"a"}`, 415, ErrUnsupportedMediaType, "content type must be application/json"},
+		{"unknown field", "application/json", `{"name":"a","role":"admin"}`, 400, ErrInvalidJSON, "invalid JSON body"},
+		{"trailing value", "application/json", `{"name":"a"}{"name":"b"}`, 400, ErrInvalidJSON, "invalid JSON body"},
+		{"trailing garbage", "application/json", `{"name":"a"} x`, 400, ErrInvalidJSON, "invalid JSON body"},
+		{"type mismatch", "application/json", `{"age":"old"}`, 400, ErrInvalidJSON, "invalid JSON body"},
+		{"overflow", "application/json", `{"age":300}`, 400, ErrInvalidJSON, "invalid JSON body"},
+		{"empty", "application/json", ``, 400, ErrInvalidJSON, "invalid JSON body"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			var out payload
+			err := ParseRequestBody(httptest.NewRecorder(), req, &out)
+			assertRequestError(t, err, tc.status, tc.kind, tc.message)
+			assert.NotContains(t, err.Error(), "payload", "no Go type names")
+			assert.NotContains(t, err.Error(), "int8")
+		})
+	}
+}
+
+func TestParseRequestBody_CauseStaysLoggable(t *testing.T) {
+	var out samplePayload
+	err := ParseRequestBody(httptest.NewRecorder(), jsonRequest(`{"name":"a","role":"x"}`), &out)
+	assert.Equal(t, "invalid JSON body", err.Error())
+	assert.Contains(t, errors.Unwrap(err).Error(), `unknown field "role"`)
+}
+
+func TestParseRequestBody_TooLarge(t *testing.T) {
+	var out samplePayload
+	body := `{"name":"` + strings.Repeat("a", 100) + `"}`
+	err := ParseRequestBody(httptest.NewRecorder(), jsonRequest(body), &out, WithMaxBodyBytes(32))
+	assertRequestError(t, err, http.StatusRequestEntityTooLarge, ErrBodyTooLarge, "request body too large")
+
+	// The server-wide cap surfaces the same way.
+	req := jsonRequest(body)
+	rec := httptest.NewRecorder()
+	req.Body = http.MaxBytesReader(rec, req.Body, 16)
+	err = ParseRequestBody(rec, req, &out)
+	assertRequestError(t, err, http.StatusRequestEntityTooLarge, ErrBodyTooLarge, "request body too large")
+
+	rec = httptest.NewRecorder()
+	Error(rec, http.StatusBadRequest, err)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
+func TestParseRequestBody_AllowUnknownFields(t *testing.T) {
+	var out samplePayload
+	require.NoError(t, ParseRequestBody(nil, jsonRequest(`{"name":"a","extra":1}`), &out, AllowUnknownFields()))
+	assert.Equal(t, "a", out.Name)
+}
+
+func TestParseRequestBody_NilBody(t *testing.T) {
+	req := jsonRequest("")
+	req.Body = nil
+	var out samplePayload
+	assertRequestError(t, ParseRequestBody(nil, req, &out), http.StatusBadRequest, ErrInvalidJSON, "invalid JSON body")
 }
 
 func TestParseRequestBody_NonPointer_ReturnsErrInvalidStruct(t *testing.T) {
@@ -119,28 +212,12 @@ func TestParseRequestBody_ReadError_ReturnsError(t *testing.T) {
 
 //  GetQueryParam ─
 
-func TestGetQueryParam_ReturnsLowercasedValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/?status=ACTIVE", nil)
-	assert.Equal(t, "active", GetQueryParam("status", req))
-}
-
 func TestGetQueryParam_ReturnsEmptyWhenAbsent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	assert.Empty(t, GetQueryParam("missing", req))
 }
 
 //  GetPathParam
-
-func TestGetPathParam_ReturnsLowercasedValue(t *testing.T) {
-	var captured string
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /products/{id}", func(w http.ResponseWriter, r *http.Request) {
-		captured = GetPathParam("id", r)
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/products/SKU-ABC", nil))
-	assert.Equal(t, "sku-abc", captured)
-}
 
 //  BindQueryParamsToStruct ─
 
@@ -250,10 +327,99 @@ func TestBindQueryParams_SliceInvalidElement_ReturnsErrorWithIndex(t *testing.T)
 	req := httptest.NewRequest(http.MethodGet, "/?ids=1&ids=abc", nil)
 	var out filterWithSlice
 	err := BindQueryParamsToStruct(req, httptest.NewRecorder(), &out)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ids[1]")
-	assert.Contains(t, err.Error(), "int32")
-	assert.Contains(t, err.Error(), "abc")
+	assertRequestError(t, err, http.StatusBadRequest, ErrInvalidQueryParam, "invalid query parameter: ids")
+	assert.Contains(t, errors.Unwrap(err).Error(), "ids: [1]", "the index stays in the logged cause")
+}
+
+// Regression: the error echoed the client's input.
+func TestBindQueryParams_ErrorDoesNotEchoInput(t *testing.T) {
+	for _, q := range []string{"/?page=<script>", "/?ids=[1,%22<x>%22]", "/?ids=1,<x>"} {
+		var out filterWithSlice
+		err := BindQueryParamsToStruct(httptest.NewRequest(http.MethodGet, q, nil), nil, &out)
+		require.Error(t, err, q)
+		assert.NotContains(t, err.Error(), "<", q)
+	}
+}
+
+// Regression: an unexported field matching a parameter panicked (SetString).
+func TestBindQueryParams_IgnoresUnexportedAndSkipped(t *testing.T) {
+	type params struct {
+		Name   string
+		secret string
+		Hidden string `form:"-"`
+	}
+	req := httptest.NewRequest(http.MethodGet, "/?name=a&secret=x&hidden=y&-=z", nil)
+	var out params
+	require.NotPanics(t, func() { require.NoError(t, BindQueryParamsToStruct(req, nil, &out)) })
+	assert.Equal(t, params{Name: "a"}, out)
+	assert.Empty(t, out.secret)
+}
+
+// Regression: ParseInt(s, 10, 64) + SetInt wrapped silently on small ints.
+func TestBindQueryParams_RejectsOverflow(t *testing.T) {
+	type params struct {
+		I8  int8    `form:"i8"`
+		I32 int32   `form:"i32"`
+		U8  uint8   `form:"u8"`
+		U16 *uint16 `form:"u16"`
+		S   []int8  `form:"s"`
+	}
+	for _, q := range []string{"i8=128", "i8=-129", "i32=2147483648", "u8=256", "u8=-1", "u16=65536", "s=1,200"} {
+		var out params
+		err := BindQueryParamsToStruct(httptest.NewRequest(http.MethodGet, "/?"+q, nil), nil, &out)
+		assertRequestError(t, err, http.StatusBadRequest, ErrInvalidQueryParam, "invalid query parameter: "+strings.Split(q, "=")[0])
+	}
+	var out params
+	req := httptest.NewRequest(http.MethodGet, "/?i8=-128&i32=2147483647&u8=255&u16=65535&s=127,-128", nil)
+	require.NoError(t, BindQueryParamsToStruct(req, nil, &out))
+	assert.Equal(t, int8(-128), out.I8)
+	assert.Equal(t, int32(2147483647), out.I32)
+	assert.Equal(t, uint8(255), out.U8)
+	assert.Equal(t, uint16(65535), *out.U16)
+	assert.Equal(t, []int8{127, -128}, out.S)
+}
+
+type fuzzParams struct {
+	S      string   `form:"s"`
+	B      bool     `form:"b"`
+	I      int      `form:"i"`
+	I8     int8     `form:"i8"`
+	I16    int16    `form:"i16"`
+	U      uint     `form:"u"`
+	U8     uint8    `form:"u8"`
+	U64    uint64   `form:"u64"`
+	PI     *int32   `form:"pi"`
+	PS     *string  `form:"ps"`
+	SI     []int16  `form:"si"`
+	SS     []string `form:"ss"`
+	SP     []*uint8 `form:"sp"`
+	F      float64  `form:"f"`
+	M      map[string]string
+	Nested struct{ A int }
+	hidden int
+	lower  string
+}
+
+func FuzzBindQueryParams(f *testing.F) {
+	for _, seed := range []string{
+		"s=x&b=true&i=1&i8=127&u8=255", "hidden=1&lower=x", "si=[1,2]&ss=a,b&sp=1,2",
+		"i8=999&u=-1&pi=x", "f=1.5&m=x&nested=y", "si=[1,&ss=[", "%zz", "sp=[null,1]",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, rawQuery string) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL.RawQuery = rawQuery
+		var out fuzzParams
+		err := BindQueryParamsToStruct(req, nil, &out)
+		var re *RequestError
+		if err != nil && !errors.As(err, &re) {
+			t.Fatalf("unexpected error type %T: %v", err, err)
+		}
+		if out.hidden != 0 || out.lower != "" {
+			t.Fatal("unexported field was set")
+		}
+	})
 }
 
 func TestBindQueryParams_SliceMalformedJSON_ReturnsError(t *testing.T) {
@@ -376,7 +542,7 @@ func TestBindQueryParams_InvalidBool_ReturnsError(t *testing.T) {
 
 //  setFieldValue ─
 
-func makeValue(v interface{}) reflect.Value {
+func makeValue(v any) reflect.Value {
 	ptr := reflect.New(reflect.TypeOf(v))
 	ptr.Elem().Set(reflect.ValueOf(v))
 	return ptr.Elem()

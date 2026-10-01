@@ -7,10 +7,7 @@ import (
 	"time"
 )
 
-const (
-	defaultRetryDelay = 30 * time.Millisecond
-	defaultAcquireTTL = 10 * time.Second
-)
+const defaultRetryDelay = 30 * time.Millisecond
 
 var (
 	once     sync.Once
@@ -25,19 +22,25 @@ var (
 // *Session implements DistributedLocker, so it can be injected as a
 // lock provider wherever that interface is expected.
 type Session struct {
-	driver Driver
-	Prefix string
-	TTL    time.Duration
+	driver  Driver
+	Prefix  string
+	TTL     time.Duration
+	lockTTL time.Duration
 }
 
 // New initialises the Session singleton. Subsequent calls are no-ops;
 // the first call wins. Pass a different Driver to switch backends.
 func New(driver Driver, cfg *Config) *Session {
 	once.Do(func() {
+		lockTTL := cfg.LockTTL
+		if lockTTL <= 0 {
+			lockTTL = defaultLockTTL
+		}
 		instance = &Session{
-			driver: driver,
-			Prefix: cfg.Prefix,
-			TTL:    cfg.TTL,
+			driver:  driver,
+			Prefix:  cfg.Prefix,
+			TTL:     cfg.TTL,
+			lockTTL: lockTTL,
 		}
 	})
 	return instance
@@ -56,13 +59,13 @@ func (s *Session) withLock(ctx context.Context, key string, fn func() error) err
 	lockKey := fmt.Sprintf("%s:lock:%s", s.Prefix, key)
 
 	for {
-		locked, err := s.driver.AcquireLock(ctx, lockKey, defaultAcquireTTL)
+		locked, release, err := s.acquire(ctx, lockKey, s.lockTTL)
 		if err != nil {
 			return fmt.Errorf("failed to acquire lock: %w", err)
 		}
 
 		if locked {
-			defer s.driver.ReleaseLock(ctx, lockKey)
+			defer release()
 			return fn()
 		}
 
@@ -155,20 +158,36 @@ func (s *Session) CleanExpired(ctx context.Context, prefix string) error {
 
 // --- DistributedLocker implementation ---
 
-// TryLock attempts to acquire a distributed lock for key.
-// The key is used as-is; callers should use NewKey to build
-// collision-resistant identifiers.
-func (s *Session) TryLock(ctx context.Context, key string) (bool, error) {
+// TryLock attempts to acquire a distributed lock for key, held for at most
+// Config.LockTTL, and returns its owner token for Unlock. The key is used
+// as-is; callers should use NewKey to build collision-resistant identifiers.
+// Drivers without TokenLocker return an empty token.
+func (s *Session) TryLock(ctx context.Context, key string) (string, bool, error) {
 	if key == "" {
-		return false, ErrInvalidKey
+		return "", false, ErrInvalidKey
 	}
-	return s.driver.AcquireLock(ctx, key, defaultLockTTL)
+	if tl, ok := s.driver.(TokenLocker); ok {
+		token, locked, err := tl.AcquireLockToken(ctx, key, s.lockTTL)
+		if err != nil || !locked {
+			return "", false, err
+		}
+		return token, true, nil
+	}
+	locked, err := s.driver.AcquireLock(ctx, key, s.lockTTL)
+	return "", locked, err
 }
 
-// Unlock releases the distributed lock for key.
-func (s *Session) Unlock(ctx context.Context, key string) error {
+// Unlock releases the lock for key only while token (from TryLock) still owns
+// it, so a holder whose lock expired cannot release the next holder's lock.
+func (s *Session) Unlock(ctx context.Context, key, token string) error {
 	if key == "" {
 		return ErrInvalidKey
+	}
+	if tl, ok := s.driver.(TokenLocker); ok {
+		if token == "" {
+			return ErrNotLocked
+		}
+		return tl.ReleaseLockToken(ctx, key, token)
 	}
 	return s.driver.ReleaseLock(ctx, key)
 }
@@ -185,7 +204,10 @@ func (s *Session) IsLocked(ctx context.Context, key string) (bool, error) {
 // Returns (false, nil) if the key is already locked.
 // Returns (true, err) if fn returned an error (lock is still released).
 func (s *Session) WithLock(ctx context.Context, key string, fn func() error) (bool, error) {
-	ok, err := s.TryLock(ctx, key)
+	if key == "" {
+		return false, fmt.Errorf("error when trying to lock key %s: %w", key, ErrInvalidKey)
+	}
+	ok, release, err := s.acquire(ctx, key, s.lockTTL)
 	if err != nil {
 		return false, fmt.Errorf("error when trying to lock key %s: %w", key, err)
 	}
@@ -194,11 +216,22 @@ func (s *Session) WithLock(ctx context.Context, key string, fn func() error) (bo
 		return false, nil
 	}
 
-	defer s.Unlock(ctx, key)
+	defer release()
 
 	if err := fn(); err != nil {
 		return true, err
 	}
 
 	return true, nil
+}
+
+// acquire takes the lock and returns its release func. Owner tokens are used when
+// the driver supports them; release ignores ctx cancellation so the lock is freed.
+func (s *Session) acquire(ctx context.Context, key string, ttl time.Duration) (bool, func(), error) {
+	if tl, ok := s.driver.(TokenLocker); ok {
+		token, locked, err := tl.AcquireLockToken(ctx, key, ttl)
+		return locked, func() { _ = tl.ReleaseLockToken(context.WithoutCancel(ctx), key, token) }, err
+	}
+	locked, err := s.driver.AcquireLock(ctx, key, ttl)
+	return locked, func() { _ = s.driver.ReleaseLock(context.WithoutCancel(ctx), key) }, err
 }

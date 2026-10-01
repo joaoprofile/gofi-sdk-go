@@ -21,6 +21,7 @@ type Claims struct {
 	// Extra carries project-specific custom claims that the SDK schema does not model.
 	// Round-tripped through the JWT payload under the "ext" key — preserved across
 	// Issue → Parse so the application can recover its domain claims after the SDK
-	// validates the token. Values must be JSON-serializable.
+	// validates the token. Values must be JSON-serializable. Readable by any
+	// bearer: never secrets (keep those in Session.SessionExtra).
 	Extra map[string]any `json:"ext,omitempty"`
 }

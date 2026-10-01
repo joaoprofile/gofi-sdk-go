@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joaoprofile/gofi/base/errs"
+	"github.com/gofi-labs/gofi-sdk-go/base/errs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -297,16 +297,17 @@ func TestAppError_ToJSON_IncludesDetails(t *testing.T) {
 
 //  GetSafeError─
 
-func TestAppError_GetSafeError_ReturnsWrappedErr(t *testing.T) {
-	cause := errors.New("original cause")
-	e := errs.RegisterOperation("safe-err", "msg").Wrap(cause)
+func TestAppError_GetSafeError_NeverExposesCause(t *testing.T) {
+	cause := errors.New("pq: password authentication failed for user admin")
+	e := errs.RegisterOperation("safe-err", "public msg").Wrap(cause).WithDetails("internal detail")
 	got := e.GetSafeError("default")
 
-	assert.Equal(t, cause, got)
+	assert.EqualError(t, got, "public msg")
+	assert.NotErrorIs(t, got, cause)
 }
 
-func TestAppError_GetSafeError_ReturnsDefaultWhenNoErr(t *testing.T) {
-	e := errs.RegisterValidation("safe-default", "msg")
+func TestAppError_GetSafeError_ReturnsDefaultWhenNoMessage(t *testing.T) {
+	e := errs.AppError{Code: "safe-default", Err: errors.New("internal")}
 	got := e.GetSafeError("fallback message")
 
 	assert.EqualError(t, got, "fallback message")

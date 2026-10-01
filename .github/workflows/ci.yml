@@ -1,0 +1,162 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  module:
+    name: ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - gofi
+          - base
+          - base/bucket/oci
+          - base/bucket/s3
+          - base/cloud/aws
+          - base/cloud/oci
+          - base/secrets/awssm
+          - base/secrets/ocivault
+          - iam
+          - msq
+          - msq/provider/kafka
+          - msq/provider/nats
+          - msq/provider/oci
+          - msq/provider/rabbitmq
+          - msq/provider/redis
+          - msq/provider/sqs
+          - netx
+          - netx/awssign
+          - obs
+          - sqln
+          - sqln/rdsauth
+          - examples/netx/api
+          - examples/sqln/search
+          - examples/sqln/filter-api
+          - examples/msq/rabbitmq/producer
+          - examples/msq/rabbitmq/consumer
+          - examples/msq/kafka/producer
+          - examples/msq/kafka/consumer
+          - examples/msq/sqs/producer
+          - examples/msq/sqs/consumer
+          - examples/obs
+          - examples/iam/login
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    env:
+      # Each module must build as a consumer would see it, without go.work.
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: tidy
+        run: go mod tidy -diff
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race -count=1 ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      # G104 (unchecked errors) is noise here; suppressions carry a "#nosec Gxxx -- reason".
+      - name: gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -severity=medium -confidence=medium ./...
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: gitleaks
+        run: >-
+          docker run --rm -v "$PWD":/repo:ro ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --no-banner --redact --exit-code 1
+
+  # Provider contracts against real brokers and PostgreSQL.
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      GOFI_IT_POSTGRES_DSN: host=localhost port=5432 user=postgres password=pw dbname=it sslmode=disable
+      GOFI_IT_AMQP_URL: amqp://guest:guest@localhost:5672/
+      GOFI_IT_REDIS_ADDR: localhost:6379
+      GOFI_IT_KAFKA_BROKERS: localhost:9092
+      GOFI_IT_NATS_URL: nats://localhost:4222
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: pw
+          POSTGRES_DB: it
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports: ["5672:5672"]
+        options: --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      kafka:
+        image: apache/kafka:3.8.0
+        ports: ["9092:9092"]
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: "**/go.sum"
+      - name: nats
+        run: docker run -d -p 4222:4222 nats:2.10-alpine -js  # services cannot pass -js
+      - name: contracts
+        run: |
+          for m in sqln msq/provider/redis msq/provider/rabbitmq msq/provider/kafka msq/provider/nats; do
+            (cd "$m" && go test -race -count=1 -run 'Contract|Integration' ./...)
+          done

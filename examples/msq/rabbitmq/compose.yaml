@@ -1,0 +1,9 @@
+services:
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: gofi
+      RABBITMQ_DEFAULT_PASS: gofi
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # management UI: http://localhost:15672 (gofi / gofi)

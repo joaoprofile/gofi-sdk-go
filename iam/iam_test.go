@@ -5,18 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/provider/memory"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/provider/memory"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// stubSession is a minimal in-memory SessionPort for test config.
-type stubSession struct {
-	*memory.Provider
-}
 
 // stubRBACPort is a test double for port.RBACPort.
 type stubRBACPort struct{}
@@ -319,4 +314,35 @@ func (s *stubCustomAuth) RefreshToken(_ context.Context, _ string) (*types.Sessi
 }
 func (s *stubCustomAuth) ValidateToken(_ context.Context, _ string) (*types.Claims, error) {
 	return nil, nil
+}
+
+func TestValidate_SessionMaxLifetimeOverLimit(t *testing.T) {
+	cfg := Config{Session: memory.NewTestProvider(), Security: SecurityConfig{SessionMaxLifetime: 91 * 24 * time.Hour}}
+	assert.ErrorIs(t, validate(cfg), core.ErrSessionMaxLifetimeExceeded)
+	cfg.Security.SessionMaxLifetime = 90 * 24 * time.Hour
+	assert.NoError(t, validate(cfg))
+}
+
+func TestValidate_TicketSecretRequiredWhenLoginEnabled(t *testing.T) {
+	d := &directoryStub{user: &types.User{ID: "u1"}}
+	cases := map[string]Config{
+		"built-in login": {Session: memory.NewTestProvider(), User: d, Tenant: d},
+		"idp login":      {Session: memory.NewTestProvider(), Auth: &stubCustomAuth{}, IDPs: map[string]port.IDPAuthPort{"x": nil}},
+	}
+	for name, cfg := range cases {
+		assert.ErrorIs(t, validate(cfg), core.ErrTenantTicketSecretRequired, name)
+
+		cfg.Security.TenantTicketSecret = []byte("short")
+		assert.ErrorIs(t, validate(cfg), core.ErrTenantTicketSecretTooShort, name)
+
+		cfg.Security.TenantTicketSecret = []byte("0123456789abcdef0123456789abcdef")
+		assert.NoError(t, validate(cfg), name)
+
+		cfg.Security.TenantTicketSecret = nil
+		cfg.Security.InsecureSkipTenantTicket = true
+		assert.NoError(t, validate(cfg), name)
+	}
+	// Resource server (no login) and custom AuthPort do not need the secret.
+	assert.NoError(t, validate(Config{Session: memory.NewTestProvider()}))
+	assert.NoError(t, validate(Config{Session: memory.NewTestProvider(), Auth: &stubCustomAuth{}, User: d, Tenant: d}))
 }

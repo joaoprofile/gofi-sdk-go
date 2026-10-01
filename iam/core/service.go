@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	iamconfig "github.com/joaoprofile/gofi/iam/config"
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // IAMService is the central facade of the iam package.
@@ -52,11 +52,19 @@ func NewService(cfg ServiceConfig) *IAMService {
 // AuthConfigFromSecurity converts SecurityConfig to the internal AuthConfig.
 func AuthConfigFromSecurity(sec iamconfig.SecurityConfig) AuthConfig {
 	return AuthConfig{
-		accessTokenTTL:  sec.AccessTokenTTL,
-		refreshTokenTTL: sec.RefreshTokenTTL,
-		issuer:          sec.Issuer,
+		accessTokenTTL:     sec.AccessTokenTTL,
+		refreshTokenTTL:    sec.RefreshTokenTTL,
+		sessionMaxLifetime: sec.SessionMaxLifetime,
+		issuer:             sec.Issuer,
+		ticketKey:          sec.TenantTicketSecret,
+		skipTicket:         sec.InsecureSkipTenantTicket,
+		dummyPasswordHash:  sec.DummyPasswordHash,
 	}
 }
+
+// MaxClockSkew caps the leeway for token time claims (SecurityConfig.ClockSkew,
+// jwt Leeway, oidc ClockSkew): a larger one keeps expired tokens alive.
+const MaxClockSkew = 5 * time.Minute
 
 // Authenticate validates credentials and returns available tenants without issuing tokens.
 func (s *IAMService) Authenticate(ctx context.Context, input port.AuthInput) (*port.AuthResult, error) {
@@ -103,6 +111,9 @@ func (s *IAMService) ListSessions(ctx context.Context, userID string) ([]*types.
 
 // ListTenants lists the available tenants for the user.
 func (s *IAMService) ListTenants(ctx context.Context, userID string) ([]types.TenantAccess, error) {
+	if s.tenant == nil {
+		return nil, ErrLoginPortsRequired
+	}
 	return s.tenant.ListUserTenants(ctx, userID)
 }
 

@@ -1,35 +1,145 @@
 package netx
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/netip"
+	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 )
 
 // ── Security headers ─────────────────────────────────────────────────────────
 
-// SecurityHeaders sets defensive response headers protecting against
-// clickjacking, XSS, MIME sniffing, HSTS bypass, and server fingerprinting.
+// securityHeaders are the fixed hardening headers. The value slices are
+// shared across requests: Header.Set replaces a slice and Header.Add on a
+// full slice reallocates, so handlers never mutate them.
+var securityHeaders = []struct {
+	key   string
+	value []string
+}{
+	{"Referrer-Policy", []string{"strict-origin-when-cross-origin"}},
+	{"Permissions-Policy", []string{"geolocation=(), microphone=(), camera=()"}},
+	{"X-Content-Type-Options", []string{"nosniff"}},
+	{"X-Frame-Options", []string{"DENY"}},
+	{"Content-Security-Policy", []string{"default-src 'self'; " +
+		"script-src 'self'; " +
+		"style-src 'self'; " +
+		"img-src 'self' data:; " +
+		"object-src 'none'; " +
+		"frame-ancestors 'none';"}},
+	// API responses carry per-user data; handlers set their own to cache.
+	{"Cache-Control", []string{"no-store"}},
+}
+
+// DefaultHSTSMaxAge is two years, the preload list minimum.
+const DefaultHSTSMaxAge = 2 * 365 * 24 * time.Hour
+
+// HSTSConfig configures Strict-Transport-Security. The zero value sends
+// max-age=63072000; includeSubDomains.
+type HSTSConfig struct {
+	// Disabled omits the header, e.g. when the ingress sets it.
+	Disabled bool
+	// MaxAge defaults to DefaultHSTSMaxAge when <= 0.
+	MaxAge time.Duration
+	// ExcludeSubDomains drops includeSubDomains.
+	ExcludeSubDomains bool
+	// Preload adds preload. Opt in only when every subdomain serves HTTPS:
+	// leaving the preload list takes months.
+	Preload bool
+}
+
+func (c HSTSConfig) value() string {
+	v := "max-age=" + strconv.FormatInt(int64(orDefault(c.MaxAge, DefaultHSTSMaxAge)/time.Second), 10)
+	if !c.ExcludeSubDomains {
+		v += "; includeSubDomains"
+	}
+	if c.Preload {
+		v += "; preload"
+	}
+	return v
+}
+
+// SecurityHeadersConfig configures SecurityHeadersWith.
+type SecurityHeadersConfig struct {
+	HSTS HSTSConfig
+	// TrustedProxies (CIDRs or TrustPrivateNetworks) may report HTTPS with
+	// X-Forwarded-Proto; invalid entries panic.
+	TrustedProxies []string
+}
+
+// SecurityHeaders sets defensive response headers against clickjacking, XSS,
+// MIME sniffing and caching of API responses, plus HSTS over TLS.
 func SecurityHeaders(next http.Handler) http.Handler {
+	return SecurityHeadersWith(SecurityHeadersConfig{})(next)
+}
+
+// SecurityHeadersWith is SecurityHeaders with HSTS settings; HSTS is sent over
+// TLS, or when a trusted proxy reports X-Forwarded-Proto: https.
+func SecurityHeadersWith(cfg SecurityHeadersConfig) Middleware {
+	trusted := mustPrefixes(cfg.TrustedProxies)
+	var hsts []string
+	if !cfg.HSTS.Disabled {
+		hsts = []string{cfg.HSTS.value()}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			for _, sh := range securityHeaders {
+				h[sh.key] = sh.value // keys are already canonical
+			}
+			if hsts != nil && isHTTPS(r, trusted) {
+				h["Strict-Transport-Security"] = hsts
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// isHTTPS reports a TLS connection, or a trusted proxy that terminated TLS.
+func isHTTPS(r *http.Request, trusted []netip.Prefix) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if len(trusted) == 0 {
+		return false
+	}
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https") && inPrefixes(peerIP(r), trusted)
+}
+
+// Recoverer turns a handler panic into a generic 500 and logs the panic with
+// the request ID, trace and stack. http.ErrAbortHandler is re-raised, so
+// net/http aborts the response as intended.
+func Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-
-		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self'; "+
-				"style-src 'self'; "+
-				"img-src 'self' data:; "+
-				"object-src 'none'; "+
-				"frame-ancestors 'none';")
-		h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
-		h.Set("Server", "")
-		h.Set("X-Powered-By", "")
-
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+				panic(rec)
+			}
+			ctx := r.Context()
+			logging.FromContext(ctx).LogAttrs(ctx, slog.LevelError, "panic recovered",
+				slog.String("request_id", GetRequestID(ctx)),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("panic", fmt.Sprint(rec)),
+				slog.String("stack", string(debug.Stack())),
+			)
+			internalError(w)
+		}()
 		next.ServeHTTP(w, r)
 	})
 }
@@ -97,6 +207,23 @@ func ValidateRequest(next http.Handler) http.Handler {
 
 // ── Stress / overload control ─────────────────────────────────────────────────
 
+// Stress control defaults, applied when StressControlConfig leaves a field <= 0.
+const (
+	// DefaultStressTimeout is how long a request waits for a slot before 503.
+	DefaultStressTimeout = 100 * time.Millisecond
+	// DefaultStressBufferBytes is how much of a request body is read before a
+	// slot is taken.
+	DefaultStressBufferBytes int64 = 64 << 10
+)
+
+// DefaultMaxConcurrent returns the default slot count: 64 per GOMAXPROCS, at
+// least 256. Handlers are mostly I/O-bound (DB, downstream HTTP), so the cap
+// guards memory and backend fan-out rather than CPU; a few dozen slots would
+// turn ordinary latency spikes into 503s.
+func DefaultMaxConcurrent() int {
+	return max(256, 64*runtime.GOMAXPROCS(0))
+}
+
 // RouteLimit defines per-route concurrency constraints.
 type RouteLimit struct {
 	Path          string
@@ -104,11 +231,23 @@ type RouteLimit struct {
 	Timeout       time.Duration
 }
 
-// StressControlConfig holds global and per-route concurrency settings.
+// StressControlConfig holds global and per-route concurrency settings. The
+// limits are process-wide, shared by every client, not per client: pair them
+// with the rate limiter for per-client fairness.
 type StressControlConfig struct {
+	// DefaultMaxConcurrent caps requests in flight outside RouteLimits;
+	// <= 0 uses DefaultMaxConcurrent().
 	DefaultMaxConcurrent int
-	DefaultTimeout       time.Duration
-	RouteLimits          []RouteLimit
+	// DefaultTimeout is the wait for a slot; <= 0 uses DefaultStressTimeout.
+	DefaultTimeout time.Duration
+	// RouteLimits give path prefixes their own pool, e.g. uploads, so slow
+	// routes cannot drain the default pool.
+	RouteLimits []RouteLimit
+	// BufferBodyBytes of each request body are read before a slot is taken,
+	// so clients trickling a small body never hold a slot. Bodies above it
+	// take the slot once the prefix arrived and are then bounded only by the
+	// read timeouts. <= 0 uses DefaultStressBufferBytes.
+	BufferBodyBytes int64
 }
 
 // NewStressControlMiddleware limits the number of concurrent requests served
@@ -117,7 +256,12 @@ type StressControlConfig struct {
 func NewStressControlMiddleware(cfg StressControlConfig) Middleware {
 	type entry struct {
 		path    string
-		handler Middleware
+		limiter Middleware
+	}
+
+	bufferBytes := cfg.BufferBodyBytes
+	if bufferBytes <= 0 {
+		bufferBytes = DefaultStressBufferBytes
 	}
 
 	defaultLimiter := newSemaphoreLimiter(cfg.DefaultMaxConcurrent, cfg.DefaultTimeout)
@@ -126,22 +270,54 @@ func NewStressControlMiddleware(cfg StressControlConfig) Middleware {
 	for _, rl := range cfg.RouteLimits {
 		routeLimiters = append(routeLimiters, entry{
 			path:    rl.Path,
-			handler: newSemaphoreLimiter(rl.MaxConcurrent, rl.Timeout),
+			limiter: newSemaphoreLimiter(rl.MaxConcurrent, rl.Timeout),
 		})
 	}
 
 	return func(next http.Handler) http.Handler {
+		defaultHandler := defaultLimiter(next)
+		routeHandlers := make([]http.Handler, len(routeLimiters))
+		for i, rl := range routeLimiters {
+			routeHandlers[i] = rl.limiter(next)
+		}
+
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			for _, rl := range routeLimiters {
+			bufferBody(r, bufferBytes)
+			for i, rl := range routeLimiters {
 				if strings.HasPrefix(r.URL.Path, rl.path) {
-					rl.handler(next).ServeHTTP(w, r)
+					routeHandlers[i].ServeHTTP(w, r)
 					return
 				}
 			}
-			defaultLimiter(next).ServeHTTP(w, r)
+			defaultHandler.ServeHTTP(w, r)
 		})
 	}
 }
+
+// bufferBody reads up to limit bytes of r.Body into memory and puts them back
+// in front of the unread rest. The buffer grows with the bytes received, so a
+// slow client costs memory in proportion to what it actually sent.
+func bufferBody(r *http.Request, limit int64) {
+	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
+		return
+	}
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(io.LimitReader(r.Body, limit))
+	rest := io.Reader(r.Body)
+	if err != nil {
+		rest = errReader{err} // keep the failure for the handler to see
+	}
+	r.Body = bufferedBody{Reader: io.MultiReader(&buf, rest), Closer: r.Body}
+}
+
+type bufferedBody struct {
+	io.Reader
+	io.Closer
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 // newSemaphoreLimiter returns a middleware that allows at most max concurrent
 // requests. If the semaphore is not acquired within timeout, the request is
@@ -149,10 +325,10 @@ func NewStressControlMiddleware(cfg StressControlConfig) Middleware {
 // releases a waiting request immediately.
 func newSemaphoreLimiter(max int, timeout time.Duration) Middleware {
 	if max <= 0 {
-		max = 100
+		max = DefaultMaxConcurrent()
 	}
 	if timeout <= 0 {
-		timeout = 50 * time.Millisecond
+		timeout = DefaultStressTimeout
 	}
 
 	sem := make(chan struct{}, max)
@@ -167,6 +343,7 @@ func newSemaphoreLimiter(max int, timeout time.Duration) Middleware {
 				defer func() { <-sem }()
 				next.ServeHTTP(w, r)
 			case <-ctx.Done():
+				w.Header().Set("Retry-After", "1")
 				http.Error(w, "server busy", http.StatusServiceUnavailable)
 			}
 		})

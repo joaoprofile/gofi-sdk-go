@@ -1,22 +1,75 @@
 package netx
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 )
 
 type contextKey string
 
 const RequestIDKey contextKey = "request_id"
+
+// RequestIDHeader carries the request ID in both directions.
+const RequestIDHeader = "X-Request-Id"
+
+// maxRequestIDLen bounds a client-supplied request ID.
+const maxRequestIDLen = 64
+
+type exposeCauseKey struct{}
+
+// requestContext stores the request ID (the client's X-Request-Id when it is
+// 1-64 of [A-Za-z0-9._-], a random one otherwise), echoes it in the response,
+// and records whether RespondError may expose error causes.
+func requestContext(exposeCause bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			id := r.Header.Get(RequestIDHeader)
+			if !validRequestID(id) {
+				id = generateRequestID()
+			}
+			w.Header().Set(RequestIDHeader, id)
+			ctx := context.WithValue(r.Context(), RequestIDKey, id)
+			ctx = context.WithValue(ctx, chiMiddleware.RequestIDKey, id)
+			if exposeCause {
+				ctx = context.WithValue(ctx, exposeCauseKey{}, true)
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// validRequestID accepts 1-64 characters of [A-Za-z0-9._-], so a client ID
+// can neither forge log fields nor bloat them.
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// exposeCause reports whether the server allows error causes in responses.
+func exposeCause(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	v, _ := r.Context().Value(exposeCauseKey{}).(bool)
+	return v
+}
 
 // responseWriter wraps http.ResponseWriter to capture the status code written
 // by the handler so the logging middleware can evaluate it after the fact.
@@ -28,6 +81,11 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush keeps streaming responses (SSE, chunked) working behind the logger.
+func (rw *responseWriter) Flush() {
+	_ = http.NewResponseController(rw.ResponseWriter).Flush()
 }
 
 // Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
@@ -50,25 +108,24 @@ func LoggingMiddleware() Middleware {
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-			reqID := chiMiddleware.GetReqID(r.Context())
-			if reqID == "" {
-				reqID = generateRequestID()
+			ctx := r.Context()
+			reqID := GetRequestID(ctx)
+			if reqID == "" { // used outside NewServer
+				reqID = cmp.Or(chiMiddleware.GetReqID(ctx), generateRequestID())
+				ctx = context.WithValue(ctx, RequestIDKey, reqID)
+				r = r.WithContext(ctx)
 			}
+			next.ServeHTTP(rw, r)
 
-			ctx := context.WithValue(r.Context(), RequestIDKey, reqID)
-			next.ServeHTTP(rw, r.WithContext(ctx))
-
+			// Attributes are built only for the responses that are logged.
 			status := rw.statusCode
-			log := logging.FromContext(ctx)
-			attrs := requestAttrs(reqID, r, status, time.Since(start))
-
 			switch {
 			case status >= 500:
-				log.Error("server error", attrs...)
+				logging.FromContext(ctx).LogAttrs(ctx, slog.LevelError, "server error", requestAttrs(reqID, r, status, time.Since(start))...)
 			case status == http.StatusUnauthorized,
 				status == http.StatusForbidden,
 				status == http.StatusTooManyRequests:
-				log.Warn("access denied", attrs...)
+				logging.FromContext(ctx).LogAttrs(ctx, slog.LevelWarn, "access denied", requestAttrs(reqID, r, status, time.Since(start))...)
 			}
 		})
 	}
@@ -77,8 +134,8 @@ func LoggingMiddleware() Middleware {
 // LogRateLimit logs a rate-limit event at Warn level with trace context.
 func LogRateLimit(r *http.Request) {
 	logging.FromContext(r.Context()).Warn("rate limit exceeded",
-		slog.String("ip", extractIP(r)),
-		slog.String("api_key", extractAPIKey(r)),
+		slog.String("ip", clientIP(r)),
+		apiKeyAttr(r),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 	)
@@ -87,8 +144,8 @@ func LogRateLimit(r *http.Request) {
 // LogInvalidAPIKey logs an invalid API key attempt at Warn level.
 func LogInvalidAPIKey(r *http.Request) {
 	logging.FromContext(r.Context()).Warn("invalid api key",
-		slog.String("ip", extractIP(r)),
-		slog.String("api_key", extractAPIKey(r)),
+		slog.String("ip", clientIP(r)),
+		apiKeyAttr(r),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 	)
@@ -97,7 +154,7 @@ func LogInvalidAPIKey(r *http.Request) {
 // LogIPBlocked logs a blocked IP attempt at Warn level.
 func LogIPBlocked(r *http.Request, clientName string) {
 	logging.FromContext(r.Context()).Warn("ip not allowed",
-		slog.String("ip", extractIP(r)),
+		slog.String("ip", clientIP(r)),
 		slog.String("client", clientName),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
@@ -107,7 +164,7 @@ func LogIPBlocked(r *http.Request, clientName string) {
 // LogServerError logs an application error at Error level with trace context.
 func LogServerError(r *http.Request, err error) {
 	logging.FromContext(r.Context()).Error("server error",
-		slog.String("ip", extractIP(r)),
+		slog.String("ip", clientIP(r)),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Any("error", err),
@@ -120,21 +177,18 @@ func GetRequestID(ctx context.Context) string {
 	return id
 }
 
-func requestAttrs(reqID string, r *http.Request, status int, latency time.Duration) []any {
-	return []any{
+func requestAttrs(reqID string, r *http.Request, status int, latency time.Duration) []slog.Attr {
+	return []slog.Attr{
 		slog.String("request_id", reqID),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Int("status", status),
-		slog.String("ip", extractIP(r)),
+		slog.String("ip", clientIP(r)),
 		slog.Duration("latency", latency),
 	}
 }
 
+// generateRequestID returns 128 random bits (crypto/rand, base32).
 func generateRequestID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
+	return rand.Text()
 }

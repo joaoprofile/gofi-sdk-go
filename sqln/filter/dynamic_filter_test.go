@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,7 +90,7 @@ func TestFilters_Add_MultipleFilters(t *testing.T) {
 // Empty Filters
 
 func TestQueryBuild_NoFilters_ReturnsBaseQuery(t *testing.T) {
-	qp := NewQueryBuildWithDialect(base, NewFilters(), pg)
+	qp := build(t, base, NewFilters(), pg)
 	assert.Equal(t, base, qp.Query)
 	assert.Empty(t, qp.Params)
 }
@@ -99,52 +99,52 @@ func TestQueryBuild_NoFilters_ReturnsBaseQuery(t *testing.T) {
 
 func TestQueryBuild_Eq_String(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("status", Eq, "active"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( status = $1 )", qp.Query)
 	assert.Equal(t, []any{StringValue("active")}, qp.Params)
 }
 
 func TestQueryBuild_Eq_Int(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("age", Eq, 30))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( age = $1 )", qp.Query)
 	assert.Equal(t, []any{IntValue(30)}, qp.Params)
 }
 
 func TestQueryBuild_Eq_Float(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("price", Eq, 9.99))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( price = $1 )", qp.Query)
 	assert.Equal(t, []any{FloatValue(9.99)}, qp.Params)
 }
 
 func TestQueryBuild_NotEqual_Scalar(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("status", NotEqual, "inactive"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( status != $1 )", qp.Query)
 }
 
 func TestQueryBuild_Less(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("age", Less, 18))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( age < $1 )", qp.Query)
 }
 
 func TestQueryBuild_LessOrEqual(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("age", LessOrEqual, 18))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( age <= $1 )", qp.Query)
 }
 
 func TestQueryBuild_Greater(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("price", Greater, 100.0))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( price > $1 )", qp.Query)
 }
 
 func TestQueryBuild_GreaterOrEqual(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("price", GreaterOrEqual, 100))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( price >= $1 )", qp.Query)
 }
 
@@ -152,14 +152,14 @@ func TestQueryBuild_GreaterOrEqual(t *testing.T) {
 
 func TestQueryBuild_In_MultipleValues(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("status", In, []any{"a", "b", "c"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( status IN ($1, $2, $3) )", qp.Query)
 	assert.Len(t, qp.Params, 3)
 }
 
 func TestQueryBuild_NotIn_MultipleValues(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("tag", NotIn, []any{"x", "y"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( tag NOT IN ($1, $2) )", qp.Query)
 	assert.Len(t, qp.Params, 2)
 }
@@ -169,14 +169,14 @@ func TestQueryBuild_NotIn_MultipleValues(t *testing.T) {
 
 func TestQueryBuild_In_SingleValue_CollapsesToEq(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("status", In, []any{"a"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( status = $1 )", qp.Query)
 	assert.Equal(t, []any{StringValue("a")}, qp.Params)
 }
 
 func TestQueryBuild_NotIn_SingleValue_CollapsesToNotEqual(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("tag", NotIn, []any{"x"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( tag != $1 )", qp.Query)
 	assert.Equal(t, []any{StringValue("x")}, qp.Params)
 }
@@ -184,21 +184,21 @@ func TestQueryBuild_NotIn_SingleValue_CollapsesToNotEqual(t *testing.T) {
 // Eq with slice → IN (semantic alias)
 func TestQueryBuild_Eq_Slice_ProducesIN(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("id", Eq, []any{1, 2, 3}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( id IN ($1, $2, $3) )", qp.Query)
 }
 
 // != with slice → NOT IN
 func TestQueryBuild_NotEqual_Slice_ProducesNotIN(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("highlight", NotEqual, []any{"NON_CATALOG", "SPONSORED"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( highlight NOT IN ($1, $2) )", qp.Query)
 }
 
 // Single-element slice treated as scalar
 func TestQueryBuild_SingleElementSlice_TreatedAsScalar(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("marketplace_id", Eq, []any{2}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( marketplace_id = $1 )", qp.Query)
 	assert.Len(t, qp.Params, 1)
 }
@@ -207,68 +207,76 @@ func TestQueryBuild_SingleElementSlice_TreatedAsScalar(t *testing.T) {
 
 func TestQueryBuild_Contains_PostgreSQL_UsesILIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", Contains, "joão"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base+" AND ( name ILIKE $1 )", qp.Query)
+	qp := build(t, base, fs, pg)
+	assert.Equal(t, base+" AND ( name ILIKE $1 ESCAPE '!' )", qp.Query)
 	assert.Equal(t, []any{"%joão%"}, qp.Params)
 }
 
 func TestQueryBuild_Contains_MySQL_UsesLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", Contains, "maria"))
-	qp := NewQueryBuildWithDialect(base, fs, my)
-	assert.Equal(t, base+" AND ( name LIKE ? )", qp.Query)
+	qp := build(t, base, fs, my)
+	assert.Equal(t, base+" AND ( name LIKE ? ESCAPE '!' )", qp.Query)
 	assert.Equal(t, []any{"%maria%"}, qp.Params)
 }
 
 func TestQueryBuild_Contains_SQLServer_UsesLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", Contains, "ana"))
-	qp := NewQueryBuildWithDialect(base, fs, mssql)
-	assert.Equal(t, base+" AND ( name LIKE @p1 )", qp.Query)
+	qp := build(t, base, fs, mssql)
+	assert.Equal(t, base+" AND ( name LIKE @p1 ESCAPE '!' )", qp.Query)
 }
 
 func TestQueryBuild_Contains_Oracle_UsesLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", Contains, "pedro"))
-	qp := NewQueryBuildWithDialect(base, fs, ora)
-	assert.Equal(t, base+" AND ( name LIKE :1 )", qp.Query)
+	qp := build(t, base, fs, ora)
+	assert.Equal(t, base+" AND ( name LIKE :1 ESCAPE '!' )", qp.Query)
 }
 
 func TestQueryBuild_NotContains_PostgreSQL_UsesNotILIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", NotContains, "bot"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base+" AND ( name NOT ILIKE $1 )", qp.Query)
+	qp := build(t, base, fs, pg)
+	assert.Equal(t, base+" AND ( name NOT ILIKE $1 ESCAPE '!' )", qp.Query)
 	assert.Equal(t, []any{"%bot%"}, qp.Params)
 }
 
 func TestQueryBuild_NotContains_MySQL_UsesNotLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("name", NotContains, "bot"))
-	qp := NewQueryBuildWithDialect(base, fs, my)
-	assert.Equal(t, base+" AND ( name NOT LIKE ? )", qp.Query)
+	qp := build(t, base, fs, my)
+	assert.Equal(t, base+" AND ( name NOT LIKE ? ESCAPE '!' )", qp.Query)
 }
 
 func TestQueryBuild_Like_AlwaysCaseSensitiveLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("code", Like, "MLB"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base+" AND ( code LIKE $1 )", qp.Query)
+	qp := build(t, base, fs, pg)
+	assert.Equal(t, base+" AND ( code LIKE $1 ESCAPE '!' )", qp.Query)
 	assert.Equal(t, []any{"%MLB%"}, qp.Params)
 }
 
 func TestQueryBuild_Like_MySQL_AlsoCaseSensitiveLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("code", Like, "MLB"))
-	qp := NewQueryBuildWithDialect(base, fs, my)
-	assert.Equal(t, base+" AND ( code LIKE ? )", qp.Query)
+	qp := build(t, base, fs, my)
+	assert.Equal(t, base+" AND ( code LIKE ? ESCAPE '!' )", qp.Query)
 }
 
 func TestQueryBuild_NotLike_AlwaysCaseSensitiveNotLIKE(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("code", NotLike, "TMP"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base+" AND ( code NOT LIKE $1 )", qp.Query)
+	qp := build(t, base, fs, pg)
+	assert.Equal(t, base+" AND ( code NOT LIKE $1 ESCAPE '!' )", qp.Query)
 	assert.Equal(t, []any{"%TMP%"}, qp.Params)
+}
+
+// Regression: % and _ in a client value were wildcards, so "%" matched
+// every row and "a_%" forced pattern scans.
+func TestQueryBuild_LikeValueIsLiteral(t *testing.T) {
+	fs := NewFilters().Add(NewFilter("name", Contains, `50%_off!\`))
+	qp := build(t, base, fs, pg)
+	assert.Equal(t, []any{`%50!%!_off!!\%`}, qp.Params)
 }
 
 // Range Operator
 
 func TestQueryBuild_Between_StringEncoded(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("created_at", Between, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( created_at BETWEEN $1 AND $2 )", qp.Query)
 	assert.Len(t, qp.Params, 2)
 	_, ok := qp.Params[0].(time.Time)
@@ -279,7 +287,7 @@ func TestQueryBuild_Between_TimeSliceDirect(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
 	fs := NewFilters().Add(NewFilter("updated_at", Between, []any{start, end}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( updated_at BETWEEN $1 AND $2 )", qp.Query)
 	assert.Equal(t, start, qp.Params[0])
 	assert.Equal(t, end, qp.Params[1])
@@ -287,19 +295,19 @@ func TestQueryBuild_Between_TimeSliceDirect(t *testing.T) {
 
 func TestQueryBuild_Between_MySQL_UsesQuestionMark(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("created_at", Between, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z"))
-	qp := NewQueryBuildWithDialect(base, fs, my)
+	qp := build(t, base, fs, my)
 	assert.Equal(t, base+" AND ( created_at BETWEEN ? AND ? )", qp.Query)
 }
 
 func TestQueryBuild_Between_SQLServer_UsesAtP(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("created_at", Between, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z"))
-	qp := NewQueryBuildWithDialect(base, fs, mssql)
+	qp := build(t, base, fs, mssql)
 	assert.Equal(t, base+" AND ( created_at BETWEEN @p1 AND @p2 )", qp.Query)
 }
 
 func TestQueryBuild_Between_Oracle_UsesColonN(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("created_at", Between, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z"))
-	qp := NewQueryBuildWithDialect(base, fs, ora)
+	qp := build(t, base, fs, ora)
 	assert.Equal(t, base+" AND ( created_at BETWEEN :1 AND :2 )", qp.Query)
 }
 
@@ -307,21 +315,21 @@ func TestQueryBuild_Between_Oracle_UsesColonN(t *testing.T) {
 
 func TestQueryBuild_IsNull_ExplicitCondition(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("deleted_at", IsNull, nil))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( deleted_at IS NULL )", qp.Query)
 	assert.Empty(t, qp.Params)
 }
 
 func TestQueryBuild_IsNotNull_ExplicitCondition(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("deleted_at", IsNotNull, nil))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( deleted_at IS NOT NULL )", qp.Query)
 	assert.Empty(t, qp.Params)
 }
 
 func TestQueryBuild_ImplicitIsNull_WhenValueNil(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("archived_at", Eq, nil))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( archived_at IS NULL )", qp.Query)
 	assert.Empty(t, qp.Params)
 }
@@ -333,7 +341,7 @@ func TestQueryBuild_MultipleFilters_WithAND(t *testing.T) {
 		Add(NewFilter("age", GreaterOrEqual, 18)).
 		Add(AND()).
 		Add(NewFilter("status", Eq, "active"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( age >= $1 AND status = $2 )", qp.Query)
 	assert.Equal(t, []any{IntValue(18), StringValue("active")}, qp.Params)
 }
@@ -343,7 +351,7 @@ func TestQueryBuild_MultipleFilters_WithOR(t *testing.T) {
 		Add(NewFilter("type", Eq, "A")).
 		Add(OR()).
 		Add(NewFilter("type", Eq, "B"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( type = $1 OR type = $2 )", qp.Query)
 }
 
@@ -354,7 +362,7 @@ func TestQueryBuild_MixedLogicalOperators(t *testing.T) {
 		Add(NewFilter("b", Eq, 2)).
 		Add(OR()).
 		Add(NewFilter("c", Eq, 3))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( a = $1 AND b = $2 OR c = $3 )", qp.Query)
 }
 
@@ -365,7 +373,7 @@ func TestQueryBuild_MySQL_PlaceholderStyle(t *testing.T) {
 		Add(NewFilter("a", Eq, 1)).
 		Add(AND()).
 		Add(NewFilter("b", Eq, "x"))
-	qp := NewQueryBuildWithDialect(base, fs, my)
+	qp := build(t, base, fs, my)
 	assert.Equal(t, base+" AND ( a = ? AND b = ? )", qp.Query)
 }
 
@@ -374,7 +382,7 @@ func TestQueryBuild_SQLServer_PlaceholderStyle(t *testing.T) {
 		Add(NewFilter("a", Eq, 1)).
 		Add(AND()).
 		Add(NewFilter("b", Eq, "x"))
-	qp := NewQueryBuildWithDialect(base, fs, mssql)
+	qp := build(t, base, fs, mssql)
 	assert.Equal(t, base+" AND ( a = @p1 AND b = @p2 )", qp.Query)
 }
 
@@ -383,7 +391,7 @@ func TestQueryBuild_Oracle_PlaceholderStyle(t *testing.T) {
 		Add(NewFilter("a", Eq, 1)).
 		Add(AND()).
 		Add(NewFilter("b", Eq, "x"))
-	qp := NewQueryBuildWithDialect(base, fs, ora)
+	qp := build(t, base, fs, ora)
 	assert.Equal(t, base+" AND ( a = :1 AND b = :2 )", qp.Query)
 }
 
@@ -392,7 +400,7 @@ func TestQueryBuild_Oracle_PlaceholderStyle(t *testing.T) {
 func TestNewQueryBuild_PostgresStyle_ExplicitDialect(t *testing.T) {
 	// NewQueryBuild requires a global connection; use NewQueryBuildWithDialect for dialect control.
 	fs := NewFilters().Add(NewFilter("status", Eq, "active"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( status = $1 )", qp.Query)
 }
 
@@ -409,7 +417,7 @@ func TestQueryBuild_UserExampleScenario(t *testing.T) {
 		Add(AND()).
 		Add(NewFilter("l.buybox_highlight", NotEqual, []any{"NON_CATALOG"}))
 
-	qp := NewQueryBuildWithDialect("SELECT * FROM listings l WHERE 1=1", fs, pg)
+	qp := build(t, "SELECT * FROM listings l WHERE 1=1", fs, pg)
 
 	assert.Equal(t,
 		"SELECT * FROM listings l WHERE 1=1 AND ( l.sku_marketplace = $1 AND l.marketplace_id = $2 AND l.buybox_highlight != $3 )",
@@ -456,34 +464,6 @@ func TestContainsNotAllowedValue_SafeValues(t *testing.T) {
 }
 
 // Internal Helpers
-
-func TestQueryBuild_InvalidCondition_FilterSkipped(t *testing.T) {
-	// A filter with an unknown operator must be silently skipped; base query is returned as-is.
-	fs := NewFilters().Add(NewFilter("field", "UNKNOWN_OP", "value"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base, qp.Query)
-	assert.Empty(t, qp.Params)
-}
-
-func TestQueryBuild_InvalidLogicalOperator_FilterSkipped(t *testing.T) {
-	// An invalid logical operator must be silently skipped; surrounding conditions still build.
-	fs := NewFilters().
-		Add(NewFilter("a", Eq, 1)).
-		Add(&Filter{LogicalOperator: "XOR"}).
-		Add(NewFilter("b", Eq, 2))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	// "XOR" filter is dropped; "a" and "b" remain, joined with implicit AND from criteria builder.
-	assert.Contains(t, qp.Query, "a = $1")
-	assert.Contains(t, qp.Query, "b = $2")
-}
-
-func TestQueryBuild_InvalidBetweenSlice_FilterSkipped(t *testing.T) {
-	// BETWEEN with a slice that is not []time.Time must be silently skipped.
-	fs := NewFilters().Add(NewFilter("created_at", Between, []any{"not-a-time", "also-not"}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base, qp.Query)
-	assert.Empty(t, qp.Params)
-}
 
 func TestResolveValueType_TypeMapping(t *testing.T) {
 	assert.Equal(t, StringValue("hello"), resolveValueType("hello"))
@@ -550,30 +530,14 @@ func TestToTimeSlice_InvalidElement(t *testing.T) {
 
 func TestQueryBuild_LessOrEqual_SliceExpandsWithOR(t *testing.T) {
 	fs := NewFilters().Add(NewFilter("score", LessOrEqual, []any{10, 20}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 	assert.Equal(t, base+" AND ( (score <= $1 OR score <= $2) )", qp.Query)
 	assert.Len(t, qp.Params, 2)
 }
 
 // buildSlicePredicate — empty slice is skipped
 
-func TestQueryBuild_EmptySlice_FilterSkipped(t *testing.T) {
-	fs := NewFilters().Add(NewFilter("id", In, []any{}))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	assert.Equal(t, base, qp.Query)
-	assert.Empty(t, qp.Params)
-}
-
 // buildScalarPredicate — []time.Time value with a non-BETWEEN condition is rejected
-
-func TestBuildScalarPredicate_TimeSlice_NonBetween_FilterSkipped(t *testing.T) {
-	// A date-range string resolves to []time.Time; any condition other than BETWEEN must be rejected.
-	fs := NewFilters().Add(NewFilter("created_at", Eq, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
-	// The filter is skipped — base query is returned unchanged.
-	assert.Equal(t, base, qp.Query)
-	assert.Empty(t, qp.Params)
-}
 
 // scalarConditionPredicate — default branch (operator not handled by switch)
 
@@ -691,7 +655,7 @@ func TestNewQueryBuild_UsesGlobalDialect_WhenConnectionIsSet(t *testing.T) {
 	setFilterTestGlobalDialect(filterTestDialect{})
 
 	fs := NewFilters().Add(NewFilter("name", Eq, "Emilia"))
-	qp := NewQueryBuild(base, fs)
+	qp := buildGlobal(t, base, fs)
 
 	// filterTestDialect uses @pN placeholders, not PostgreSQL $N.
 	assert.Equal(t, base+" AND ( name = @p1 )", qp.Query)
@@ -706,7 +670,7 @@ func TestNewQueryBuild_ContainsDialect_UsesGlobalDialectForLike(t *testing.T) {
 	setFilterTestGlobalDialect(filterTestDialect{})
 
 	fs := NewFilters().Add(NewFilter("name", Contains, "Emilia"))
-	qp := NewQueryBuild(base, fs)
+	qp := buildGlobal(t, base, fs)
 
 	// filterTestDialect.Like produces LIKE, not ILIKE.
 	assert.Contains(t, qp.Query, "LIKE")
@@ -724,7 +688,7 @@ func TestNewQueryBuildWithDialect_ExplicitDialectTakesPrecedence(t *testing.T) {
 
 	// But we pass pgDialect explicitly — it must win.
 	fs := NewFilters().Add(NewFilter("status", Eq, "ok"))
-	qp := NewQueryBuildWithDialect(base, fs, pg)
+	qp := build(t, base, fs, pg)
 
 	assert.Equal(t, base+" AND ( status = $1 )", qp.Query)
 }
@@ -738,8 +702,27 @@ func TestNewQueryBuildWithDialect_NilDialect_FallsBackToGlobal(t *testing.T) {
 	setFilterTestGlobalDialect(filterTestDialect{})
 
 	fs := NewFilters().Add(NewFilter("id", Eq, 42))
-	qp := NewQueryBuildWithDialect(base, fs, nil)
+	qp := build(t, base, fs, nil)
 
 	// nil dialect falls back to the global → filterTestDialect → @pN.
 	assert.Equal(t, base+" AND ( id = @p1 )", qp.Query)
+}
+
+// Invalid filters reject the whole set instead of being dropped, which could
+// silently widen or reshape the query.
+func TestBuild_InvalidFiltersAreRejected(t *testing.T) {
+	tests := map[string]*Filters{
+		"unknown condition":          NewFilters().Add(NewFilter("field", "UNKNOWN_OP", "value")),
+		"unknown logical operator":   NewFilters().Add(NewFilter("a", Eq, 1), &Filter{LogicalOperator: "XOR"}, NewFilter("b", Eq, 2)),
+		"between without times":      NewFilters().Add(NewFilter("created_at", Between, []any{"not-a-time", "also-not"})),
+		"empty IN list":              NewFilters().Add(NewFilter("id", In, []any{})),
+		"date range without BETWEEN": NewFilters().Add(NewFilter("created_at", Eq, "2024-01-01T00:00:00Z|2024-12-31T23:59:59Z")),
+	}
+	for name, fs := range tests {
+		t.Run(name, func(t *testing.T) {
+			qp, err := Build(base, nil, fs, allowAll(fs), pg)
+			assert.Nil(t, qp)
+			assert.ErrorIs(t, err, ErrInvalidFilter)
+		})
+	}
 }

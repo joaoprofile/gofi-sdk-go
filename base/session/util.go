@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-var sessionCounter uint64
+var sessionCounter atomic.Uint64
 
 func GenerateSessionID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 
-	counter := atomic.AddUint64(&sessionCounter, 1)
+	counter := sessionCounter.Add(1)
 
 	return fmt.Sprintf(
 		"session_%s_%x_%x",
@@ -26,7 +26,7 @@ func GenerateSessionID() string {
 	)
 }
 
-func NewKey(prefix string, parts ...interface{}) string {
+func NewKey(prefix string, parts ...any) string {
 	var b strings.Builder
 	b.WriteString(prefix)
 	for _, part := range parts {

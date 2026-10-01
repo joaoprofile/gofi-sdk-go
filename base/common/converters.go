@@ -22,6 +22,7 @@ func ToFixed(num float64, precision int) float64 {
 	return float64(int(num*output)) / output
 }
 
+//go:fix inline
 func Ptr(s string) *string {
-	return &s
+	return new(s)
 }

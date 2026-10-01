@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // memSession is a minimal in-memory SessionPort for use in core package tests.

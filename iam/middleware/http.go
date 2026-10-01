@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/joaoprofile/gofi/iam/core"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // contextKey is a private type to avoid context key collisions.

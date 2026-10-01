@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,27 +23,11 @@ func TestResultConstants(t *testing.T) {
 	assert.NotEqual(t, types.Nack, types.Ignore)
 }
 
-// ByteEncoder
-
-func TestByteEncoderEncode(t *testing.T) {
-	data := []byte("hello")
-	enc := types.ByteEncoder(data)
-
-	got, err := enc.Encode()
-	require.NoError(t, err)
-	assert.Equal(t, data, got)
-}
-
-func TestByteEncoderLength(t *testing.T) {
-	assert.Equal(t, 5, types.ByteEncoder("hello").Length())
-	assert.Equal(t, 0, types.ByteEncoder(nil).Length())
-}
-
 // Message
 
 func TestNewMessageSetsIDAndTimestamp(t *testing.T) {
 	before := time.Now()
-	msg := types.NewMessage("payload")
+	msg := testMessage("payload")
 	after := time.Now()
 
 	assert.NotEqual(t, [16]byte{}, msg.Id)
@@ -53,7 +37,7 @@ func TestNewMessageSetsIDAndTimestamp(t *testing.T) {
 
 func TestNewMessageSerializesValue(t *testing.T) {
 	type body struct{ X int }
-	msg := types.NewMessage(body{X: 42})
+	msg := testMessage(body{X: 42})
 
 	var got body
 	require.NoError(t, json.Unmarshal(msg.Value, &got))
@@ -61,19 +45,19 @@ func TestNewMessageSerializesValue(t *testing.T) {
 }
 
 func TestNewMessageInitializesHeaders(t *testing.T) {
-	msg := types.NewMessage(nil)
+	msg := testMessage(nil)
 	assert.NotNil(t, msg.Headers)
 }
 
 func TestNewMessageWithTopic(t *testing.T) {
-	msg := types.NewMessageWithTopic("orders", "data")
+	msg := testMessageWithTopic("orders", "data")
 
 	assert.Equal(t, "orders", msg.Topic)
 	assert.NotNil(t, msg.Value)
 }
 
 func TestWithTopicChaining(t *testing.T) {
-	msg := types.NewMessage("x")
+	msg := testMessage("x")
 	returned := msg.WithTopic("events")
 
 	assert.Same(t, msg, returned, "WithTopic must return the same pointer")
@@ -81,7 +65,7 @@ func TestWithTopicChaining(t *testing.T) {
 }
 
 func TestWithKeyChaining(t *testing.T) {
-	msg := types.NewMessage("x")
+	msg := testMessage("x")
 	returned := msg.WithKey("mykey")
 
 	assert.Same(t, msg, returned)
@@ -89,7 +73,7 @@ func TestWithKeyChaining(t *testing.T) {
 }
 
 func TestWithHeaderChaining(t *testing.T) {
-	msg := types.NewMessage("x")
+	msg := testMessage("x")
 	returned := msg.WithHeader("trace-id", "abc123")
 
 	assert.Same(t, msg, returned)
@@ -104,7 +88,7 @@ func TestWithHeaderCreatesMapWhenNil(t *testing.T) {
 }
 
 func TestWithHeaderMultiple(t *testing.T) {
-	msg := types.NewMessage(nil)
+	msg := testMessage(nil)
 	msg.WithHeader("a", "1").WithHeader("b", "2")
 
 	assert.Equal(t, "1", msg.Headers["a"])
@@ -112,18 +96,18 @@ func TestWithHeaderMultiple(t *testing.T) {
 }
 
 func TestStringReturnsValidJSON(t *testing.T) {
-	msg := types.NewMessageWithTopic("t", map[string]int{"n": 7})
+	msg := testMessageWithTopic("t", map[string]int{"n": 7})
 	s := msg.String()
 
 	assert.Contains(t, s, `"topic":"t"`)
 	// Must be parseable JSON
-	var raw map[string]interface{}
+	var raw map[string]any
 	require.NoError(t, json.Unmarshal([]byte(s), &raw))
 }
 
 func TestDecodeMessage(t *testing.T) {
 	type payload struct{ Score float64 }
-	msg := types.NewMessage(payload{Score: 9.5})
+	msg := testMessage(payload{Score: 9.5})
 
 	var got payload
 	require.NoError(t, msg.DecodeMessage(&got))
@@ -138,7 +122,7 @@ func TestDecodeMessageError(t *testing.T) {
 
 func TestUnpackMessage(t *testing.T) {
 	type order struct{ Amount int }
-	msg := types.NewMessage(order{Amount: 100})
+	msg := testMessage(order{Amount: 100})
 
 	got, err := types.UnpackMessage[order](msg)
 	require.NoError(t, err)
@@ -155,7 +139,7 @@ func TestUnpackMessageWrongType(t *testing.T) {
 	type src struct{ Name string }
 	type dst struct{ Age int }
 
-	msg := types.NewMessage(src{Name: "Emilia"})
+	msg := testMessage(src{Name: "Emilia"})
 
 	got, err := types.UnpackMessage[dst](msg)
 	// JSON decoding into mismatched struct succeeds (zero-value fields); no error
@@ -178,30 +162,6 @@ func TestDefaultConsumeConfigConstants(t *testing.T) {
 	assert.Greater(t, types.DefaultPollInterval, time.Duration(0))
 }
 
-// QueueAttributes
-
-func TestQueueAttributesToConsumeConfig(t *testing.T) {
-	qa := types.QueueAttributes{
-		QueueName:  "wb.orders",
-		QueueID:    "ocid1.queue.123",
-		RoutingKey: "orders.created",
-	}
-
-	cfg := qa.ToConsumeConfig()
-
-	assert.Equal(t, "wb.orders", cfg.Topic)
-	assert.Equal(t, "ocid1.queue.123", cfg.QueueID)
-	assert.Equal(t, "orders.created", cfg.RoutingKey)
-	assert.Equal(t, types.DefaultConcurrency, cfg.Concurrency)
-}
-
-func TestQueueAttributesToConsumeConfigEmpty(t *testing.T) {
-	cfg := types.QueueAttributes{}.ToConsumeConfig()
-
-	assert.Empty(t, cfg.Topic)
-	assert.Equal(t, types.DefaultConcurrency, cfg.Concurrency)
-}
-
 // BrokerEvent
 
 func TestBrokerEventTypes(t *testing.T) {
@@ -214,6 +174,7 @@ func TestBrokerEventTypes(t *testing.T) {
 		types.EventConsumerStopped,
 		types.EventProducerError,
 		types.EventConsumerError,
+		types.EventMessageDeadLettered,
 	}
 
 	seen := make(map[types.BrokerEventType]bool)
@@ -238,4 +199,41 @@ func TestBrokerEventFields(t *testing.T) {
 	assert.Equal(t, "abc-123", ev.MessageID)
 	assert.Equal(t, now, ev.Timestamp)
 	assert.NoError(t, ev.Error)
+}
+
+func TestConsumeConfigDeliveryLimit(t *testing.T) {
+	cases := []struct {
+		max, count int
+		dlq        string
+		limit      int
+		reached    bool
+	}{
+		{0, 9, "dlq", types.DefaultMaxDeliveries, false},
+		{0, types.DefaultMaxDeliveries, "dlq", types.DefaultMaxDeliveries, true},
+		{0, 1000, "", 0, false}, // no DLQ: never dropped by default
+		{3, 3, "", 3, true},     // an explicit limit applies without a DLQ
+		{3, 0, "", 3, false},    // unknown count never reaches the limit
+		{-1, 1000, "dlq", 0, false},
+	}
+	for _, c := range cases {
+		cfg := types.ConsumeConfig{MaxDeliveries: c.max, DeadLetterTopic: c.dlq}
+		if got := cfg.DeliveryLimit(); got != c.limit {
+			t.Errorf("MaxDeliveries=%d: limit %d, want %d", c.max, got, c.limit)
+		}
+		if got := cfg.DeliveryLimitReached(c.count); got != c.reached {
+			t.Errorf("MaxDeliveries=%d count=%d: reached %v, want %v", c.max, c.count, got, c.reached)
+		}
+	}
+}
+
+func TestConsumeConfigHandlerTimeout(t *testing.T) {
+	if got := (types.ConsumeConfig{}).EffectiveHandlerTimeout(); got != types.DefaultHandlerTimeout {
+		t.Errorf("zero must use the default, got %v", got)
+	}
+	if got := (types.ConsumeConfig{HandlerTimeout: -1}).EffectiveHandlerTimeout(); got != 0 {
+		t.Errorf("negative must disable it, got %v", got)
+	}
+	if got := (types.ConsumeConfig{HandlerTimeout: time.Second}).EffectiveHandlerTimeout(); got != time.Second {
+		t.Errorf("explicit value must be kept, got %v", got)
+	}
 }

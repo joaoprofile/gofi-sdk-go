@@ -11,6 +11,7 @@ package bucket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -24,7 +25,33 @@ var (
 	// ErrInvalidConfig is returned by a factory when the supplied Config is
 	// missing required fields.
 	ErrInvalidConfig = errors.New("bucket: invalid configuration")
+
+	// ErrInvalidTTL is returned by PresignGet when ttl is not positive or
+	// exceeds the store's limit.
+	ErrInvalidTTL = errors.New("bucket: invalid presign ttl")
 )
+
+// MaxPresignTTL is the longest validity PresignGet grants on any backend: the
+// S3 SigV4 limit. OCI PARs cannot be revoked by the URL holder, so the same
+// cap bounds how long a leaked URL stays usable.
+const MaxPresignTTL = 7 * 24 * time.Hour
+
+// PresignLimit returns the effective cap for limit: MaxPresignTTL when limit
+// is not positive or larger than it.
+func PresignLimit(limit time.Duration) time.Duration {
+	if limit <= 0 || limit > MaxPresignTTL {
+		return MaxPresignTTL
+	}
+	return limit
+}
+
+// CheckPresignTTL returns ErrInvalidTTL unless 0 < ttl <= PresignLimit(limit).
+func CheckPresignTTL(ttl, limit time.Duration) error {
+	if ceiling := PresignLimit(limit); ttl <= 0 || ttl > ceiling {
+		return fmt.Errorf("%w: %s must be in (0, %s]", ErrInvalidTTL, ttl, ceiling)
+	}
+	return nil
+}
 
 // Object is the provider-agnostic metadata of a stored object.
 type Object struct {
@@ -73,7 +100,9 @@ type Store interface {
 
 	// PresignGet returns a time-limited, read-only URL for a single object that
 	// a client can download directly from the backend, without proxying the
-	// bytes through the application. ttl bounds the URL's validity. OCI issues a
+	// bytes through the application. ttl bounds the URL's validity and must be
+	// in (0, limit], where limit is Config.PresignMaxTTL capped at
+	// MaxPresignTTL; otherwise it returns ErrInvalidTTL. OCI issues a
 	// Pre-Authenticated Request; S3/MinIO a presigned GET.
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 }

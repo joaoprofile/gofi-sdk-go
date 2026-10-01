@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	iamconfig "github.com/joaoprofile/gofi/iam/config"
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	iamconfig "github.com/gofi-labs/gofi-sdk-go/iam/config"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -93,7 +93,7 @@ func TestIAMService_SelectTenant_Delegates(t *testing.T) {
 	auth := &stubAuthPort{session: expected}
 	svc := buildTestService(auth, &stubTenantPort{}, &stubRBACPort{}, newMemSession())
 
-	sess, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{UserID: "u1"})
+	sess, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{UserID: "u1", Ticket: testTicket("u1")})
 	require.NoError(t, err)
 	assert.Equal(t, "sess1", sess.ID)
 }
@@ -209,7 +209,7 @@ func TestIAMService_IDPInitFlow_ProviderNotFound(t *testing.T) {
 
 func TestIAMService_IDPHandleCallback_ProviderNotFound(t *testing.T) {
 	svc := buildTestService(&stubAuthPort{}, &stubTenantPort{}, &stubRBACPort{}, newMemSession())
-	_, err := svc.IDPHandleCallback(context.Background(), "nonexistent", port.IDPCallbackInput{})
+	_, err := svc.IDPHandleCallback(context.Background(), "nonexistent", port.IDPCallbackInput{State: "s", ExpectedState: "s"})
 	assert.ErrorIs(t, err, ErrProviderNotFound)
 }
 
@@ -224,11 +224,18 @@ func TestAuthConfigFromSecurity_MapsFields(t *testing.T) {
 		AccessTokenTTL:  10 * time.Minute,
 		RefreshTokenTTL: 3 * 24 * time.Hour,
 		Issuer:          "my-issuer",
+
+		SessionMaxLifetime:       5 * 24 * time.Hour,
+		TenantTicketSecret:       ticketKey,
+		InsecureSkipTenantTicket: true,
 	}
 	cfg := AuthConfigFromSecurity(sec)
 	assert.Equal(t, 10*time.Minute, cfg.accessTokenTTL)
 	assert.Equal(t, 3*24*time.Hour, cfg.refreshTokenTTL)
 	assert.Equal(t, "my-issuer", cfg.issuer)
+	assert.Equal(t, 5*24*time.Hour, cfg.sessionMaxLifetime)
+	assert.Equal(t, ticketKey, cfg.ticketKey)
+	assert.True(t, cfg.skipTicket)
 }
 
 // --- helpers for IDP-registered service ---
@@ -329,7 +336,7 @@ func TestIAMService_IDPHandleCallback_Success(t *testing.T) {
 	)
 	svc := buildServiceWithIDP(idpSvc)
 
-	result, err := svc.IDPHandleCallback(context.Background(), "test-idp", port.IDPCallbackInput{})
+	result, err := svc.IDPHandleCallback(context.Background(), "test-idp", port.IDPCallbackInput{State: "s", ExpectedState: "s"})
 	require.NoError(t, err)
 	assert.False(t, result.IsNewUser)
 }
@@ -344,7 +351,7 @@ func TestIAMService_IDPSelectTenant_Success(t *testing.T) {
 	svc := buildServiceWithIDP(idpSvc)
 
 	sess, err := svc.IDPSelectTenant(context.Background(), "test-idp", port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testIDPTicket("test-idp", "u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "u1", sess.UserID)
@@ -367,7 +374,7 @@ func TestLocalAuth_SelectTenant_ListTenantsError(t *testing.T) {
 	auth, _ := buildLocalAuth(user, tenant, &stubTokenPort{})
 
 	_, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	assert.Error(t, err)
 }
@@ -381,11 +388,11 @@ func TestLocalAuth_SelectTenant_SessionSaveError(t *testing.T) {
 
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: token, Session: sess,
-		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour},
+		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, ticketKey: ticketKey},
 	})
 
 	_, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	assert.Error(t, err)
 }
@@ -399,11 +406,11 @@ func TestLocalAuth_RefreshToken_SessionSaveError(t *testing.T) {
 	sess := newMemSession()
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: token, Session: sess,
-		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour},
+		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, ticketKey: ticketKey},
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 
@@ -421,7 +428,7 @@ func TestLocalAuth_RefreshToken_SessionSaveError(t *testing.T) {
 
 	authWithFailSess := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: token, Session: failSess,
-		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour},
+		Cfg: AuthConfig{accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, ticketKey: ticketKey},
 	})
 
 	_, err = authWithFailSess.RefreshToken(context.Background(), session.RefreshToken)
@@ -438,13 +445,14 @@ func TestAuthConfigFromSecurity_SessionExpiryApplied(t *testing.T) {
 		accessTokenTTL:  10 * time.Minute,
 		refreshTokenTTL: 3 * 24 * time.Hour,
 		issuer:          "my-issuer",
+		ticketKey:       ticketKey,
 	}
 	auth := NewLocalAuth(LocalAuthConfig{
 		User: user, Tenant: tenant, Token: token, Session: sess, Cfg: cfg,
 	})
 
 	session, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1",
 	})
 	require.NoError(t, err)
 

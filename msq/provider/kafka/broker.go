@@ -2,8 +2,11 @@
 package kafka
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"log/slog"
@@ -13,10 +16,11 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/google/uuid"
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
 )
 
 // TopicConfig describes a Kafka topic that should be created during Setup.
@@ -27,26 +31,52 @@ type TopicConfig struct {
 	ConfigEntries     map[string]*string
 }
 
-// Config configures the Kafka broker.
+// Config configures the Kafka broker. Printing or logging it redacts the
+// password.
 type Config struct {
-	Brokers  []string
+	Brokers []string
+	// User and Password enable SASL; set both or neither.
 	User     string
 	Password string
 	UseTLS   bool
+	// TLS is the client TLS configuration (private CA, mTLS, server name);
+	// setting it enables TLS. Versions below TLS 1.2 are raised to it.
+	TLS *tls.Config `json:"-"`
 	// SASLMechanism selects the SASL mechanism: "PLAIN" (default),
 	// "SCRAM-SHA-256" or "SCRAM-SHA-512". Managed brokers such as OCI Kafka
 	// typically require SCRAM. Empty means PLAIN.
 	SASLMechanism string
-	ClientID      string
+	// AllowPlaintextSASL permits SASL PLAIN without TLS, which sends the
+	// password in clear text. Only for local development.
+	AllowPlaintextSASL bool
+	// Acks is how many replicas must store a record before a send succeeds:
+	// "all" (default, with the idempotent producer), "leader" or "none".
+	// Anything but "all" disables idempotence and can lose acknowledged
+	// records on a leader failover.
+	Acks     string
+	ClientID string
 	// Topics lists topics to be created idempotently when Setup is called.
 	Topics []TopicConfig
 }
+
+// Errors returned by New for unsafe or inconsistent configurations.
+var (
+	ErrPartialCredentials = errors.New("kafka: SASL needs both User and Password")
+	ErrUnknownMechanism   = errors.New("kafka: unknown SASL mechanism (PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512)")
+	ErrPlaintextSASL      = errors.New("kafka: SASL PLAIN without TLS sends the password in clear text; enable TLS or set AllowPlaintextSASL")
+)
 
 // clusterAdmin abstracts sarama.ClusterAdmin to allow injection of test doubles.
 type clusterAdmin interface {
 	CreateTopic(topic string, detail *sarama.TopicDetail, validateOnly bool) error
 	Close() error
 }
+
+// In-place redelivery bounds for a record the handler nacked.
+const (
+	redeliverBackoffMin = time.Second
+	redeliverBackoffMax = 30 * time.Second
+)
 
 // Broker implements port.Broker for Kafka.
 type Broker struct {
@@ -91,33 +121,22 @@ func New(cfg Config) (*Broker, error) {
 	if cfg.ClientID != "" {
 		sc.ClientID = cfg.ClientID
 	}
-	mechanism := "PLAIN"
-	if cfg.User != "" && cfg.Password != "" {
-		sc.Net.SASL.Enable = true
-		sc.Net.SASL.User = cfg.User
-		sc.Net.SASL.Password = cfg.Password
-		switch strings.ToUpper(strings.TrimSpace(cfg.SASLMechanism)) {
-		case "SCRAM-SHA-256":
-			mechanism = "SCRAM-SHA-256"
-			sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
-			sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
-				return &scramClient{HashGeneratorFcn: sha256GeneratorFcn}
-			}
-		case "SCRAM-SHA-512":
-			mechanism = "SCRAM-SHA-512"
-			sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
-			sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
-				return &scramClient{HashGeneratorFcn: sha512GeneratorFcn}
-			}
-		default:
-			sc.Net.SASL.Mechanism = sarama.SASLTypePlaintext
-		}
+	if err := applyDurability(sc, cfg.Acks); err != nil {
+		return nil, err
+	}
+	tlsEnabled := cfg.UseTLS || cfg.TLS != nil
+	mechanism, err := applySASL(sc, cfg, tlsEnabled)
+	if err != nil {
+		return nil, err
 	}
 	// TLS is independent of SASL: managed brokers commonly require SASL_SSL,
 	// but plain TLS (no auth) is also valid. Enable via MESSAGING_USE_TLS.
-	if cfg.UseTLS {
+	if tlsEnabled {
 		sc.Net.TLS.Enable = true
-		sc.Net.TLS.Config = &tls.Config{MinVersion: tls.VersionTLS12}
+		sc.Net.TLS.Config = tlsConfig(cfg.TLS)
+	}
+	if err := sc.Validate(); err != nil {
+		return nil, fmt.Errorf("kafka: invalid config: %w", err)
 	}
 
 	// Startup diagnostics: make the resolved target explicit so connection
@@ -125,7 +144,7 @@ func New(cfg Config) (*Broker, error) {
 	// MESSAGING_DEBUG=true to surface Sarama's per-broker connection errors.
 	logging.Info("kafka: broker config",
 		slog.Any("brokers", cfg.Brokers),
-		slog.Bool("tls", cfg.UseTLS),
+		slog.Bool("tls", tlsEnabled),
 		slog.Bool("sasl", sc.Net.SASL.Enable),
 		slog.String("mechanism", mechanism),
 	)
@@ -139,6 +158,94 @@ func New(cfg Config) (*Broker, error) {
 		topics:       cfg.Topics,
 		adminFactory: defaultAdminFactory,
 	}, nil
+}
+
+// applyDurability makes a confirmed send survive a leader failover by
+// default: every in-sync replica stores the record, and the idempotent
+// producer keeps retries from duplicating or reordering it.
+func applyDurability(sc *sarama.Config, acks string) error {
+	switch strings.ToLower(strings.TrimSpace(acks)) {
+	case "", "all", "-1":
+		sc.Producer.RequiredAcks = sarama.WaitForAll
+		sc.Producer.Idempotent = true
+		sc.Net.MaxOpenRequests = 1
+	case "leader", "1":
+		sc.Producer.RequiredAcks = sarama.WaitForLocal
+	case "none", "0":
+		sc.Producer.RequiredAcks = sarama.NoResponse
+	default:
+		return fmt.Errorf("kafka: invalid Acks %q (all, leader or none)", acks)
+	}
+	return nil
+}
+
+// applySASL enables SASL when credentials are set and returns the mechanism
+// name for logging. Partial credentials, unknown mechanisms and PLAIN over
+// plaintext are refused instead of silently degraded.
+func applySASL(sc *sarama.Config, cfg Config, tlsEnabled bool) (string, error) {
+	mechanism := strings.ToUpper(strings.TrimSpace(cfg.SASLMechanism))
+	if cfg.User == "" && cfg.Password == "" {
+		return "none", nil
+	}
+	if cfg.User == "" || cfg.Password == "" {
+		return "", ErrPartialCredentials
+	}
+	sc.Net.SASL.Enable = true
+	sc.Net.SASL.User = cfg.User
+	sc.Net.SASL.Password = cfg.Password
+	switch mechanism {
+	case "", "PLAIN":
+		mechanism = "PLAIN"
+		if !tlsEnabled && !cfg.AllowPlaintextSASL {
+			return "", ErrPlaintextSASL
+		}
+		sc.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+	case "SCRAM-SHA-256":
+		sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &scramClient{HashGeneratorFcn: sha256GeneratorFcn}
+		}
+	case "SCRAM-SHA-512":
+		sc.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		sc.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &scramClient{HashGeneratorFcn: sha512GeneratorFcn}
+		}
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnknownMechanism, cfg.SASLMechanism)
+	}
+	return mechanism, nil
+}
+
+// tlsConfig returns a TLS 1.2+ copy of custom, or the default when nil.
+func tlsConfig(custom *tls.Config) *tls.Config {
+	if custom == nil {
+		return &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	c := custom.Clone()
+	c.MinVersion = max(c.MinVersion, tls.VersionTLS12)
+	return c
+}
+
+// String implements fmt.Stringer with the password redacted.
+func (c Config) String() string { return fmt.Sprintf("%+v", c.redacted()) }
+
+// GoString implements fmt.GoStringer with the password redacted.
+func (c Config) GoString() string { return fmt.Sprintf("%#v", c.redacted()) }
+
+// LogValue implements slog.LogValuer with the password redacted.
+func (c Config) LogValue() slog.Value { return slog.StringValue(c.String()) }
+
+// MarshalJSON encodes the configuration with the password redacted.
+func (c Config) MarshalJSON() ([]byte, error) { return json.Marshal(c.redacted()) }
+
+type plainConfig Config
+
+func (c Config) redacted() plainConfig {
+	if c.Password != "" {
+		c.Password = "[REDACTED]"
+	}
+	c.TLS = nil // holds private keys
+	return plainConfig(c)
 }
 
 func enableSaramaDebug() bool {
@@ -198,16 +305,11 @@ func (b *Broker) NewProducer() (port.Producer, error) {
 	return &kafkaProducer{producer: prod}, nil
 }
 
-func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
+func (b *Broker) NewConsumer(cfg types.ConsumeConfig) (port.Consumer, error) {
 	groupID := cfg.GroupID
 	if groupID == "" {
 		groupID = cfg.Topic
 	}
-	concurrency := cfg.Concurrency
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-
 	sc := *b.config
 	switch cfg.InitialOffset {
 	case types.OffsetResetEarliest:
@@ -218,12 +320,11 @@ func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
 
 	brokers := b.brokers
 	return &kafkaConsumer{
-		cfg:         cfg,
-		concurrency: concurrency,
+		cfg: cfg,
 		newGroup: func() (sarama.ConsumerGroup, error) {
 			return sarama.NewConsumerGroup(brokers, groupID, &sc)
 		},
-	}
+	}, nil
 }
 
 // Producer
@@ -231,26 +332,56 @@ func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
 type kafkaProducer struct{ producer sarama.SyncProducer }
 
 func (p *kafkaProducer) SendMessage(_ context.Context, msg *types.Message) error {
-	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
-		Topic:   msg.Topic,
-		Key:     sarama.StringEncoder(msg.Key),
-		Value:   sarama.ByteEncoder(msg.Value),
-		Headers: toRecordHeaders(msg.Headers),
-	})
+	_, _, err := p.producer.SendMessage(encode(msg))
 	return err
 }
 
 func (p *kafkaProducer) SendMessagesBatch(_ context.Context, msgs []*types.Message) error {
 	batch := make([]*sarama.ProducerMessage, 0, len(msgs))
 	for _, m := range msgs {
-		batch = append(batch, &sarama.ProducerMessage{
-			Topic:   m.Topic,
-			Key:     sarama.StringEncoder(m.Key),
-			Value:   sarama.ByteEncoder(m.Value),
-			Headers: toRecordHeaders(m.Headers),
-		})
+		batch = append(batch, encode(m))
 	}
 	return p.producer.SendMessages(batch)
+}
+
+// encode writes CloudEvents binary mode: the value is the payload and the
+// attributes are record headers, so Id, type and time survive the trip.
+func encode(m *types.Message) *sarama.ProducerMessage {
+	value, headers := types.KafkaBinding.Encode(m)
+	pm := &sarama.ProducerMessage{
+		Topic:   m.Topic,
+		Value:   sarama.ByteEncoder(value),
+		Headers: toRecordHeaders(headers),
+	}
+	if m.Key != "" {
+		pm.Key = sarama.StringEncoder(m.Key)
+	}
+	if !m.Timestamp.IsZero() {
+		pm.Timestamp = m.Timestamp
+	}
+	return pm
+}
+
+// decode reads CloudEvents records and, for producers without them, keeps the
+// record's key, timestamp and headers with an Id derived from the record's
+// position, so a redelivered record keeps its Id.
+func decode(sm *sarama.ConsumerMessage) *types.Message {
+	headers := fromRecordHeaders(sm.Headers)
+	var m types.Message
+	if types.KafkaBinding.IsBinary(headers) {
+		m = types.KafkaBinding.Decode(sm.Value, headers)
+	} else {
+		m = types.Message{Value: sm.Value, Headers: headers}
+	}
+	if m.Id == uuid.Nil {
+		m.Id = types.StableID(fmt.Sprintf("kafka/%s/%d/%d", sm.Topic, sm.Partition, sm.Offset))
+	}
+	m.Topic = sm.Topic
+	m.Key = string(sm.Key)
+	if m.Timestamp.IsZero() {
+		m.Timestamp = sm.Timestamp
+	}
+	return &m
 }
 
 // toRecordHeaders converts the transport-agnostic string map into the sarama
@@ -288,61 +419,79 @@ func (p *kafkaProducer) Close() error { return p.producer.Close() }
 // Consumer
 
 type kafkaConsumer struct {
-	cfg         types.ConsumeConfig
-	concurrency int
-	newGroup    func() (sarama.ConsumerGroup, error)
+	cfg      types.ConsumeConfig
+	newGroup func() (sarama.ConsumerGroup, error)
+
+	mu     sync.Mutex
+	group  sarama.ConsumerGroup // set while Consume runs
+	paused bool
 }
 
-// Consume starts `concurrency` workers, each with its OWN sarama ConsumerGroup.
-// Each ConsumerGroup is a distinct MEMBER of the Kafka group, so
-// the topic partitions spread across them (real parallelism up to
-// min(concurrency, partitions)).
-//
-// Why not one ConsumerGroup shared by N goroutines: a single ConsumerGroup
-// has a single memberID; N goroutines calling Consume() on the same group
-// re-enter JoinGroup and invalidate each other's generation → error
-// "member not known in the current generation" in a loop (rebalance churn). One
-// group per worker removes that.
+// Consume joins the group as ONE member. Sarama runs ConsumeClaim for every
+// assigned partition in its own goroutine, so a pod processes its share of
+// partitions in parallel while each partition keeps its order.
 func (c *kafkaConsumer) Consume(ctx context.Context, handler port.MessageHandler) error {
-	topics := []string{c.cfg.Topic}
-	var wg sync.WaitGroup
-	for i := 0; i < c.concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			group, err := c.newGroup()
-			if err != nil {
-				logging.Error("kafka consumer: failed to create consumer group",
-					slog.String("topic", c.cfg.Topic),
-					slog.String("group_id", c.cfg.GroupID),
-					slog.Any("error", err))
-				return
-			}
-			defer group.Close()
-
-			h := &groupHandler{handler: handler, cfg: c.cfg}
-			for {
-				if err := group.Consume(ctx, topics, h); err != nil {
-					logging.Error("kafka consumer: session error",
-						slog.String("topic", c.cfg.Topic),
-						slog.Any("error", err))
-				}
-				if ctx.Err() != nil {
-					return
-				}
-			}
-		}()
+	group, err := c.newGroup()
+	if err != nil {
+		return fmt.Errorf("kafka consumer: create consumer group: %w", err)
 	}
-	wg.Wait()
+	defer group.Close()
+
+	c.mu.Lock()
+	c.group = group
+	if c.paused {
+		group.PauseAll()
+	}
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.group = nil
+		c.mu.Unlock()
+	}()
+
+	topics := []string{c.cfg.Topic}
+	h := &groupHandler{handler: handler, cfg: c.cfg}
+	backoff := worker.Backoff{Min: worker.ReceiveBackoffMin, Max: worker.ReceiveBackoffMax}
+	for {
+		err := group.Consume(ctx, topics, h)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			backoff.Reset() // session ended by a rebalance
+			continue
+		}
+		logging.Error("kafka consumer: session error",
+			slog.String("topic", c.cfg.Topic),
+			slog.Any("error", err))
+		_ = worker.Sleep(ctx, backoff.Next())
+	}
+}
+
+// Close is a no-op: Consume closes the group when its context ends.
+func (c *kafkaConsumer) Close() error { return nil }
+
+// Pause stops fetching on every assigned partition; the membership is kept,
+// so no rebalance happens.
+func (c *kafkaConsumer) Pause() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.paused = true
+	if c.group != nil {
+		c.group.PauseAll()
+	}
 	return nil
 }
 
-// Close is a no-op: each worker closes its own ConsumerGroup via defer when
-// Consume returns (ctx cancelled by the ConsumerManager). Kept to satisfy
-// port.Consumer.
-func (c *kafkaConsumer) Close() error  { return nil }
-func (c *kafkaConsumer) Pause() error  { return nil }
-func (c *kafkaConsumer) Resume() error { return nil }
+func (c *kafkaConsumer) Resume() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.paused = false
+	if c.group != nil {
+		c.group.ResumeAll()
+	}
+	return nil
+}
 
 // groupHandler implements sarama.ConsumerGroupHandler.
 type groupHandler struct {
@@ -370,48 +519,47 @@ func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 	}
 
 	for sm := range claim.Messages() {
-		msg := &types.Message{
-			Id:        uuid.New(),
-			Topic:     sm.Topic,
-			Key:       string(sm.Key),
-			Value:     sm.Value,
-			Timestamp: sm.Timestamp,
-			Headers:   fromRecordHeaders(sm.Headers),
+		if !h.process(session, sm) {
+			// Unmarked: the next owner of the partition reprocesses the record.
+			return nil
 		}
-
-		// Nack is the only result that retries. Keying on err instead would
-		// let (Nack, nil) through on the first attempt.
-		var lastResult types.Result
-		var lastErr error
-		for attempt := 0; attempt <= h.cfg.MaxRetries; attempt++ {
-			if attempt > 0 {
-				backoff := h.cfg.RetryBackoff
-				if backoff <= 0 {
-					backoff = time.Second
-				}
-				time.Sleep(backoff)
-			}
-			lastResult, lastErr = h.handler.Handle(context.Background(), msg)
-			if lastResult != types.Nack {
-				break
-			}
-		}
-
-		if lastResult == types.Nack {
-			// Kafka cannot redeliver one record without rewinding the whole
-			// partition, so the offset advances and the record is dropped.
-			// Always log it — a silent drop looks like a success.
-			logging.Error("kafka consumer: retries exhausted, record dropped",
-				slog.String("topic", h.cfg.Topic),
-				slog.Int("partition", int(sm.Partition)),
-				slog.Int64("offset", sm.Offset),
-				slog.String("dead_letter_topic", h.cfg.DeadLetterTopic),
-				slog.Any("error", lastErr))
-		}
-
-		// Always mark: Sarama's auto-commit only flushes offsets that were
-		// marked, so skipping this means the group never commits at all.
+		// Always mark once settled: Sarama's auto-commit only flushes marked
+		// offsets, so skipping this means the group never commits at all.
 		session.MarkMessage(sm, "")
 	}
 	return nil
+}
+
+// process runs the handler until the record is settled (Ack, Ignore, Reject
+// or dead lettered by the pipeline). Each in-place redelivery counts as a
+// delivery, so the pipeline's MaxDeliveries ends a poison record. Kafka cannot redeliver one record without
+// rewinding the partition, and marking a Nack would commit past it and lose
+// it, so a Nack is redelivered in place with backoff: the partition waits,
+// which keeps per-key order. It reports false when the session ended first.
+func (h *groupHandler) process(session sarama.ConsumerGroupSession, sm *sarama.ConsumerMessage) bool {
+	ctx := session.Context()
+	backoff := worker.Backoff{Min: cmp.Or(h.cfg.RetryBackoff, redeliverBackoffMin), Max: redeliverBackoffMax}
+	backoff.Max = max(backoff.Max, backoff.Min)
+	for attempt := 1; ; attempt++ {
+		// Retries and dead-lettering run in msq's core pipeline; the session
+		// context lets it stop waiting when the partition is revoked.
+		m := decode(sm)
+		m.DeliveryCount = attempt
+		result, err := h.handler.Handle(ctx, m)
+		if result != types.Nack {
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		logging.Error("kafka consumer: record nacked, redelivering in place (partition blocked)",
+			slog.String("topic", sm.Topic),
+			slog.Int("partition", int(sm.Partition)),
+			slog.Int64("offset", sm.Offset),
+			slog.Int("attempt", attempt),
+			slog.Any("error", err))
+		if worker.Sleep(ctx, backoff.Next()) != nil {
+			return false
+		}
+	}
 }

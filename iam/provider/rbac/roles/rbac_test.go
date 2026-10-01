@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 )
 

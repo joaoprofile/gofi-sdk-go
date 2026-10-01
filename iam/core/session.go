@@ -51,9 +51,11 @@ func generateState() (string, error) {
 	return generateSecureToken(32)
 }
 
-// generateNonce generates a 16-byte random nonce for OIDC.
-func generateNonce() (string, error) {
-	return generateSecureToken(16)
+// NonceForState derives the OIDC nonce from the flow state, so callers that only
+// persist the state (and never pass ExpectedNonce) still get replay protection.
+func NonceForState(state string) string {
+	sum := sha256.Sum256([]byte("gofi/oidc-nonce:" + state))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // buildRefreshToken builds a refresh token in the format {sessionID}.{randomBase64url}.

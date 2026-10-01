@@ -4,9 +4,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/joaoprofile/gofi/msq/provider/kafka"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/msq/provider/kafka"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +71,7 @@ func TestNewConsumerIsLazyAndReturnsConsumer(t *testing.T) {
 	broker, err := kafka.New(cfg)
 	require.NoError(t, err)
 
-	consumer := broker.NewConsumer(types.ConsumeConfig{
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{
 		Topic:       "test-topic",
 		GroupID:     "test-group",
 		Concurrency: 1,
@@ -86,7 +86,7 @@ func TestNewConsumerUsesTopicAsGroupIDWhenEmpty(t *testing.T) {
 
 	// GroupID="" should default to Topic. NewConsumer is lazy (groups are created
 	// per-worker in Consume), so it returns a non-nil consumer without a server.
-	consumer := broker.NewConsumer(types.ConsumeConfig{
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{
 		Topic:   "my-topic",
 		GroupID: "", // will be defaulted to Topic
 	})
@@ -100,7 +100,7 @@ func TestNewConsumerDefaultsConcurrencyToOne(t *testing.T) {
 
 	// Concurrency <= 0 should default to 1 without panicking. NewConsumer is lazy
 	// (groups created per-worker in Consume), so it returns a non-nil consumer.
-	consumer := broker.NewConsumer(types.ConsumeConfig{
+	consumer, _ := broker.NewConsumer(types.ConsumeConfig{
 		Topic:       "t",
 		Concurrency: 0,
 	})

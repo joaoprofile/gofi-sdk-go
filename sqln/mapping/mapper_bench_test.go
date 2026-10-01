@@ -4,8 +4,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 )
 
 // Reference implementation (no plan cache) — matches the pre-Phase-1 behavior
@@ -38,7 +36,7 @@ func collectColsNoCache(v reflect.Value, t reflect.Type) []any {
 		}
 		switch {
 		case fv.Kind() == reflect.Slice:
-			cols = append(cols, pq.Array(fv.Addr().Interface()))
+			cols = append(cols, pgArray{fv.Addr().Interface()})
 		case isNestedScannableType(fv.Type()):
 			cols = append(cols, collectColsNoCache(fv, fv.Type())...)
 		default:
@@ -96,8 +94,7 @@ type benchComplex struct {
 func BenchmarkGetMappedCols_Simple_Cached(b *testing.B) {
 	m := &benchSimple{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = GetMappedCols(m)
 	}
 }
@@ -105,8 +102,7 @@ func BenchmarkGetMappedCols_Simple_Cached(b *testing.B) {
 func BenchmarkGetMappedCols_Simple_NoCache(b *testing.B) {
 	m := &benchSimple{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = getMappedColsNoCache(m)
 	}
 }
@@ -116,8 +112,7 @@ func BenchmarkGetMappedCols_Simple_NoCache(b *testing.B) {
 func BenchmarkGetMappedCols_WithVO_Cached(b *testing.B) {
 	m := &benchWithVO{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = GetMappedCols(m)
 	}
 }
@@ -125,8 +120,7 @@ func BenchmarkGetMappedCols_WithVO_Cached(b *testing.B) {
 func BenchmarkGetMappedCols_WithVO_NoCache(b *testing.B) {
 	m := &benchWithVO{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = getMappedColsNoCache(m)
 	}
 }
@@ -136,8 +130,7 @@ func BenchmarkGetMappedCols_WithVO_NoCache(b *testing.B) {
 func BenchmarkGetMappedCols_Complex_Cached(b *testing.B) {
 	m := &benchComplex{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = GetMappedCols(m)
 	}
 }
@@ -145,8 +138,7 @@ func BenchmarkGetMappedCols_Complex_Cached(b *testing.B) {
 func BenchmarkGetMappedCols_Complex_NoCache(b *testing.B) {
 	m := &benchComplex{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = getMappedColsNoCache(m)
 	}
 }

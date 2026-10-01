@@ -21,7 +21,7 @@ func TestGenerateSessionID_Format(t *testing.T) {
 func TestGenerateSessionID_Uniqueness(t *testing.T) {
 	const n = 1000
 	ids := make(map[string]struct{}, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		id := GenerateSessionID()
 		_, exists := ids[id]
 		assert.False(t, exists, "duplicate session ID generated: %s", id)
@@ -36,7 +36,7 @@ func TestGenerateSessionID_ConcurrentUniqueness(t *testing.T) {
 	var wg sync.WaitGroup
 
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
 			id := GenerateSessionID()

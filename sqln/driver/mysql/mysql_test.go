@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +18,11 @@ func TestDriver_ParseError_NilInput_ReturnsNil(t *testing.T) {
 	assert.Nil(t, Driver{}.ParseError(nil))
 }
 
-func TestDriver_ParseError_NonNilInput_ReturnsSameError(t *testing.T) {
-	err := errors.New("mysql error")
-	assert.Equal(t, err, Driver{}.ParseError(err))
+func TestDriver_ParseError_HidesMessageKeepsCause(t *testing.T) {
+	err := errors.New("Duplicate entry 'a@b.c' for key 'email'")
+	got := Driver{}.ParseError(err)
+	assert.ErrorIs(t, got, err)
+	assert.NotContains(t, got.Error(), "a@b.c")
 }
 
 func TestDriver_Dialect_ImplementsDialectInterface(t *testing.T) {

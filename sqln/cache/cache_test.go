@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/joaoprofile/gofi/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,26 +21,32 @@ func TestMain(m *testing.M) {
 
 // Helpers
 
-// withRedis starts a miniredis server, wires it into redisInstance, and cleans
-// up when the test finishes.
+// withRedis starts a miniredis server, makes it the shared client, and
+// restores the previous one when the test finishes.
 func withRedis(t *testing.T) *miniredis.Miniredis {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	prev := redisInstance
-	redisInstance = &singletonRedis{
-		client: redis.NewClient(&redis.Options{Addr: mr.Addr()}),
-		once:   sync.Once{},
-	}
-	t.Cleanup(func() { redisInstance = prev })
+	prev := current.Load()
+	current.Store(&shared{client: redis.NewClient(&redis.Options{Addr: mr.Addr()})})
+	t.Cleanup(func() { current.Store(prev) })
 	return mr
 }
 
-// withNoRedis ensures redisInstance is nil for the duration of the test.
+// withNoRedis leaves the shared client unset for the duration of the test.
 func withNoRedis(t *testing.T) {
 	t.Helper()
-	prev := redisInstance
-	redisInstance = nil
-	t.Cleanup(func() { redisInstance = prev })
+	prev := current.Load()
+	current.Store(nil)
+	t.Cleanup(func() { current.Store(prev) })
+}
+
+// withConfig points lazy creation at mr with no shared client yet.
+func withConfig(t *testing.T, mr *miniredis.Miniredis) {
+	t.Helper()
+	prevCfg := cfg
+	Configure(Config{URI: mr.Addr()})
+	withNoRedis(t)
+	t.Cleanup(func() { cfg = prevCfg })
 }
 
 // NewCache
@@ -278,68 +284,65 @@ func TestUniqueResult_UnmarshalError_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// NewCacheRedis — initializes the singleton client using environment CacheURI
+// Shared client lifecycle
 
-func TestNewCacheRedis_InitializesClient(t *testing.T) {
-	mr := miniredis.RunT(t)
-	prevCfg := cfg
-	Configure(Config{URI: mr.Addr()})
-	t.Cleanup(func() { cfg = prevCfg })
-
-	prev := redisInstance
-	redisInstance = nil
-	t.Cleanup(func() { redisInstance = prev })
-
-	NewCacheRedis()
-
-	require.NotNil(t, redisInstance)
-	assert.NotNil(t, redisInstance.client)
+func TestInstanceRedis_CreatesOnceFromConfig(t *testing.T) {
+	withConfig(t, miniredis.RunT(t))
+	first := InstanceRedis()
+	require.NotNil(t, first)
+	assert.Same(t, first, InstanceRedis())
+	assert.NoError(t, Ping(context.Background()))
 }
 
-// NewCacheRedis — idempotent: second call is a no-op (once.Do)
-
-func TestNewCacheRedis_Idempotent_SecondCallIsNoOp(t *testing.T) {
-	mr := miniredis.RunT(t)
-	prevCfg := cfg
-	Configure(Config{URI: mr.Addr()})
-	t.Cleanup(func() { cfg = prevCfg })
-
-	prev := redisInstance
-	redisInstance = nil
-	t.Cleanup(func() { redisInstance = prev })
-
-	NewCacheRedis()
-	first := redisInstance.client
-
-	NewCacheRedis()
-	// once.Do ensures the second call does not replace the client.
-	assert.Equal(t, first, redisInstance.client)
+func TestInstanceRedis_ConcurrentFirstUseCreatesOneClient(t *testing.T) {
+	withConfig(t, miniredis.RunT(t))
+	clients := make(chan redis.UniversalClient, 20)
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() { clients <- InstanceRedis() })
+	}
+	wg.Wait()
+	close(clients)
+	first := <-clients
+	for c := range clients {
+		assert.Same(t, first, c)
+	}
 }
 
-// InstanceRedis — client==nil branch triggers NewCacheRedis
-
-func TestInstanceRedis_ClientNil_TriggersNewCacheRedis(t *testing.T) {
-	mr := miniredis.RunT(t)
-	prevCfg := cfg
-	Configure(Config{URI: mr.Addr()})
-	t.Cleanup(func() { cfg = prevCfg })
-
-	prev := redisInstance
-	redisInstance = &singletonRedis{client: nil, once: sync.Once{}}
-	t.Cleanup(func() { redisInstance = prev })
-
+// After Close the shared client stays closed instead of dialing again.
+func TestClose_DoesNotReconnect(t *testing.T) {
+	withConfig(t, miniredis.RunT(t))
 	client := InstanceRedis()
-	assert.NotNil(t, client)
+	require.NoError(t, Close())
+	require.NoError(t, Close(), "Close is idempotent")
+	assert.Same(t, client, InstanceRedis())
+	assert.ErrorIs(t, Ping(context.Background()), redis.ErrClosed)
 }
 
-// cacheDBObserver.Close — closes the client and nils redisInstance
+// Injected clients belong to the caller.
+func TestClose_LeavesInjectedClientOpen(t *testing.T) {
+	withNoRedis(t)
+	mr := miniredis.RunT(t)
+	injected := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { injected.Close() })
+	UseClient(injected)
+	require.NoError(t, Close())
+	assert.NoError(t, injected.Ping(context.Background()).Err())
+}
 
-func TestCacheDBObserver_Close_ClosesConnectionAndNilsInstance(t *testing.T) {
-	withRedis(t)
-	// withRedis cleanup restores the previous redisInstance after the test.
+func TestNewCacheRedis_UnreachableOnlyLogs(t *testing.T) {
+	prevCfg := cfg
+	Configure(Config{URI: "127.0.0.1:1"})
+	withNoRedis(t)
+	t.Cleanup(func() { cfg = prevCfg })
+	assert.NotPanics(t, NewCacheRedis)
+	assert.Error(t, Ping(context.Background()))
+}
 
-	obs := &cacheDBObserver{}
-	obs.Close()
-
-	assert.Nil(t, redisInstance)
+func TestCache_WithClientUsesItsOwnRedis(t *testing.T) {
+	withRedis(t) // shared
+	own := miniredis.RunT(t)
+	c := NewCache[string]("own", time.Minute).WithClient(redis.NewClient(&redis.Options{Addr: own.Addr()}))
+	require.NoError(t, c.SetKeyed(context.Background(), "k", "v"))
+	assert.NotEmpty(t, own.Keys(), "written to the cache's own Redis")
 }

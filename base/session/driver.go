@@ -21,8 +21,17 @@ type Driver interface {
 // DistributedLocker is the contract for distributed locking.
 // *Session implements this interface, so it can be injected wherever a DistributedLocker is expected.
 type DistributedLocker interface {
-	TryLock(ctx context.Context, key string) (bool, error)
-	Unlock(ctx context.Context, key string) error
+	// TryLock returns the owner token of the acquired lock; pass it to Unlock.
+	TryLock(ctx context.Context, key string) (token string, ok bool, err error)
+	// Unlock releases the lock only while token still owns it.
+	Unlock(ctx context.Context, key, token string) error
 	IsLocked(ctx context.Context, key string) (bool, error)
 	WithLock(ctx context.Context, key string, fn func() error) (bool, error)
+}
+
+// TokenLocker is optionally implemented by a Driver so that a lock can only be
+// released by the holder that acquired it, even after its TTL expired.
+type TokenLocker interface {
+	AcquireLockToken(ctx context.Context, key string, ttl time.Duration) (token string, ok bool, err error)
+	ReleaseLockToken(ctx context.Context, key, token string) error
 }

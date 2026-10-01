@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/joaoprofile/gofi/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
 )
 
 // MessageHandler is the interface for processing broker messages.

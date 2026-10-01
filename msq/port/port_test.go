@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +27,7 @@ func TestMessageHandlerFuncHandle(t *testing.T) {
 		return types.Ack, nil
 	})
 
-	msg := types.NewMessageWithTopic("t", "payload")
+	msg := testMessageWithTopic("t", "payload")
 	result, err := fn.Handle(context.Background(), msg)
 
 	require.NoError(t, err)

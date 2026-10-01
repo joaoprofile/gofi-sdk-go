@@ -15,3 +15,10 @@ type Dialect interface {
 
 	BuildCount(query string) string
 }
+
+// ArrayDialect is implemented by dialects that bind a whole slice as one
+// array parameter, so IN lists keep the same SQL text for any length.
+type ArrayDialect interface {
+	// ArrayMembership renders field IN / NOT IN for an array placeholder.
+	ArrayMembership(field, param string, negate bool) string
+}

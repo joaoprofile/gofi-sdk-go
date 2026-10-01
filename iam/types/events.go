@@ -8,6 +8,7 @@ type EventType string
 const (
 	EventLogin              EventType = "auth.login"
 	EventLoginFailed        EventType = "auth.login_failed"
+	EventLoginThrottled     EventType = "auth.login_throttled" // LoginThrottler lockout
 	EventIDPLogin           EventType = "auth.idp_login"
 	EventIDPLoginFailed     EventType = "auth.idp_login_failed"
 	EventNewUser            EventType = "auth.new_user" // first login via IDP

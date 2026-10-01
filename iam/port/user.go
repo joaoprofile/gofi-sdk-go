@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 )
 
 // UserPort abstracts the user repository.
@@ -19,5 +19,8 @@ type UserPort interface {
 
 	// FindOrCreateByExternalIdentity is called during the social IDP callback.
 	// If the user does not exist, it must create one. Must be idempotent.
+	// Look up by Provider+ExternalID; linking to an existing account by Email
+	// must be refused unless identity.EmailVerified is true, otherwise anyone
+	// who controls an IDP account with the victim's email takes over the account.
 	FindOrCreateByExternalIdentity(ctx context.Context, identity types.ExternalIdentity) (*types.User, error)
 }

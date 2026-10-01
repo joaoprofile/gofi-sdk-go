@@ -2,10 +2,12 @@ package google
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
-	"github.com/joaoprofile/gofi/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/core"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
 )
 
 // ---- New ----
@@ -25,7 +27,6 @@ func TestNew_NoHostedDomain(t *testing.T) {
 }
 
 func TestNew_WithHostedDomain(t *testing.T) {
-	// When HostedDomain is set, an extra "hd" scope is added to ExtraScopes.
 	p := New(Config{
 		ClientID:     "cid",
 		ClientSecret: "secret",
@@ -93,6 +94,16 @@ func TestHandleCallback_StateMismatch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for state mismatch")
+	}
+}
+
+// Attack: empty state and no state cookie (login CSRF) is rejected before any network call.
+func TestHandleCallback_EmptyStateRejected(t *testing.T) {
+	p := New(Config{ClientID: "cid", HTTPClient: &http.Client{Transport: &errorTransport{}}})
+
+	_, err := p.HandleCallback(context.Background(), port.IDPCallbackInput{Code: "attacker-code"})
+	if !errors.Is(err, core.ErrInvalidIDPState) {
+		t.Fatalf("expected ErrInvalidIDPState, got %v", err)
 	}
 }
 

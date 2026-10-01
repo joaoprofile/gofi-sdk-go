@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoprofile/gofi/iam/port"
-	"github.com/joaoprofile/gofi/iam/types"
+	"github.com/gofi-labs/gofi-sdk-go/iam/port"
+	"github.com/gofi-labs/gofi-sdk-go/iam/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,10 +19,12 @@ type stubIDPAuthPort struct {
 	authURLErr     error
 	callbackResult *port.IDPCallbackResult
 	callbackErr    error
+	gotAuthInput   port.IDPAuthInput
 }
 
 func (s *stubIDPAuthPort) ProviderName() string { return s.name }
-func (s *stubIDPAuthPort) AuthorizationURL(_ context.Context, _ port.IDPAuthInput) (*port.IDPAuthURL, error) {
+func (s *stubIDPAuthPort) AuthorizationURL(_ context.Context, in port.IDPAuthInput) (*port.IDPAuthURL, error) {
+	s.gotAuthInput = in
 	return s.authURL, s.authURLErr
 }
 func (s *stubIDPAuthPort) HandleCallback(_ context.Context, _ port.IDPCallbackInput) (*port.IDPCallbackResult, error) {
@@ -35,6 +37,7 @@ func buildIDPService(idp port.IDPAuthPort, user *stubUserPort, tenant *stubTenan
 		accessTokenTTL:  15 * time.Minute,
 		refreshTokenTTL: 7 * 24 * time.Hour,
 		issuer:          "test",
+		ticketKey:       ticketKey,
 	}
 	return NewIDPService(IDPServiceConfig{
 		Provider: idp,
@@ -70,6 +73,16 @@ func TestIDPService_InitFlow_Success(t *testing.T) {
 	result, err := svc.InitFlow(context.Background(), "https://myapp.com/callback", nil)
 	require.NoError(t, err)
 	assert.Equal(t, expectedURL.URL, result.URL)
+}
+
+func TestIDPService_InitFlow_NonceDerivedFromState(t *testing.T) {
+	idp := &stubIDPAuthPort{name: "google", authURL: &port.IDPAuthURL{}}
+	svc := buildIDPService(idp, &stubUserPort{}, &stubTenantPort{}, &stubTokenPort{})
+
+	_, err := svc.InitFlow(context.Background(), "https://myapp.com/callback", nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, idp.gotAuthInput.State)
+	assert.Equal(t, NonceForState(idp.gotAuthInput.State), idp.gotAuthInput.Nonce)
 }
 
 func TestIDPService_InitFlow_ProviderError(t *testing.T) {
@@ -123,7 +136,7 @@ func TestIDPService_HandleCallback_ExistingUser(t *testing.T) {
 	tenant := &stubTenantPort{}
 	svc := buildIDPService(idp, user, tenant, &stubTokenPort{})
 
-	result, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{})
+	result, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{State: "s", ExpectedState: "s"})
 	require.NoError(t, err)
 	assert.False(t, result.IsNewUser)
 }
@@ -132,7 +145,7 @@ func TestIDPService_HandleCallback_ProviderError(t *testing.T) {
 	idp := &stubIDPAuthPort{name: "google", callbackErr: errors.New("token exchange failed")}
 	svc := buildIDPService(idp, &stubUserPort{}, &stubTenantPort{}, &stubTokenPort{})
 
-	_, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{})
+	_, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{State: "s", ExpectedState: "s"})
 	assert.Error(t, err)
 }
 
@@ -143,7 +156,7 @@ func TestIDPService_HandleCallback_UserCreateError(t *testing.T) {
 	user := &stubUserPort{externalErr: errors.New("db error")}
 	svc := buildIDPService(idp, user, &stubTenantPort{}, &stubTokenPort{})
 
-	_, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{})
+	_, err := svc.HandleCallback(context.Background(), port.IDPCallbackInput{State: "s", ExpectedState: "s"})
 	assert.Error(t, err)
 }
 
@@ -157,7 +170,7 @@ func TestIDPService_SelectTenant_Success(t *testing.T) {
 	svc := buildIDPService(idp, user, tenant, token)
 
 	session, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1", Module: "mod",
+		UserID: "u1", Ticket: testIDPTicket("google", "u1"), TenantID: "t1", Module: "mod",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "u1", session.UserID)
@@ -171,7 +184,7 @@ func TestIDPService_SelectTenant_AccessDenied(t *testing.T) {
 	svc := buildIDPService(idp, &stubUserPort{}, tenant, &stubTokenPort{})
 
 	_, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testIDPTicket("google", "u1"), TenantID: "t1",
 	})
 	assert.ErrorIs(t, err, ErrTenantAccessDenied)
 }
@@ -183,7 +196,7 @@ func TestIDPService_SelectTenant_TokenError(t *testing.T) {
 	svc := buildIDPService(idp, &stubUserPort{}, tenant, token)
 
 	_, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{
-		UserID: "u1", TenantID: "t1",
+		UserID: "u1", Ticket: testIDPTicket("google", "u1"), TenantID: "t1",
 	})
 	assert.Error(t, err)
 }

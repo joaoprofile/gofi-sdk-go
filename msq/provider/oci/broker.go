@@ -1,37 +1,44 @@
 package oci
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
+	"time"
 
-	"github.com/joaoprofile/gofi/msq/port"
-	"github.com/joaoprofile/gofi/msq/types"
-	"github.com/joaoprofile/gofi/msq/worker"
-	"github.com/joaoprofile/gofi/obs/logging"
-	ocicommon "github.com/oracle/oci-go-sdk/v65/common"
+	cloudoci "github.com/gofi-labs/gofi-sdk-go/base/cloud/oci"
+	"github.com/gofi-labs/gofi-sdk-go/msq/port"
+	"github.com/gofi-labs/gofi-sdk-go/msq/types"
+	"github.com/gofi-labs/gofi-sdk-go/msq/worker"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/google/uuid"
 	"github.com/oracle/oci-go-sdk/v65/queue"
 )
-
-const defaultQueueURL = "https://cell-1.queue.messaging.sa-saopaulo-1.oci.oraclecloud.com"
 
 // queueClientAPI abstracts *queue.QueueClient so that it can be mocked in tests.
 type queueClientAPI interface {
 	PutMessages(ctx context.Context, req queue.PutMessagesRequest) (queue.PutMessagesResponse, error)
 	GetMessages(ctx context.Context, req queue.GetMessagesRequest) (queue.GetMessagesResponse, error)
 	DeleteMessage(ctx context.Context, req queue.DeleteMessageRequest) (queue.DeleteMessageResponse, error)
+	UpdateMessage(ctx context.Context, req queue.UpdateMessageRequest) (queue.UpdateMessageResponse, error)
 }
+
+const (
+	deleteTimeout = 5 * time.Second // bounds the delete issued after a handler finishes
+	maxReceive    = 20              // GetMessages limit
+	maxVisibility = 12 * time.Hour  // OCI Queue limit
+)
 
 // Config configures the OCI Queue broker.
 type Config struct {
-	TenancyID   string
-	UserID      string
-	Region      string
-	FingerPrint string
-	PrivateKey  string
-	QueueURL    string // defaults to São Paulo region endpoint
+	// Credentials selects the principal (API key, instance, resource or
+	// workload identity) and region, shared with other OCI integrations.
+	Credentials cloudoci.Config
+	// QueueURL is the queue's messages endpoint; it defaults to the
+	// region's cell-1 endpoint.
+	QueueURL string
 }
 
 // Broker implements port.Broker for OCI Queue.
@@ -41,25 +48,21 @@ type Broker struct {
 
 // New creates a Broker from the given configuration.
 func New(cfg Config) (*Broker, error) {
-	if cfg.TenancyID == "" || cfg.UserID == "" || cfg.Region == "" || cfg.FingerPrint == "" {
-		return nil, fmt.Errorf("oci: missing required credentials (TenancyID, UserID, Region, FingerPrint)")
+	if cfg.Credentials.Region == "" {
+		return nil, fmt.Errorf("oci queue: region is required")
 	}
-
-	provider := ocicommon.NewRawConfigurationProvider(
-		cfg.TenancyID, cfg.UserID, cfg.Region, cfg.FingerPrint, cfg.PrivateKey, nil,
-	)
-
+	provider, err := cloudoci.ConfigurationProvider(cfg.Credentials)
+	if err != nil {
+		return nil, fmt.Errorf("oci queue: %w", err)
+	}
 	client, err := queue.NewQueueClientWithConfigurationProvider(provider)
 	if err != nil {
-		return nil, fmt.Errorf("oci: failed to create queue client: %w", err)
+		return nil, fmt.Errorf("oci queue: create client: %w", err)
 	}
-
-	queueURL := cfg.QueueURL
-	if queueURL == "" {
-		queueURL = defaultQueueURL
+	client.Host = cfg.QueueURL
+	if client.Host == "" {
+		client.Host = fmt.Sprintf("https://cell-1.queue.messaging.%s.oci.oraclecloud.com", cfg.Credentials.Region)
 	}
-	client.Host = queueURL
-
 	return &Broker{client: &client}, nil
 }
 
@@ -67,12 +70,20 @@ func (b *Broker) NewProducer() (port.Producer, error) {
 	return &ociProducer{client: b.client}, nil
 }
 
-func (b *Broker) NewConsumer(cfg types.ConsumeConfig) port.Consumer {
+func (b *Broker) NewConsumer(cfg types.ConsumeConfig) (port.Consumer, error) {
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
 		concurrency = types.DefaultConcurrency
 	}
-	return &ociConsumer{client: b.client, cfg: cfg, concurrency: concurrency}
+	return newConsumer(b.client, cfg, concurrency), nil
+}
+
+func newConsumer(client queueClientAPI, cfg types.ConsumeConfig, concurrency int) *ociConsumer {
+	lease := min(cmp.Or(cfg.VisibilityTimeout, types.DefaultVisibilityTimeout), maxVisibility)
+	return &ociConsumer{
+		client: client, cfg: cfg, concurrency: concurrency,
+		lease: lease, visibility: int(max(lease.Round(time.Second)/time.Second, 1)),
+	}
 }
 
 // Producer
@@ -141,7 +152,9 @@ type ociConsumer struct {
 	client      queueClientAPI
 	cfg         types.ConsumeConfig
 	concurrency int
-	paused      atomic.Bool
+	gate        worker.Gate
+	lease       time.Duration // visibility granted on receive and on every renewal
+	visibility  int           // lease in seconds
 }
 
 func (c *ociConsumer) Consume(ctx context.Context, handler port.MessageHandler) error {
@@ -151,75 +164,125 @@ func (c *ociConsumer) Consume(ctx context.Context, handler port.MessageHandler) 
 
 	pool := worker.New(c.concurrency)
 	defer pool.Close()
+	slots := worker.NewSlots(c.concurrency)
 
-	visibilitySec := int(c.cfg.PollInterval.Seconds())
-	if visibilitySec <= 0 {
-		visibilitySec = int(types.DefaultPollInterval.Seconds())
-	}
-
+	backoff := worker.Backoff{Min: worker.ReceiveBackoffMin, Max: worker.ReceiveBackoffMax}
 	for {
-		select {
-		case <-ctx.Done():
+		// Blocks while paused; returns once ctx is done.
+		if c.gate.Wait(ctx) != nil || ctx.Err() != nil {
 			logging.Info("oci consumer: shutting down", slog.String("queue_id", c.cfg.QueueID))
 			return nil
-		default:
-			if c.paused.Load() {
-				continue
-			}
-			c.poll(ctx, handler, pool, visibilitySec)
 		}
+		// Receive only what can start now: a buffered message's visibility
+		// would run out before its handler even starts.
+		free, err := slots.Acquire(ctx, maxReceive)
+		if err != nil {
+			continue
+		}
+		if err := c.poll(ctx, handler, pool, slots, free); err != nil {
+			_ = worker.Sleep(ctx, backoff.Next())
+			continue
+		}
+		backoff.Reset()
 	}
 }
 
-func (c *ociConsumer) poll(ctx context.Context, handler port.MessageHandler, pool *worker.Pool, visibilitySec int) {
+// poll receives up to free messages, each holding one of the acquired slots
+// until its handler finishes; unused slots are released at once.
+func (c *ociConsumer) poll(ctx context.Context, handler port.MessageHandler, pool *worker.Pool, slots *worker.Slots, free int) error {
 	resp, err := c.client.GetMessages(ctx, queue.GetMessagesRequest{
 		QueueId:             &c.cfg.QueueID,
-		VisibilityInSeconds: ocicommon.Int(visibilitySec),
-		Limit:               ocicommon.Int(c.concurrency),
+		VisibilityInSeconds: new(c.visibility),
+		Limit:               new(free),
 	})
 	if err != nil {
-		logging.Error("oci consumer: get messages failed",
-			slog.String("queue_id", c.cfg.QueueID),
-			slog.Any("error", err))
-		return
+		slots.Release(free)
+		if ctx.Err() == nil {
+			logging.Error("oci consumer: get messages failed",
+				slog.String("queue_id", c.cfg.QueueID),
+				slog.Any("error", err))
+		}
+		return err
 	}
+	slots.Release(free - len(resp.Messages))
 	for _, m := range resp.Messages {
-		m := m
-		pool.Enqueue(func() { c.handle(ctx, m, handler) })
+		stop := c.keepAlive(ctx, m)
+		pool.Enqueue(func() {
+			defer slots.Release(1)
+			c.handle(ctx, m, handler, stop)
+		})
 	}
+	return nil
 }
 
-func (c *ociConsumer) handle(ctx context.Context, ociMsg queue.GetMessage, handler port.MessageHandler) {
-	content := ""
-	if ociMsg.Content != nil {
-		content = *ociMsg.Content
+// keepAlive renews the message's visibility until the returned stop is called.
+func (c *ociConsumer) keepAlive(ctx context.Context, m queue.GetMessage) func() {
+	if m.Receipt == nil {
+		return func() {}
 	}
-	var msg types.Message
-	// Valid JSON that is not a types.Message envelope unmarshals into all-zero
-	// fields — deliver the raw body instead of an empty Value.
-	if err := json.Unmarshal([]byte(content), &msg); err != nil || len(msg.Value) == 0 {
-		msg = types.Message{Value: []byte(content)}
-	}
+	return worker.KeepAlive(ctx, worker.RenewEvery(c.lease), func(rctx context.Context) {
+		if _, err := c.client.UpdateMessage(rctx, queue.UpdateMessageRequest{
+			QueueId:              &c.cfg.QueueID,
+			MessageReceipt:       m.Receipt,
+			UpdateMessageDetails: queue.UpdateMessageDetails{VisibilityInSeconds: new(c.visibility)},
+		}); err != nil {
+			logging.Warn("oci consumer: visibility renewal failed", slog.String("queue_id", c.cfg.QueueID), slog.Any("error", err))
+		}
+	})
+}
+
+// handle stops the lease renewal before settling, so a renewal never races
+// the delete.
+func (c *ociConsumer) handle(ctx context.Context, ociMsg queue.GetMessage, handler port.MessageHandler, stopLease func()) {
+	msg := c.decode(ociMsg)
 
 	result, err := handler.Handle(ctx, &msg)
+	stopLease()
 	if err != nil {
 		logging.Error("oci consumer: handler error", slog.String("queue_id", c.cfg.QueueID), slog.Any("error", err))
 	}
 
 	switch result {
-	case types.Ack, types.Ignore:
-		// Ack = processed, Ignore = discarded on purpose. Both remove the
-		// message: on a visibility-timeout queue, not deleting IS a requeue.
+	case types.Ack, types.Ignore, types.Reject:
+		// Ack = processed, Ignore = discarded on purpose, Reject = delivery
+		// limit reached. All remove the message: on a visibility-timeout
+		// queue, not deleting IS a requeue.
 		c.delete(ctx, ociMsg)
 	case types.Nack:
-		// Visibility timeout will expire and message becomes visible again.
+		// Visible again once the last granted visibility ends.
 	}
 }
 
+// decode sets Topic to the queue OCID consumed and DeliveryCount from the
+// queue's own counter; a message without an Id gets one from the OCI message
+// id, which is the same on every delivery.
+func (c *ociConsumer) decode(m queue.GetMessage) types.Message {
+	content := ""
+	if m.Content != nil {
+		content = *m.Content
+	}
+	msg := types.DecodeEnvelope([]byte(content))
+	msg.Topic = c.cfg.QueueID
+	if m.DeliveryCount != nil {
+		msg.DeliveryCount = *m.DeliveryCount
+	}
+	if msg.Id == uuid.Nil {
+		if m.Id != nil {
+			msg.Id = types.StableID(fmt.Sprintf("oci/%s/%d", c.cfg.QueueID, *m.Id))
+		} else {
+			msg.Id = uuid.New()
+		}
+	}
+	return msg
+}
+
+// delete survives shutdown cancellation so processed messages are not redelivered.
 func (c *ociConsumer) delete(ctx context.Context, m queue.GetMessage) {
 	if m.Receipt == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteTimeout)
+	defer cancel()
 	if _, err := c.client.DeleteMessage(ctx, queue.DeleteMessageRequest{
 		QueueId:        &c.cfg.QueueID,
 		MessageReceipt: m.Receipt,
@@ -229,5 +292,5 @@ func (c *ociConsumer) delete(ctx context.Context, m queue.GetMessage) {
 }
 
 func (c *ociConsumer) Close() error  { return nil }
-func (c *ociConsumer) Pause() error  { c.paused.Store(true); return nil }
-func (c *ociConsumer) Resume() error { c.paused.Store(false); return nil }
+func (c *ociConsumer) Pause() error  { c.gate.Pause(); return nil }
+func (c *ociConsumer) Resume() error { c.gate.Resume(); return nil }

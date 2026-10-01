@@ -4,6 +4,7 @@ package criteria
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -123,17 +124,15 @@ func TestToSlice_Struct_ReturnsFalse(t *testing.T) {
 	assert.Nil(t, out)
 }
 
-// []int8 and []uint are not handled — confirm they return false.
-func TestToSlice_Int8Slice_ReturnsFalse(t *testing.T) {
+// Every slice kind expands; before, []int8 and []uint were bound as one scalar.
+func TestToSlice_OtherIntegerSlices(t *testing.T) {
 	out, ok := toSlice([]int8{1, 2, 3})
-	assert.False(t, ok)
-	assert.Nil(t, out)
-}
+	assert.True(t, ok)
+	assert.Equal(t, []any{int8(1), int8(2), int8(3)}, out)
 
-func TestToSlice_UintSlice_ReturnsFalse(t *testing.T) {
-	out, ok := toSlice([]uint{1, 2, 3})
-	assert.False(t, ok)
-	assert.Nil(t, out)
+	out, ok = toSlice([]uint{1, 2, 3})
+	assert.True(t, ok)
+	assert.Len(t, out, 3)
 }
 
 // Output is always a fresh slice (no aliasing)
@@ -172,4 +171,21 @@ func TestToSlice_SingleInt64(t *testing.T) {
 	out, ok := toSlice([]int64{99})
 	assert.True(t, ok)
 	assert.Equal(t, []any{int64(99)}, out)
+}
+
+func TestToSlice_AnySliceType(t *testing.T) {
+	type status string
+	type id [16]byte
+	for _, v := range []any{[]status{"a", "b"}, []id{{1}, {2}}, []time.Time{{}, {}}} {
+		out, ok := toSlice(v)
+		if !ok || len(out) != 2 {
+			t.Errorf("toSlice(%T)=%v,%v", v, out, ok)
+		}
+	}
+	if _, ok := toSlice([]byte("ab")); ok {
+		t.Error("[]byte is a scalar, not a list")
+	}
+	if _, ok := toSlice("x"); ok {
+		t.Error("string is not a slice")
+	}
 }

@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 const testDriver = "tx-testdriver"

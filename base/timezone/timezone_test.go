@@ -6,15 +6,27 @@ import (
 	"time"
 )
 
-func TestApplyDefaultBrazil(t *testing.T) {
+func TestApplyDefaultIsUTC(t *testing.T) {
 	original := time.Local
 	t.Cleanup(func() { time.Local = original })
 
 	if err := Apply(Config{}); err != nil {
 		t.Fatalf("Apply(Config{}) returned unexpected error: %v", err)
 	}
-	if time.Local == nil {
-		t.Error("Expected time.Local to be set after Apply(Config{})")
+	if time.Local != time.UTC {
+		t.Errorf("default timezone must be UTC, got %s", time.Local)
+	}
+}
+
+func TestApplyExplicitBrazilKeepsLegacyZone(t *testing.T) {
+	original := time.Local
+	t.Cleanup(func() { time.Local = original })
+
+	if err := Apply(Config{Name: BrazilName}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Local.String() != BrazilName {
+		t.Errorf("time.Local=%s, want %s (embedded tzdata)", time.Local, BrazilName)
 	}
 }
 

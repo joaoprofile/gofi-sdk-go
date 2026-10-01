@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/joaoprofile/gofi/base/observer"
+	"github.com/gofi-labs/gofi-sdk-go/base/observer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

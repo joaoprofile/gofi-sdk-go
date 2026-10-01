@@ -30,18 +30,25 @@ func TestApplyPool_AllValuesSet(t *testing.T) {
 	assert.Equal(t, 20, stats.MaxOpenConnections)
 }
 
-func TestApplyPool_ZeroValuesSkipped(t *testing.T) {
+// Regression: a zero PoolConfig left database/sql's unlimited connections.
+func TestApplyPool_ZeroValuesUseDefaults(t *testing.T) {
 	db := mustOpenTestDB("ok")
 	defer db.Close()
 
-	// Aplicar valores iniciais
-	applyPool(db, PoolConfig{MaxOpenConns: 10, MaxIdleConns: 5, MaxConnLifeTime: time.Minute})
+	applyPool(db, PoolConfig{})
 
-	// Applying a zero-valued config — must not change anything
-	applyPool(db, PoolConfig{MaxOpenConns: 0, MaxIdleConns: 0, MaxConnLifeTime: 0})
+	assert.Equal(t, DefaultPoolConfig().MaxOpenConns, db.Stats().MaxOpenConnections)
+	assert.Equal(t, PoolConfig{MaxOpenConns: 10, MaxIdleConns: 5, MaxConnLifeTime: 5 * time.Minute}, PoolConfig{}.withDefaults())
+	assert.Equal(t, PoolConfig{MaxOpenConns: 50, MaxIdleConns: 5, MaxConnLifeTime: 5 * time.Minute}, PoolConfig{MaxOpenConns: 50}.withDefaults())
+}
 
-	stats := db.Stats()
-	assert.Equal(t, 10, stats.MaxOpenConnections)
+func TestApplyPool_NegativeRemovesLimit(t *testing.T) {
+	db := mustOpenTestDB("ok")
+	defer db.Close()
+
+	applyPool(db, PoolConfig{MaxOpenConns: -1, MaxConnLifeTime: -1})
+
+	assert.Equal(t, 0, db.Stats().MaxOpenConnections, "0 is database/sql's unlimited")
 }
 
 func TestStartPoolMonitor_DoesNotPanic(t *testing.T) {

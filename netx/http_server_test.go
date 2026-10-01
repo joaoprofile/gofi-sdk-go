@@ -2,12 +2,11 @@ package netx
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"syscall"
 	"testing"
 	"time"
 
@@ -18,9 +17,12 @@ import (
 )
 
 func newTestHTTPServer() *httpServer {
+	global := mustCORSPolicy(DefaultCORSConfig())
 	return &httpServer{
-		config: &WSConfig{ServerPort: ":0"},
-		router: chi.NewMux(),
+		config:     &WSConfig{ServerPort: ":0"},
+		router:     chi.NewMux(),
+		cors:       global,
+		preflights: newRoutePreflights(global),
 	}
 }
 
@@ -295,23 +297,13 @@ func TestRegisterRoute_PathNormalizationRootPath(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestListenAndServe_GracefulShutdown(t *testing.T) {
+func TestListenAndServe_StopsGracefullyOnShutdown(t *testing.T) {
 	addr := freePort(t)
+	ws := &httpServer{config: &WSConfig{ServerPort: addr}, router: chi.NewMux()}
+	ws.router.Get("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
-	ws := &httpServer{
-		config: &WSConfig{ServerPort: addr},
-		router: chi.NewMux(),
-	}
-
-	ws.router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	done := make(chan struct{})
-	go func() {
-		ws.ListenAndServe()
-		close(done)
-	}()
+	done := make(chan error, 1)
+	go func() { done <- ws.ListenAndServe() }()
 
 	require.Eventually(t, func() bool {
 		resp, err := http.Get("http://" + addr + "/health")
@@ -320,19 +312,26 @@ func TestListenAndServe_GracefulShutdown(t *testing.T) {
 		}
 		resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
-	}, 3*time.Second, 50*time.Millisecond, "servidor não ficou disponível a tempo")
+	}, 3*time.Second, 50*time.Millisecond)
 
-	// Send SIGTERM to the process
-	proc, err := os.FindProcess(os.Getpid())
-	require.NoError(t, err)
-	require.NoError(t, proc.Signal(syscall.SIGTERM))
-
+	require.NoError(t, ws.Shutdown(context.Background()))
 	select {
-	case <-done:
-		// encerramento gracioso confirmado
+	case err := <-done:
+		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("servidor não encerrou dentro do prazo esperado")
+		t.Fatal("ListenAndServe did not return after Shutdown")
 	}
+}
+
+func TestListenAndServe_ListenErrorIsReturned(t *testing.T) {
+	ws := &httpServer{config: &WSConfig{ServerPort: "256.0.0.1:0"}, router: chi.NewMux()}
+	require.Error(t, ws.ListenAndServe())
+}
+
+func TestShutdownBeforeListenAndServe(t *testing.T) {
+	ws := &httpServer{config: &WSConfig{ServerPort: freePort(t)}, router: chi.NewMux()}
+	require.NoError(t, ws.Shutdown(context.Background()))
+	require.NoError(t, ws.ListenAndServe(), "must return immediately after Shutdown")
 }
 
 // --- NewServer ---
@@ -446,7 +445,51 @@ func TestNewServer_SecurityHeaders_SetByDefault(t *testing.T) {
 
 	assert.NotEmpty(t, rec.Header().Get("X-Frame-Options"))
 	assert.NotEmpty(t, rec.Header().Get("X-Content-Type-Options"))
-	assert.NotEmpty(t, rec.Header().Get("Strict-Transport-Security"))
+	assert.Empty(t, rec.Header().Get("Strict-Transport-Security"), "plain HTTP")
+
+	req.TLS = &tls.ConnectionState{}
+	rec = httptest.NewRecorder()
+	ws.router.ServeHTTP(rec, req)
+	assert.Equal(t, "max-age=63072000; includeSubDomains", rec.Header().Get("Strict-Transport-Security"))
+}
+
+// Regression: a Shutdown timeout left the stuck connections open.
+func TestServe_ClosesConnectionsWhenShutdownTimesOut(t *testing.T) {
+	addr := freePort(t)
+	ws := NewServer(&WSConfig{ServerPort: addr, ShutdownTimeout: 50 * time.Millisecond}).(*httpServer)
+	started, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	ws.AddHandlers(routesFunc(func() []*Route {
+		return PublicRoutes("/", GET("/stuck").To(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			close(started)
+			<-release // ignores its context
+		}))
+	}))
+	done := make(chan error, 1)
+	go func() { done <- ws.ListenAndServe() }()
+
+	var resp *http.Response
+	require.Eventually(t, func() bool {
+		var err error
+		resp, err = http.Get("http://" + addr + "/stuck")
+		return err == nil
+	}, 2*time.Second, 10*time.Millisecond)
+	defer resp.Body.Close()
+	<-started
+
+	require.NoError(t, ws.Shutdown(context.Background()))
+	err := <-done
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	readErr := make(chan error, 1)
+	go func() { _, err := io.ReadAll(resp.Body); readErr <- err }()
+	select {
+	case <-readErr: // the connection was closed
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection still open after the shutdown timeout")
+	}
 }
 
 func TestNewServer_TraceMethodBlocked(t *testing.T) {

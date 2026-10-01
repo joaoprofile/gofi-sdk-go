@@ -3,7 +3,7 @@ package netx
 import (
 	"io"
 
-	"github.com/joaoprofile/gofi/base/observer"
+	"github.com/gofi-labs/gofi-sdk-go/base/observer"
 )
 
 type Module interface {

@@ -10,9 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/joaoprofile/gofi/obs/logging"
-	"github.com/joaoprofile/gofi/sqln/connection"
-	sqln_driver "github.com/joaoprofile/gofi/sqln/driver"
+	"github.com/gofi-labs/gofi-sdk-go/obs/logging"
+	"github.com/gofi-labs/gofi-sdk-go/sqln/connection"
+	sqln_driver "github.com/gofi-labs/gofi-sdk-go/sqln/driver"
 )
 
 const testDriver = "stmt-testdriver"
@@ -39,7 +39,22 @@ func (d *fakeSQLDriver) Open(name string) (driver.Conn, error) {
 	if name == "fail-prepare" {
 		return &failPrepareConn{}, nil
 	}
+	if name == "record-deadline" {
+		return &deadlineConn{}, nil
+	}
 	return &fakeConn{}, nil
+}
+
+// lastExecDeadline records whether the last ExecContext on a deadlineConn
+// received a context with a deadline.
+var lastExecDeadline sync.Map // "had" -> bool
+
+type deadlineConn struct{ fakeConn }
+
+func (c *deadlineConn) ExecContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
+	_, ok := ctx.Deadline()
+	lastExecDeadline.Store("had", ok)
+	return driver.RowsAffected(1), nil
 }
 
 type fakeConn struct{}
@@ -163,6 +178,3 @@ func mustOpenDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
-
-// fakeError is a sentinel for rollback/exec failure tests.
-var fakeError = errors.New("fake error")
