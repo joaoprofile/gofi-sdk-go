@@ -3,8 +3,8 @@ module github.com/joaoprofile/gofi-sdk-go/msq/provider/rabbitmq
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/msq v0.2.1
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.2
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.2
 	github.com/google/uuid v1.6.0
 	github.com/rabbitmq/amqp091-go v1.13.0
 	github.com/stretchr/testify v1.12.1
@@ -18,7 +18,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.2 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect

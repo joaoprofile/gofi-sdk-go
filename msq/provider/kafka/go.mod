@@ -4,8 +4,8 @@ go 1.26.6
 
 require (
 	github.com/IBM/sarama v1.47.0
-	github.com/joaoprofile/gofi-sdk-go/msq v0.2.1
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.1
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.2
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.2
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.12.1
 	github.com/xdg-go/scram v1.2.0
@@ -22,7 +22,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.1 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.2 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
