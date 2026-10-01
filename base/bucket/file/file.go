@@ -1,8 +1,13 @@
 // Package file implements bucket.Store on a local directory, for development
 // and single-node deployments. Keys map to paths below the root and cannot
 // escape it. Importing it registers the "file" provider for bucket.Open
-// (Config.Endpoint is the directory). ContentType is derived from the key
-// extension.
+// (Config.Endpoint is the directory) and bucket.OpenManager (Config.Endpoint
+// is the parent directory, one subdirectory per bucket). ContentType is
+// derived from the key extension.
+//
+// Folders are directories: a "path/" marker key creates one, an empty
+// directory lists as its "path/" marker, and a non-empty one is implied by
+// the keys below it.
 package file
 
 import (
@@ -27,6 +32,9 @@ func init() {
 	bucket.Register(bucket.ProviderFile, func(_ context.Context, cfg bucket.Config) (bucket.Store, error) {
 		return New(cfg.Endpoint)
 	})
+	bucket.RegisterManager(bucket.ProviderFile, func(_ context.Context, cfg bucket.Config) (bucket.Manager, error) {
+		return NewManager(cfg.Endpoint)
+	})
 }
 
 // Store is a bucket.Store rooted at a directory.
@@ -36,8 +44,10 @@ type Store struct {
 }
 
 var (
-	_ bucket.Store  = (*Store)(nil)
-	_ bucket.Walker = (*Store)(nil)
+	_ bucket.Store       = (*Store)(nil)
+	_ bucket.Walker      = (*Store)(nil)
+	_ bucket.FolderMaker = (*Store)(nil)
+	_ bucket.Statter     = (*Store)(nil)
 )
 
 // New opens (creating when missing) the root directory.
@@ -70,14 +80,24 @@ func name(key string) (string, error) {
 }
 
 // Put writes to a temporary file and renames it, so readers never see a
-// partial object.
-func (s *Store) Put(_ context.Context, in bucket.PutInput) error {
+// partial object. A key ending in "/" is a folder marker: it creates the
+// directory and its body must be empty.
+func (s *Store) Put(ctx context.Context, in bucket.PutInput) error {
 	n, err := name(in.Key)
 	if err != nil {
 		return err
 	}
 	if in.Body == nil {
 		return fmt.Errorf("%w: body is required", bucket.ErrInvalidConfig)
+	}
+	if strings.HasSuffix(in.Key, "/") {
+		var b [1]byte
+		if k, err := io.ReadFull(in.Body, b[:]); k > 0 {
+			return fmt.Errorf("%w: folder marker %q must have an empty body", bucket.ErrInvalidConfig, in.Key)
+		} else if !errors.Is(err, io.EOF) {
+			return fmt.Errorf("file bucket: put %q: %w", in.Key, err)
+		}
+		return s.CreateFolder(ctx, in.Key)
 	}
 	if dir := filepath.Dir(n); dir != "." {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
@@ -120,24 +140,65 @@ func (s *Store) Get(_ context.Context, key string) (bucket.Object, io.ReadCloser
 	return object(key, st), f, nil
 }
 
-// All walks the directory in lexical order.
+func (s *Store) Stat(_ context.Context, key string) (bucket.Object, error) {
+	n, err := name(key)
+	if err != nil {
+		return bucket.Object{}, err
+	}
+	st, err := s.root.Stat(n)
+	if err != nil {
+		return bucket.Object{}, mapErr(key, err)
+	}
+	if st.IsDir() {
+		return bucket.Object{}, fmt.Errorf("%w: %q", bucket.ErrNotFound, key)
+	}
+	return object(key, st), nil
+}
+
+// CreateFolder creates the directory of path ("a/b" or "a/b/").
+func (s *Store) CreateFolder(_ context.Context, path string) error {
+	n, err := name(strings.TrimSuffix(path, "/"))
+	if err != nil {
+		return err
+	}
+	if err := s.root.MkdirAll(n, 0o750); err != nil {
+		return fmt.Errorf("file bucket: create folder %q: %w", path, err)
+	}
+	return nil
+}
+
+// All walks the directory in lexical order. An empty directory yields its
+// "dir/" folder marker.
 func (s *Store) All(_ context.Context, prefix string) iter.Seq2[bucket.Object, error] {
 	return func(yield func(bucket.Object, error) bool) {
-		err := fs.WalkDir(s.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		fsys := s.root.FS()
+		err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || strings.Contains(path.Base(p), ".tmp-") {
+			if strings.Contains(path.Base(p), ".tmp-") {
 				return nil
 			}
-			if !strings.HasPrefix(p, prefix) {
+			key := p
+			if d.IsDir() {
+				if p == "." {
+					return nil
+				}
+				key += "/"
+			}
+			if !strings.HasPrefix(key, prefix) {
 				return nil
+			}
+			if d.IsDir() {
+				if entries, err := fs.ReadDir(fsys, p); err != nil || len(entries) > 0 {
+					return err
+				}
 			}
 			info, err := d.Info()
 			if err != nil {
 				return err
 			}
-			if !yield(object(p, info), nil) {
+			if !yield(object(key, info), nil) {
 				return fs.SkipAll
 			}
 			return nil
@@ -152,10 +213,19 @@ func (s *Store) List(ctx context.Context, prefix string) ([]bucket.Object, error
 	return bucket.Collect(s.All(ctx, prefix))
 }
 
+// Delete removes the file of key. For a folder marker ("dir/") it removes the
+// directory when empty and is a no-op otherwise, since the folder still
+// exists through the keys below it.
 func (s *Store) Delete(_ context.Context, key string) error {
 	n, err := name(key)
 	if err != nil {
 		return err
+	}
+	if strings.HasSuffix(key, "/") {
+		entries, err := fs.ReadDir(s.root.FS(), filepath.ToSlash(filepath.Clean(n)))
+		if err != nil || len(entries) > 0 {
+			return nil
+		}
 	}
 	if err := s.root.Remove(n); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("file bucket: delete %q: %w", key, err)
@@ -179,6 +249,9 @@ func (s *Store) PresignGet(_ context.Context, key string, ttl time.Duration) (st
 }
 
 func object(key string, info fs.FileInfo) bucket.Object {
+	if info.IsDir() {
+		return bucket.Object{Key: filepath.ToSlash(key), LastModified: info.ModTime()}
+	}
 	return bucket.Object{
 		Key:          filepath.ToSlash(key),
 		Size:         info.Size(),

@@ -29,6 +29,26 @@ var (
 	// ErrInvalidTTL is returned by PresignGet when ttl is not positive or
 	// exceeds the store's limit.
 	ErrInvalidTTL = errors.New("bucket: invalid presign ttl")
+
+	// ErrBucketNotFound is returned when the bucket itself does not exist. It
+	// wraps ErrNotFound, so errors.Is(err, ErrNotFound) still holds.
+	ErrBucketNotFound = fmt.Errorf("%w: bucket does not exist", ErrNotFound)
+
+	// ErrBucketExists is returned by CreateBucket when the name is taken.
+	ErrBucketExists = errors.New("bucket: bucket already exists")
+
+	// ErrBucketNotEmpty is returned by DeleteBucket without Force when the
+	// bucket still holds objects.
+	ErrBucketNotEmpty = errors.New("bucket: bucket is not empty")
+
+	// ErrInvalidBucketName is returned when a name breaks the provider's rules.
+	ErrInvalidBucketName = errors.New("bucket: invalid bucket name")
+
+	// ErrAccessDenied is returned when the credentials lack permission.
+	ErrAccessDenied = errors.New("bucket: access denied")
+
+	// ErrNotSupported is returned when a provider does not implement a feature.
+	ErrNotSupported = errors.New("bucket: not supported by provider")
 )
 
 // MaxPresignTTL is the longest validity PresignGet grants on any backend: the

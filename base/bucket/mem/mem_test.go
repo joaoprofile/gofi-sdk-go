@@ -20,3 +20,15 @@ func TestOpenURL(t *testing.T) {
 		t.Fatalf("got %T", s)
 	}
 }
+
+func TestManagerContract(t *testing.T) { buckettest.RunManager(t, mem.NewManager()) }
+
+func TestOpenManager(t *testing.T) {
+	m, err := bucket.OpenManager(context.Background(), bucket.Config{Provider: bucket.ProviderMem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.(*mem.Manager); !ok {
+		t.Fatalf("got %T", m)
+	}
+}

@@ -21,6 +21,9 @@ func init() {
 	bucket.Register(bucket.ProviderMem, func(_ context.Context, cfg bucket.Config) (bucket.Store, error) {
 		return New(cfg.Name), nil
 	})
+	bucket.RegisterManager(bucket.ProviderMem, func(context.Context, bucket.Config) (bucket.Manager, error) {
+		return NewManager(), nil
+	})
 }
 
 type object struct {
@@ -36,8 +39,10 @@ type Store struct {
 }
 
 var (
-	_ bucket.Store  = (*Store)(nil)
-	_ bucket.Walker = (*Store)(nil)
+	_ bucket.Store        = (*Store)(nil)
+	_ bucket.Walker       = (*Store)(nil)
+	_ bucket.BatchDeleter = (*Store)(nil)
+	_ bucket.Statter      = (*Store)(nil)
 )
 
 // New returns an empty Store; name only appears in presigned URLs.
@@ -62,13 +67,26 @@ func (s *Store) Put(_ context.Context, in bucket.PutInput) error {
 }
 
 func (s *Store) Get(_ context.Context, key string) (bucket.Object, io.ReadCloser, error) {
+	o, err := s.object(key)
+	if err != nil {
+		return bucket.Object{}, nil, err
+	}
+	return o.meta, io.NopCloser(bytes.NewReader(o.data)), nil
+}
+
+func (s *Store) Stat(_ context.Context, key string) (bucket.Object, error) {
+	o, err := s.object(key)
+	return o.meta, err
+}
+
+func (s *Store) object(key string) (object, error) {
 	s.mu.RLock()
 	o, ok := s.objects[key]
 	s.mu.RUnlock()
 	if !ok {
-		return bucket.Object{}, nil, fmt.Errorf("%w: %q", bucket.ErrNotFound, key)
+		return object{}, fmt.Errorf("%w: %q", bucket.ErrNotFound, key)
 	}
-	return o.meta, io.NopCloser(bytes.NewReader(o.data)), nil
+	return o, nil
 }
 
 // All yields objects in key order.
@@ -100,6 +118,21 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	defer s.mu.Unlock()
 	delete(s.objects, key)
 	return nil
+}
+
+func (s *Store) DeleteMany(_ context.Context, keys []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range keys {
+		delete(s.objects, k)
+	}
+	return nil
+}
+
+func (s *Store) empty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.objects) == 0
 }
 
 // PresignGet returns a mem:// URL; it is not downloadable.
