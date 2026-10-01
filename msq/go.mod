@@ -3,8 +3,8 @@ module github.com/joaoprofile/gofi-sdk-go/msq
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.2
 	github.com/google/uuid v1.6.0
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.2
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0

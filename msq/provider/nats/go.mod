@@ -3,9 +3,9 @@ module github.com/joaoprofile/gofi-sdk-go/msq/provider/nats
 go 1.26.6
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/joaoprofile/gofi-sdk-go/msq v0.2.2
 	github.com/joaoprofile/gofi-sdk-go/obs v0.2.2
-	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats-server/v2 v2.15.0
 	github.com/nats-io/nats.go v1.54.0
 )
@@ -19,8 +19,8 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.2 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.2 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/minio/highwayhash v1.0.4 // indirect
