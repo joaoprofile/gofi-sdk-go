@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package people.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/joaoprofile/gofi-sdk-go/examples/grpc/gen/people/v1;peoplev1";
+
+// PeopleService covers the four gRPC call shapes over one entity.
+service PeopleService {
+  // Unary.
+  rpc CreatePerson(CreatePersonRequest) returns (Person);
+  rpc GetPerson(GetPersonRequest) returns (Person);
+
+  // Server streaming: one request, many people.
+  rpc ListPeople(ListPeopleRequest) returns (stream Person);
+
+  // Client streaming: the person ID, then the image in chunks.
+  rpc UploadPhoto(stream UploadPhotoRequest) returns (PhotoInfo);
+
+  // Server streaming: the photo metadata, then the image in chunks.
+  rpc DownloadPhoto(DownloadPhotoRequest) returns (stream DownloadPhotoResponse);
+
+  // Bidirectional streaming: both sides send whenever they want.
+  rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
+
+message Address {
+  string street = 1;
+  string city = 2;
+  string country = 3;
+}
+
+message Person {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  google.protobuf.Timestamp birth_date = 4;
+  repeated string phones = 5;
+  Address address = 6;
+  google.protobuf.Timestamp created_at = 7;
+  // Set once a photo was uploaded.
+  PhotoInfo photo = 8;
+}
+
+message PhotoInfo {
+  // Detected by the server from the bytes, never taken from the client.
+  string content_type = 1;
+  int64 size = 2;
+  // Hex SHA-256 of the image, so both sides can verify the transfer.
+  string sha256 = 3;
+}
+
+message CreatePersonRequest {
+  string name = 1;
+  string email = 2;
+  google.protobuf.Timestamp birth_date = 3;
+  repeated string phones = 4;
+  Address address = 5;
+}
+
+message GetPersonRequest {
+  string id = 1;
+}
+
+message ListPeopleRequest {
+  // Case-insensitive filter on the name; empty lists everyone.
+  string name_contains = 1;
+}
+
+message UploadPhotoRequest {
+  oneof data {
+    // First message.
+    string person_id = 1;
+    // Every following message.
+    bytes chunk = 2;
+  }
+}
+
+message DownloadPhotoRequest {
+  string person_id = 1;
+}
+
+message DownloadPhotoResponse {
+  oneof data {
+    // First message.
+    PhotoInfo info = 1;
+    // Every following message.
+    bytes chunk = 2;
+  }
+}
+
+message ChatMessage {
+  string person_id = 1;
+  string text = 2;
+  google.protobuf.Timestamp sent_at = 3;
+}

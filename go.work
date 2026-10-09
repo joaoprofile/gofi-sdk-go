@@ -1,7 +1,6 @@
 go 1.26.6
 
 use (
-	./gofi
 	./base
 	./base/bucket/oci
 	./base/bucket/s3
@@ -9,6 +8,7 @@ use (
 	./base/cloud/oci
 	./base/secrets/awssm
 	./base/secrets/ocivault
+	./examples/grpc
 	./examples/iam/login
 	./examples/msq/kafka/consumer
 	./examples/msq/kafka/producer
@@ -20,6 +20,7 @@ use (
 	./examples/obs
 	./examples/sqln/filter-api
 	./examples/sqln/search
+	./gofi
 	./iam
 	./msq
 	./msq/provider/kafka

@@ -111,6 +111,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 | Example | What it shows |
 |---------|---------------|
 | [examples/netx/api](examples/netx/api) | `httpx` server through the `httpserver` component: several handlers, public/private routes, global and auth middlewares |
+| [examples/grpc](examples/grpc) | gRPC with `grpcx`: a `Person` entity and photos through unary, server, client and bidirectional streams; a gRPC-only server, an HTTP + gRPC server in one gofi service, and a client |
 | [examples/sqln/search](examples/sqln/search) | Job (no HTTP) on PostgreSQL: migrations, `criteria` filters, join, pagination, single row and streaming |
 | [examples/sqln/filter-api](examples/sqln/filter-api) | HTTP API with client-driven dynamic filters, allowlisted by `sqln.FilterMapping` |
 | [examples/msq/rabbitmq](examples/msq/rabbitmq) | Producer and consumer as separate services on RabbitMQ, with retries and dead-letter queue |
