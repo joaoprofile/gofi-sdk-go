@@ -6,8 +6,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-redis/redis_rate/v10 v10.0.1
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.4
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0

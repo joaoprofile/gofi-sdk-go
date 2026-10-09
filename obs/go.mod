@@ -3,7 +3,7 @@ module github.com/joaoprofile/gofi-sdk-go/obs
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.71.0

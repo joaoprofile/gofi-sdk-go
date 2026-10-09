@@ -4,10 +4,10 @@ go 1.26.6
 
 require (
 	github.com/golang/protobuf v1.5.4
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/netx v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/netx/grpcx v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/netx v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/netx/grpcx v0.2.4
 	google.golang.org/grpc v1.83.1
 	google.golang.org/protobuf v1.36.12
 )
@@ -24,7 +24,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-redis/redis_rate/v10 v10.0.1 // indirect
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3 // indirect
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.4 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/redis/go-redis/v9 v9.18.0 // indirect

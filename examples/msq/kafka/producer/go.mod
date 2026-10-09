@@ -3,10 +3,10 @@ module github.com/joaoprofile/gofi-sdk-go/examples/msq/kafka/producer
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/msq v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/msq v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.4
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

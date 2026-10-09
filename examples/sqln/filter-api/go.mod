@@ -3,9 +3,9 @@ module github.com/joaoprofile/gofi-sdk-go/examples/sqln/filter-api
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/netx v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/sqln v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/netx v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/sqln v0.2.4
 )
 
 require (
@@ -26,8 +26,8 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3 // indirect
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3 // indirect
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4 // indirect
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.4 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/redis/go-redis/v9 v9.18.0 // indirect

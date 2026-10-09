@@ -3,9 +3,9 @@ module github.com/joaoprofile/gofi-sdk-go/netx/grpcx
 go 1.26.6
 
 require (
-	github.com/joaoprofile/gofi-sdk-go/base v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/netx v0.2.3
-	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/base v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/netx v0.2.4
+	github.com/joaoprofile/gofi-sdk-go/obs v0.2.4
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688
