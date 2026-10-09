@@ -8,6 +8,7 @@ require (
 	github.com/joaoprofile/gofi-sdk-go/iam v0.2.3
 	github.com/joaoprofile/gofi-sdk-go/msq v0.2.3
 	github.com/joaoprofile/gofi-sdk-go/netx v0.2.3
+	github.com/joaoprofile/gofi-sdk-go/netx/grpcx v0.2.3
 	github.com/joaoprofile/gofi-sdk-go/obs v0.2.3
 	github.com/joaoprofile/gofi-sdk-go/sqln v0.2.3
 	github.com/lib/pq v1.12.3
@@ -59,6 +60,7 @@ require (
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
@@ -78,6 +80,7 @@ replace (
 	github.com/joaoprofile/gofi-sdk-go/iam => ../iam
 	github.com/joaoprofile/gofi-sdk-go/msq => ../msq
 	github.com/joaoprofile/gofi-sdk-go/netx => ../netx
+	github.com/joaoprofile/gofi-sdk-go/netx/grpcx => ../netx/grpcx
 	github.com/joaoprofile/gofi-sdk-go/obs => ../obs
 	github.com/joaoprofile/gofi-sdk-go/sqln => ../sqln
 )

@@ -24,6 +24,8 @@ const (
 	ResourceTLS = "tls"
 	// ResourceHTTP is the HTTP server served without TLS.
 	ResourceHTTP = "http"
+	// ResourceGRPC is the gRPC server served without TLS.
+	ResourceGRPC = "grpc"
 	// AllowAll in GOFI_ALLOW_INSECURE_TRANSPORT allows every resource.
 	AllowAll = "all"
 )
@@ -77,6 +79,25 @@ func InsecureHTTP(env *environment.Environment, tlsEnabled bool) []InsecureTrans
 	}
 	if isGuarded(env) {
 		logging.Warn("HTTP server without TLS: terminate TLS before it (ingress, mesh) or set HTTP_TLS_CERT_FILE / HTTP_TLS_KEY_FILE; HTTP_REQUIRE_TLS=true refuses it",
+			slog.String("resource", it.Resource))
+	}
+	return nil
+}
+
+// InsecureGRPC reports a gRPC server without TLS, with the same policy as
+// InsecureHTTP: a warning in prod and stage, a refusal with GRPC_REQUIRE_TLS.
+// Internal gRPC is often plaintext inside a private network or behind a mesh
+// that encrypts the hop.
+func InsecureGRPC(env *environment.Environment, tlsEnabled bool) []InsecureTransport {
+	if tlsEnabled {
+		return nil
+	}
+	it := InsecureTransport{ResourceGRPC, "GRPC_TLS_CERT_FILE / GRPC_TLS_KEY_FILE", "gRPC server without TLS"}
+	if env.GRPCRequireTLS {
+		return []InsecureTransport{it}
+	}
+	if isGuarded(env) {
+		logging.Warn("gRPC server without TLS: keep it on a private network or mesh, or set GRPC_TLS_CERT_FILE / GRPC_TLS_KEY_FILE; GRPC_REQUIRE_TLS=true refuses it",
 			slog.String("resource", it.Resource))
 	}
 	return nil

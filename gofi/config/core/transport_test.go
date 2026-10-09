@@ -148,6 +148,38 @@ func TestInsecureHTTP(t *testing.T) {
 	}
 }
 
+func TestInsecureGRPC(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	logging.ResetForTesting() // logging.Warn falls back to slog.Default
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev); logging.ResetForTesting() })
+
+	if got := InsecureGRPC(&environment.Environment{AppEnvironment: "prod", GRPCRequireTLS: true}, true); got != nil {
+		t.Fatalf("TLS enabled: %+v", got)
+	}
+	if got := InsecureGRPC(&environment.Environment{AppEnvironment: "dev"}, false); got != nil || logs.Len() > 0 {
+		t.Fatalf("dev: %+v %s", got, logs.String())
+	}
+
+	env := &environment.Environment{AppEnvironment: "stage"}
+	if got := InsecureGRPC(env, false); got != nil {
+		t.Fatalf("stage without GRPC_REQUIRE_TLS must only warn: %+v", got)
+	}
+	if !strings.Contains(logs.String(), "gRPC server without TLS") {
+		t.Fatalf("no warning: %s", logs.String())
+	}
+
+	env.GRPCRequireTLS = true
+	got := InsecureGRPC(env, false)
+	if len(got) != 1 || got[0].Resource != ResourceGRPC {
+		t.Fatalf("got %+v", got)
+	}
+	if err := CheckTransport(env, got); !errors.Is(err, ErrInsecureTransport) || !strings.Contains(err.Error(), "GOFI_ALLOW_INSECURE_TRANSPORT=grpc") {
+		t.Fatalf("want refusal, got %v", err)
+	}
+}
+
 func TestCheckTransport_Allowed(t *testing.T) {
 	logging.NewLogger("test")
 	env := &environment.Environment{AppEnvironment: "prod", AllowInsecureTransport: " Database , ,cache"}

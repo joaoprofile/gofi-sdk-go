@@ -473,6 +473,35 @@ func TestEnvironmentHTTPServerFieldsBootstrap(t *testing.T) {
 	}
 }
 
+func TestEnvironmentGRPCFieldsBootstrap(t *testing.T) {
+	reset(t)
+	vars := map[string]string{
+		"GRPC_TLS_CERT_FILE":      "/tls/tls.crt",
+		"GRPC_TLS_KEY_FILE":       "/tls/tls.key",
+		"GRPC_TLS_CLIENT_CA_FILE": "/tls/ca.crt",
+		"GRPC_TLS_CLIENT_AUTH":    "require_and_verify",
+		"GRPC_REQUIRE_TLS":        "true",
+	}
+	for k, v := range vars {
+		t.Setenv(k, v)
+	}
+
+	env := Instance()
+	got := Environment{
+		GRPCTLSCertFile: env.GRPCTLSCertFile, GRPCTLSKeyFile: env.GRPCTLSKeyFile,
+		GRPCTLSClientCAFile: env.GRPCTLSClientCAFile, GRPCTLSClientAuth: env.GRPCTLSClientAuth,
+		GRPCRequireTLS: env.GRPCRequireTLS,
+	}
+	want := Environment{
+		GRPCTLSCertFile: "/tls/tls.crt", GRPCTLSKeyFile: "/tls/tls.key",
+		GRPCTLSClientCAFile: "/tls/ca.crt", GRPCTLSClientAuth: "require_and_verify",
+		GRPCRequireTLS: true,
+	}
+	if got != want {
+		t.Errorf("GRPC_* not loaded:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 // End-to-end parser for the OTLP TLS file fields.
 func TestEnvironmentOTLPTLSFieldsBootstrap(t *testing.T) {
 	reset(t)

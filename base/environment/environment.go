@@ -232,6 +232,16 @@ type Environment struct {
 	// instead of a warning.
 	HTTPRequireTLS bool `env:"HTTP_REQUIRE_TLS"`
 
+	// gRPC server (gofi grpcserver component); code-provided config wins.
+	GRPCTLSCertFile     string `env:"GRPC_TLS_CERT_FILE"`
+	GRPCTLSKeyFile      string `env:"GRPC_TLS_KEY_FILE"`
+	GRPCTLSClientCAFile string `env:"GRPC_TLS_CLIENT_CA_FILE"`
+	// GRPCTLSClientAuth: none | request | require | verify_if_given | require_and_verify.
+	GRPCTLSClientAuth string `env:"GRPC_TLS_CLIENT_AUTH"`
+	// GRPCRequireTLS makes a plaintext gRPC server a refusal in prod and stage
+	// instead of a warning.
+	GRPCRequireTLS bool `env:"GRPC_REQUIRE_TLS"`
+
 	// Mail / SMTP — envio transacional e em massa por qualquer provedor SMTP.
 	MailHost       string        `env:"MAIL_HOST"`
 	MailPort       int           `env:"MAIL_PORT"`

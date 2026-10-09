@@ -141,7 +141,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 │  Orchestrator — github.com/joaoprofile/gofi-sdk-go                         │
 │    gofi.New("svc").With(database.New(), httpserver.New(":8080")).Build() │
 │    component/{database,cache,session,messaging,observability,iam,        │
-│               httpserver}                                                │
+│               httpserver,grpcserver}                                     │
 │    config/, config/core  ← env → typed Config bridge                     │
 └───────────────┬──────────────────────────────────────────────────────────┘
                 │ imports
@@ -159,7 +159,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 │  Provider modules (opt-in, carry the vendor SDKs)                        │
 │    msq/provider/{kafka,rabbitmq,sqs,oci,redis,nats}                      │
 │    base/bucket/{s3,oci}   base/secrets/{awssm,ocivault}                  │
-│    netx/awssign           sqln/rdsauth                                   │
+│    netx/awssign  netx/grpcx  sqln/rdsauth                                │
 └───────────────┬──────────────────────────────────────────────────────────┘
                 │ credentials
 ┌───────────────▼──────────────────────────────────────────────────────────┐
@@ -188,6 +188,7 @@ base/bucket/oci             → base, base/cloud/oci
 base/secrets/awssm          → base, base/cloud/aws
 base/secrets/ocivault       → base, base/cloud/oci
 netx/awssign                → netx, base/cloud/aws
+netx/grpcx                  → netx, base, obs (+ google.golang.org/grpc)
 sqln/rdsauth                → vendor SDK only
 base/cloud/{aws,oci}        → vendor SDK only
 examples/*                  → gofi modules via replace (each one its own module)
@@ -217,6 +218,7 @@ examples/*                  → gofi modules via replace (each one its own modul
 | `.../base/secrets/awssm`                 | provider      | AWS Secrets Manager (`secret://awssm/...`)          |
 | `.../base/secrets/ocivault`              | provider      | OCI Vault (`secret://ocivault/...`)                 |
 | `.../netx/awssign`                       | provider      | AWS SigV4 request signer                            |
+| `.../netx/grpcx`                         | library       | gRPC server and client with the netx defaults       |
 | `.../sqln/rdsauth`                       | provider      | RDS / Aurora IAM authentication tokens              |
 | `.../base/cloud/aws`                     | cloud         | AWS credential chain                                |
 | `.../base/cloud/oci`                     | cloud         | OCI authentication modes                            |
@@ -241,6 +243,7 @@ Entry point of the SDK. Exposes the `Builder` and `Service` interfaces, the `Com
 | `component/observability`          | `observability.New()` (OTEL_*)           | `observability.FromTelemetry(t)` | `Telemetry()`           |
 | `component/iam`                    | `iam.New(iam.Config...)` (JWT_*, `*_TOKEN_TTL`, CACHE_* for Redis sessions) | `iam.FromService(svc)` | `Service()` |
 | `component/httpserver`             | `httpserver.New(port, cfg...)`           | `httpserver.FromServer(s)`    | `Server()`; `.Handlers/.Use/.UseAuth` |
+| `component/grpcserver`             | `grpcserver.New(addr, cfg...)` (GRPC_TLS_*) | `grpcserver.FromServer(s)` | `Server()`; `.Register` |
 
 ```go
 db := database.New()
@@ -570,6 +573,42 @@ func (s hmacSigner) Sign(req *http.Request, body []byte) (*http.Request, error) 
 }
 ```
 
+### `netx/grpcx` — gRPC server and client
+
+**Path:** `github.com/joaoprofile/gofi-sdk-go/netx/grpcx` (its own module: HTTP-only services never link gRPC)
+
+Server and client for service-to-service gRPC with the same defaults as the HTTP server: hardened TLS
+(`netx.TLSConfig`, certificate reload, optional mTLS), request ID in `x-request-id` (readable with
+`netx.GetRequestID`), panic recovery, error-only logging, OpenTelemetry (`otelgrpc`), keepalive tuned
+on both sides, graceful shutdown that reports `NOT_SERVING` before draining, and the standard
+`grpc.health.v1` service fed by readiness checks.
+
+Handlers return `errs.AppError` (or any error). The server maps the kind to a status code
+(validation → `InvalidArgument`, not found → `NotFound`, conflict → `AlreadyExists`, unauthorized →
+`Unauthenticated`, forbidden → `PermissionDenied`, external → `Unavailable`, others → `Internal`) and
+sends the AppError code in an `ErrorInfo` detail, never the cause; `grpcx.FromError` gives the client
+the same registered AppError back.
+
+```go
+srv, err := grpcx.NewServer(grpcx.ServerConfig{
+    Addr: ":9090",
+    Auth: &grpcx.AuthConfig{Validate: validateServiceToken}, // optional bearer token check
+})
+ordersv1.RegisterOrdersServer(srv, ordersImpl)
+err = srv.ListenAndServe()
+
+conn, err := grpcx.NewClient("dns:///orders.internal:9090", grpcx.ClientConfig{
+    TLS:   &grpcx.ClientTLSConfig{CAFile: "/etc/tls/ca.pem"}, // or Insecure: true inside a private network
+    Token: func(ctx context.Context) (string, error) { return mintToken(ctx) },
+    Retry: &grpcx.RetryPolicy{}, // opt-in: UNAVAILABLE, 3 attempts; only for idempotent methods
+})
+defer conn.Close()
+orders := ordersv1.NewOrdersClient(conn)
+```
+
+With the orchestrator, `grpcserver.New(":9090").Register(func(r grpc.ServiceRegistrar) {...})` runs it
+next to the HTTP server; the readiness checks of the other components feed its health service.
+
 ---
 
 ### `base/cloud` — Cloud identity
@@ -701,6 +740,7 @@ go get github.com/joaoprofile/gofi-sdk-go/msq/provider/kafka     # or rabbitmq, 
 go get github.com/joaoprofile/gofi-sdk-go/base/bucket/s3         # or base/bucket/oci
 go get github.com/joaoprofile/gofi-sdk-go/base/secrets/awssm     # or base/secrets/ocivault
 go get github.com/joaoprofile/gofi-sdk-go/netx/awssign           # AWS SigV4 signer
+go get github.com/joaoprofile/gofi-sdk-go/netx/grpcx             # gRPC server and client
 go get github.com/joaoprofile/gofi-sdk-go/sqln/rdsauth           # RDS IAM auth
 ```
 
@@ -733,15 +773,15 @@ The `base/environment` module loads configuration from environment variables at 
 With `APP_ENVIRONMENT=prod` or `stage`, `Build` refuses to start when the database, cache, broker,
 OTLP exporter or object storage is reached without verified TLS, or when `TLS_INSECURE_SKIP_VERIFY`
 is set. `GOFI_ALLOW_INSECURE_TRANSPORT` downgrades the refusal to a logged warning for the listed
-resources; treat each use as a documented exception. An HTTP server without TLS only logs a warning,
-unless `HTTP_REQUIRE_TLS=true`. See [SECURITY.md](SECURITY.md) for the full hardening guidance.
+resources; treat each use as a documented exception. An HTTP or gRPC server without TLS only logs a
+warning, unless `HTTP_REQUIRE_TLS=true` / `GRPC_REQUIRE_TLS=true`. See [SECURITY.md](SECURITY.md) for the full hardening guidance.
 
 ### Security and transport variables
 
 | Variable | Effect |
 | -------- | ------ |
 | `APP_ENVIRONMENT` | `dev`, `test`, `stage` or `prod`; any other value fails `Build` |
-| `GOFI_ALLOW_INSECURE_TRANSPORT` | in `prod`/`stage`, CSV of `database,cache,messaging,otlp,bucket,tls,http` or `all`: refusal becomes a warning |
+| `GOFI_ALLOW_INSECURE_TRANSPORT` | in `prod`/`stage`, CSV of `database,cache,messaging,otlp,bucket,tls,http,grpc` or `all`: refusal becomes a warning |
 | `DATABASE_SSL_MODE` | empty means `verify-full` (`disable` for a local host) |
 | `DATABASE_SSL_ROOT_CERT` / `DATABASE_SSL_CERT` / `DATABASE_SSL_KEY` | server CA and client certificate (mTLS), PEM |
 | `DATABASE_STATEMENT_TIMEOUT` / `DATABASE_QUERY_TIMEOUT` | PostgreSQL `statement_timeout`; query timeout when the `ctx` has no deadline (default 30s, negative disables) |
@@ -750,6 +790,8 @@ unless `HTTP_REQUIRE_TLS=true`. See [SECURITY.md](SECURITY.md) for the full hard
 | `MESSAGING_MAX_DELIVERIES` / `MESSAGING_HANDLER_TIMEOUT` | delivery limit before dead-lettering; handler timeout (default 5 min) |
 | `HTTP_TLS_CERT_FILE` / `HTTP_TLS_KEY_FILE` / `HTTP_TLS_CLIENT_CA_FILE` / `HTTP_TLS_CLIENT_AUTH` | server TLS and mTLS |
 | `HTTP_REQUIRE_TLS` | in `prod`/`stage`, an HTTP server without TLS fails `Build` |
+| `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` / `GRPC_TLS_CLIENT_CA_FILE` / `GRPC_TLS_CLIENT_AUTH` | gRPC server TLS and mTLS (`grpcserver` component) |
+| `GRPC_REQUIRE_TLS` | in `prod`/`stage`, a gRPC server without TLS fails `Build` |
 | `HTTP_TRUSTED_PROXIES` | CSV of CIDRs (`private` = private networks); no proxy is trusted by default |
 | `HTTP_ALLOWED_ORIGINS` | CORS origins, also trusted by the CSRF check (falls back to `ALLOWED_ORIGINS`) |
 | `HTTP_MAX_CONCURRENT` / `HTTP_RATE_LIMIT_FAIL_CLOSED` | concurrency limiter slots; answer 503 when the rate-limit backend fails |
