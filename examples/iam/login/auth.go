@@ -11,7 +11,7 @@ import (
 
 	"github.com/joaoprofile/gofi-sdk-go/iam/core"
 	"github.com/joaoprofile/gofi-sdk-go/iam/types"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 const sessionCookie = "sid"
@@ -48,7 +48,7 @@ func (a *authenticator) Middleware(next http.Handler) http.Handler {
 			claims, err = a.fromSession(r.Context(), c.Value)
 		}
 		if err != nil {
-			netx.Error(w, http.StatusUnauthorized, errUnauthenticated)
+			httpx.Error(w, http.StatusUnauthorized, errUnauthenticated)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))

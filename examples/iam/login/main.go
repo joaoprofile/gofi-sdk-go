@@ -40,7 +40,7 @@ func main() {
 		OnEvent: logEvent,
 	})
 
-	// 2. HTTP server. netx rejects cross-site POSTs by Origin/Sec-Fetch-Site
+	// 2. HTTP server. httpx rejects cross-site POSTs by Origin/Sec-Fetch-Site
 	// by default: CSRF protection for the cookie mode.
 	http := httpserver.New(":8080")
 

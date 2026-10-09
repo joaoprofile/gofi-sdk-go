@@ -8,7 +8,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/gofi"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/database"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres" // DATABASE_DRIVER=postgres
 
 	"github.com/joaoprofile/gofi-sdk-go/examples/sqln/filter-api/product"
@@ -19,7 +19,7 @@ func main() {
 		With(
 			database.New(), // DATABASE_* → global sqln connection; DATABASE_MIGRATION=true applies .migrations
 			httpserver.New(":8080").
-				Use(netx.LoggingMiddleware()).
+				Use(httpx.LoggingMiddleware()).
 				Handlers(product.NewHandler(product.NewRepository())),
 		).
 		Build()

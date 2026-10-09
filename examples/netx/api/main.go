@@ -1,4 +1,4 @@
-// Command api is a minimal HTTP API built with the netx package: handlers,
+// Command api is a minimal HTTP API built with the netx/httpx package: handlers,
 // public and private routes, global and auth middlewares, all wired here.
 package main
 
@@ -10,7 +10,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/examples/netx/api/middleware"
 	"github.com/joaoprofile/gofi-sdk-go/gofi"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 func main() {
@@ -19,14 +19,14 @@ func main() {
 	svc, err := gofi.New("example-api").
 		With(
 			// 1. Server config. Every field is optional; zero values fall back to defaults.
-			httpserver.New(":8080", &netx.WSConfig{
+			httpserver.New(":8080", &httpx.WSConfig{
 				AllowedOrigins: []string{"http://localhost:3000"},
 				MaxBodyBytes:   1 << 20, // 1 MB
 				RequestTimeout: 10 * time.Second,
 			}).
 				// 2. Global middlewares: run on every route.
 				Use(middleware.APIVersion("v1")).
-				// 3. Auth middleware: runs only on routes declared with netx.PrivateRoutes.
+				// 3. Auth middleware: runs only on routes declared with httpx.PrivateRoutes.
 				UseAuth(middleware.Auth).
 				// 4. Handlers: each one declares its own routes.
 				Handlers(

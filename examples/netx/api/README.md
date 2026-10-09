@@ -1,6 +1,6 @@
-# netx — API example
+# netx/httpx — API example
 
-A minimal HTTP API built with `netx`: several handlers, public and private
+A minimal HTTP API built with `netx/httpx`: several handlers, public and private
 routes, a global middleware and an auth middleware, all wired in `main.go`
 through the gofi `httpserver` component.
 
@@ -31,7 +31,7 @@ Private routes require `Authorization: Bearer secret-token`.
 
 ```sh
 TOKEN='Authorization: Bearer secret-token'
-JSON='Content-Type: application/json'   # netx rejects other bodies with 415
+JSON='Content-Type: application/json'   # httpx rejects other bodies with 415
 
 # public
 curl localhost:8080/health
@@ -52,10 +52,10 @@ curl 'localhost:8080/orders?status=pending' -H "$TOKEN"
 | Area | API |
 |------|-----|
 | Service | `gofi.New`, `With`, `Build`, `ListenAndServe` |
-| Server | `httpserver.New` with `netx.WSConfig`, `Use`, `UseAuth`, `Handlers` |
+| Server | `httpserver.New` with `httpx.WSConfig`, `Use`, `UseAuth`, `Handlers` |
 | Routes | `GET` `POST` `PUT` `PATCH` `DELETE`, `To`, `Cors`, `Timeouts`, `PublicRoutes`, `PrivateRoutes`, `RouterHandler` |
 | Request | `ParseRequestBody`, `GetPathParam`, `GetQueryParam`, `BindQueryParamsToStruct`, `GetRequestID` |
 | Response | `Response`, `JSON`, `Error`, `ErrorDetails`, `RespondError` (with `base/errs`) |
 
-`Build` sets up the logger `netx` writes to, and `ListenAndServe` blocks
+`Build` sets up the logger `httpx` writes to, and `ListenAndServe` blocks
 until SIGINT/SIGTERM, then drains the server gracefully.

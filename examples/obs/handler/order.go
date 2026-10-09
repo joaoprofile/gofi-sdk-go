@@ -10,7 +10,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/examples/obs/store"
 	"github.com/joaoprofile/gofi-sdk-go/examples/obs/telemetry"
 	"github.com/joaoprofile/gofi-sdk-go/examples/obs/worker"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -33,18 +33,18 @@ type CreateOrder struct {
 type OrderHandler struct {
 	store    *store.Store
 	queue    *worker.Queue
-	payments *netx.HttpClient
+	payments *httpx.HttpClient
 	metrics  *telemetry.Metrics
 }
 
-func NewOrderHandler(s *store.Store, q *worker.Queue, payments *netx.HttpClient, m *telemetry.Metrics) *OrderHandler {
+func NewOrderHandler(s *store.Store, q *worker.Queue, payments *httpx.HttpClient, m *telemetry.Metrics) *OrderHandler {
 	return &OrderHandler{store: s, queue: q, payments: payments, metrics: m}
 }
 
-func (h *OrderHandler) Handlers() []*netx.Route {
-	return netx.PublicRoutes("/orders",
-		netx.POST("/").To(h.create),
-		netx.GET("/{id}").To(h.get),
+func (h *OrderHandler) Handlers() []*httpx.Route {
+	return httpx.PublicRoutes("/orders",
+		httpx.POST("/").To(h.create),
+		httpx.GET("/{id}").To(h.get),
 	)
 }
 
@@ -56,12 +56,12 @@ func (h *OrderHandler) create(w http.ResponseWriter, r *http.Request) {
 	log := logging.FromContext(ctx)
 
 	var in CreateOrder
-	if err := netx.ParseRequestBody(w, r, &in); err != nil {
-		netx.Error(w, http.StatusBadRequest, err)
+	if err := httpx.ParseRequestBody(w, r, &in); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
 
-	// netx already opened the server span; business attributes go on it so
+	// httpx already opened the server span; business attributes go on it so
 	// traces can be searched by them in Tempo ({span.order.payment_method="pix"}).
 	trace.SpanFromContext(ctx).SetAttributes(
 		attribute.String("order.payment_method", in.PaymentMethod),
@@ -82,14 +82,14 @@ func (h *OrderHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.WarnContext(ctx, "order rejected", "reason", status, "error", err)
-		netx.Error(w, httpStatus(err), err)
+		httpx.Error(w, httpStatus(err), err)
 		return
 	}
 
 	h.metrics.OrderAmount.Record(ctx, order.Amount,
 		metric.WithAttributes(attribute.String("payment_method", order.PaymentMethod)))
 	log.InfoContext(ctx, "order created", "order_id", order.ID, "amount", order.Amount)
-	netx.Response(w, http.StatusCreated, order)
+	httpx.Response(w, http.StatusCreated, order)
 }
 
 // place is the order flow. Its span groups the steps; each step is a child.
@@ -126,14 +126,14 @@ func (h *OrderHandler) place(ctx context.Context, in CreateOrder) (order store.O
 	return order, h.queue.Publish(ctx, worker.Message{Type: "order.paid", OrderID: order.ID})
 }
 
-// charge calls the payment API through netx.HttpClient. Its transport is
+// charge calls the payment API through httpx.HttpClient. Its transport is
 // instrumented: it creates a client span and sends the traceparent header, so
 // the payment server span becomes a child of this one, even across services.
 func (h *OrderHandler) charge(ctx context.Context, in CreateOrder) error {
-	req := netx.NewRequest[PaymentResult](ctx, h.payments, http.MethodPost, "/payments")
+	req := httpx.NewRequest[PaymentResult](ctx, h.payments, http.MethodPost, "/payments")
 	req.SetBody(PaymentRequest{Amount: in.Amount, Method: in.PaymentMethod})
 	if _, err := req.Execute(); err != nil {
-		var httpErr *netx.HttpError
+		var httpErr *httpx.HttpError
 		if errors.As(err, &httpErr) && httpErr.Status == http.StatusPaymentRequired {
 			return errDeclined
 		}
@@ -153,12 +153,12 @@ func reserveStock(ctx context.Context) error {
 
 // GET /orders/{id}
 func (h *OrderHandler) get(w http.ResponseWriter, r *http.Request) {
-	order, err := h.store.Get(netx.GetPathParam("id", r))
+	order, err := h.store.Get(httpx.GetPathParam("id", r))
 	if err != nil {
-		netx.Error(w, http.StatusNotFound, err)
+		httpx.Error(w, http.StatusNotFound, err)
 		return
 	}
-	netx.Response(w, http.StatusOK, order)
+	httpx.Response(w, http.StatusOK, order)
 }
 
 func statusLabel(err error) string {

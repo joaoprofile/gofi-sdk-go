@@ -16,7 +16,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/gofi"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/observability"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 const baseURL = "http://localhost:8080"
@@ -35,8 +35,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("create queue: %v", err)
 	}
-	// netx.HttpClient propagates the trace context and records client spans.
-	payments, err := netx.NewClient(&netx.HttpClientConfig{
+	// httpx.HttpClient propagates the trace context and records client spans.
+	payments, err := httpx.NewClient(&httpx.HttpClientConfig{
 		Name:    "payments",
 		BaseURL: baseURL,
 		Timeout: 2 * time.Second,
@@ -52,7 +52,7 @@ func main() {
 		// It starts first and is flushed last, after the shutdown logs.
 		observability.New(),
 
-		// 3. HTTP server: netx names each request span after its route
+		// 3. HTTP server: httpx names each request span after its route
 		// ("POST /orders") and records http.server.* metrics with http_route.
 		httpserver.New(":8080").Handlers(
 			handler.NewOrderHandler(orders, queue, payments, m),

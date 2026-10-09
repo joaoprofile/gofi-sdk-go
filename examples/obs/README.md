@@ -5,8 +5,8 @@ to a local Grafana stack. It covers what a real service has to instrument:
 
 | What | Where | Shows |
 |------|-------|-------|
-| HTTP handlers | [handler/order.go](handler/order.go) | server span from netx, business attributes, a flow split into steps, counters and histograms, trace-aware logs |
-| Outgoing HTTP call | `OrderHandler.charge` | `netx.HttpClient` creates the client span and propagates `traceparent` |
+| HTTP handlers | [handler/order.go](handler/order.go) | server span from httpx, business attributes, a flow split into steps, counters and histograms, trace-aware logs |
+| Outgoing HTTP call | `OrderHandler.charge` | `httpx.HttpClient` creates the client span and propagates `traceparent` |
 | Called service | [handler/payment.go](handler/payment.go) | continues the caller's trace, span events |
 | Async flow (queue) | [worker/](worker) | trace context injected into message headers and extracted by the consumer; observable gauge |
 | Scheduled job | [job/archive.go](job/archive.go) | one root trace per run, a child span per batch, duration/outcome metrics |
@@ -55,11 +55,11 @@ curl localhost:8080/orders/ord-1
 **Trace of `POST /orders`** (Explore → Tempo, or click a trace in the dashboard):
 
 ```
-POST /orders                 server    (netx)
+POST /orders                 server    (httpx)
 └─ order.place               internal  (the flow)
    ├─ order.validate
    ├─ stock.reserve
-   ├─ HTTP POST              client    (netx.HttpClient)
+   ├─ HTTP POST              client    (httpx.HttpClient)
    │  └─ POST /payments      server    (same trace across the HTTP call)
    └─ publish orders         producer
       └─ process orders      consumer  (other goroutine, same trace)
@@ -116,7 +116,7 @@ the component starts.
 
 ### 2. HTTP handlers
 
-netx already opens a server span named after the route (`POST /orders`) and
+httpx already opens a server span named after the route (`POST /orders`) and
 records `http.server.request.duration` labeled with `http_route` for every
 request. Add what is specific to your code:
 
@@ -144,7 +144,7 @@ child. On errors, `span.RecordError` alone does not mark the span as failed;
 
 ### 4. Calls to other services
 
-Use `netx.HttpClient` (or any `otelhttp` transport) and pass the request
+Use `httpx.HttpClient` (or any `otelhttp` transport) and pass the request
 `ctx`. The `traceparent` header goes along and the other service continues
 the same trace.
 

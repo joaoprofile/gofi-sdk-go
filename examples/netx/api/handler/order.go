@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 type Order struct {
@@ -25,18 +25,18 @@ func NewOrderHandler() *OrderHandler {
 	return &OrderHandler{nextID: 1}
 }
 
-// Handlers implements netx.RouterHandler.
-func (h *OrderHandler) Handlers() []*netx.Route {
-	return netx.PrivateRoutes("/orders",
-		netx.GET("/").To(h.list),
-		netx.POST("/").To(h.create),
+// Handlers implements httpx.RouterHandler.
+func (h *OrderHandler) Handlers() []*httpx.Route {
+	return httpx.PrivateRoutes("/orders",
+		httpx.GET("/").To(h.list),
+		httpx.POST("/").To(h.create),
 	)
 }
 
 // GET /orders?status=pending
 func (h *OrderHandler) list(w http.ResponseWriter, r *http.Request) {
 	// GetQueryParam returns a single value, already lowercased.
-	status := netx.GetQueryParam("status", r)
+	status := httpx.GetQueryParam("status", r)
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -48,18 +48,18 @@ func (h *OrderHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	netx.Response(w, http.StatusOK, result)
+	httpx.Response(w, http.StatusOK, result)
 }
 
 // POST /orders
 func (h *OrderHandler) create(w http.ResponseWriter, r *http.Request) {
 	var o Order
-	if err := netx.ParseRequestBody(w, r, &o); err != nil {
-		netx.Error(w, http.StatusBadRequest, err)
+	if err := httpx.ParseRequestBody(w, r, &o); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
 	if o.ProductID <= 0 || o.Quantity <= 0 {
-		netx.ErrorDetails(w, http.StatusBadRequest, "invalid order", map[string]string{
+		httpx.ErrorDetails(w, http.StatusBadRequest, "invalid order", map[string]string{
 			"product_id": "required",
 			"quantity":   "must be greater than zero",
 		})
@@ -73,5 +73,5 @@ func (h *OrderHandler) create(w http.ResponseWriter, r *http.Request) {
 	h.orders = append(h.orders, o)
 	h.mu.Unlock()
 
-	netx.Response(w, http.StatusCreated, o)
+	httpx.Response(w, http.StatusCreated, o)
 }

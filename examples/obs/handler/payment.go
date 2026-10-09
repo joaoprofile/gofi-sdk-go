@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/joaoprofile/gofi-sdk-go/examples/obs/telemetry"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -32,16 +32,16 @@ type PaymentHandler struct {
 
 func NewPaymentHandler(m *telemetry.Metrics) *PaymentHandler { return &PaymentHandler{metrics: m} }
 
-func (h *PaymentHandler) Handlers() []*netx.Route {
-	return netx.PublicRoutes("/payments", netx.POST("/").To(h.pay))
+func (h *PaymentHandler) Handlers() []*httpx.Route {
+	return httpx.PublicRoutes("/payments", httpx.POST("/").To(h.pay))
 }
 
 // POST /payments
 func (h *PaymentHandler) pay(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in PaymentRequest
-	if err := netx.ParseRequestBody(w, r, &in); err != nil {
-		netx.Error(w, http.StatusBadRequest, err)
+	if err := httpx.ParseRequestBody(w, r, &in); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
 
@@ -65,8 +65,8 @@ func (h *PaymentHandler) pay(w http.ResponseWriter, r *http.Request) {
 
 	if !approved {
 		logging.FromContext(ctx).WarnContext(ctx, "payment declined", "method", in.Method)
-		netx.Error(w, http.StatusPaymentRequired, errors.New("payment declined"))
+		httpx.Error(w, http.StatusPaymentRequired, errors.New("payment declined"))
 		return
 	}
-	netx.Response(w, http.StatusOK, PaymentResult{Approved: true})
+	httpx.Response(w, http.StatusOK, PaymentResult{Approved: true})
 }

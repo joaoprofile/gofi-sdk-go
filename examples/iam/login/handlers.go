@@ -11,7 +11,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/iam/middleware"
 	"github.com/joaoprofile/gofi-sdk-go/iam/port"
 	"github.com/joaoprofile/gofi-sdk-go/iam/types"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 var (
@@ -42,22 +42,22 @@ type handler struct {
 	cookies iamconfig.SecurityConfig
 }
 
-func (h *handler) Handlers() []*netx.Route {
-	public := netx.PublicRoutes("/auth",
-		netx.POST("/token/login").To(h.tokenLogin),
-		netx.POST("/token/refresh").To(h.tokenRefresh),
-		netx.POST("/session/login").To(h.sessionLogin),
-		netx.POST("/cookie/login").To(h.cookieLogin),
-		netx.POST("/refresh").To(h.cookieRefresh),
+func (h *handler) Handlers() []*httpx.Route {
+	public := httpx.PublicRoutes("/auth",
+		httpx.POST("/token/login").To(h.tokenLogin),
+		httpx.POST("/token/refresh").To(h.tokenRefresh),
+		httpx.POST("/session/login").To(h.sessionLogin),
+		httpx.POST("/cookie/login").To(h.cookieLogin),
+		httpx.POST("/refresh").To(h.cookieRefresh),
 	)
-	private := netx.PrivateRoutes("/auth",
-		netx.POST("/logout").To(h.logout),
-		netx.POST("/logout-all").To(h.logoutAll),
+	private := httpx.PrivateRoutes("/auth",
+		httpx.POST("/logout").To(h.logout),
+		httpx.POST("/logout-all").To(h.logoutAll),
 	)
-	api := netx.PrivateRoutes("/api",
-		netx.GET("/me").To(h.me),
-		netx.GET("/reports").To(h.reports),
-		netx.GET("/sessions").To(h.sessions),
+	api := httpx.PrivateRoutes("/api",
+		httpx.GET("/me").To(h.me),
+		httpx.GET("/reports").To(h.reports),
+		httpx.GET("/sessions").To(h.sessions),
 	)
 	return append(append(public, private...), api...)
 }
@@ -66,7 +66,7 @@ func (h *handler) Handlers() []*netx.Route {
 // the user's tenants; SelectTenant opens the session and issues the tokens.
 func (h *handler) login(w http.ResponseWriter, r *http.Request) (*types.Session, error) {
 	var in credentials
-	if err := netx.ParseRequestBody(w, r, &in); err != nil {
+	if err := httpx.ParseRequestBody(w, r, &in); err != nil {
 		return nil, err
 	}
 	ip := clientIP(r)
@@ -100,10 +100,10 @@ func clientIP(r *http.Request) string {
 // the throttler locks the email or IP out, 401 otherwise.
 func loginFailed(w http.ResponseWriter, err error) {
 	if errors.Is(err, core.ErrTooManyAttempts) {
-		netx.Error(w, http.StatusTooManyRequests, errTooMany)
+		httpx.Error(w, http.StatusTooManyRequests, errTooMany)
 		return
 	}
-	netx.Error(w, http.StatusUnauthorized, errBadCredentials)
+	httpx.Error(w, http.StatusUnauthorized, errBadCredentials)
 }
 
 // POST /auth/token/login — token mode: the client keeps both tokens and sends
@@ -114,7 +114,7 @@ func (h *handler) tokenLogin(w http.ResponseWriter, r *http.Request) {
 		loginFailed(w, err)
 		return
 	}
-	netx.Response(w, http.StatusOK, h.toTokens(s, true))
+	httpx.Response(w, http.StatusOK, h.toTokens(s, true))
 }
 
 // POST /auth/token/refresh — trades the refresh token for a new pair. The old
@@ -123,16 +123,16 @@ func (h *handler) tokenRefresh(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := netx.ParseRequestBody(w, r, &in); err != nil {
-		netx.Error(w, http.StatusBadRequest, err)
+	if err := httpx.ParseRequestBody(w, r, &in); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
 	s, err := h.iam.RefreshToken(r.Context(), in.RefreshToken)
 	if err != nil {
-		netx.Error(w, http.StatusUnauthorized, errUnauthenticated)
+		httpx.Error(w, http.StatusUnauthorized, errUnauthenticated)
 		return
 	}
-	netx.Response(w, http.StatusOK, h.toTokens(s, true))
+	httpx.Response(w, http.StatusOK, h.toTokens(s, true))
 }
 
 // POST /auth/cookie/login — cookie mode: the access token goes in the body
@@ -145,7 +145,7 @@ func (h *handler) cookieLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.SetRefreshCookie(w, h.cookies, s)
-	netx.Response(w, http.StatusOK, h.toTokens(s, false))
+	httpx.Response(w, http.StatusOK, h.toTokens(s, false))
 }
 
 // POST /auth/refresh — cookie mode refresh: rotates the cookie's refresh token.
@@ -153,11 +153,11 @@ func (h *handler) cookieRefresh(w http.ResponseWriter, r *http.Request) {
 	s, err := h.iam.RefreshToken(r.Context(), middleware.RefreshTokenFromCookie(r, h.cookies))
 	if err != nil {
 		middleware.ClearRefreshCookie(w, h.cookies)
-		netx.Error(w, http.StatusUnauthorized, errUnauthenticated)
+		httpx.Error(w, http.StatusUnauthorized, errUnauthenticated)
 		return
 	}
 	middleware.SetRefreshCookie(w, h.cookies, s)
-	netx.Response(w, http.StatusOK, h.toTokens(s, false))
+	httpx.Response(w, http.StatusOK, h.toTokens(s, false))
 }
 
 // POST /auth/session/login — session mode: the tokens go to the vault and the
@@ -178,7 +178,7 @@ func (h *handler) sessionLogin(w http.ResponseWriter, r *http.Request) {
 		Secure:   !h.cookies.CookieInsecure, // HTTPS only; off for local http
 		SameSite: http.SameSiteLaxMode,      // not sent on cross-site POSTs
 	})
-	netx.Response(w, http.StatusOK, map[string]any{"user_id": s.UserID})
+	httpx.Response(w, http.StatusOK, map[string]any{"user_id": s.UserID})
 }
 
 // POST /auth/logout — revokes the current session in any mode. Tokens
@@ -186,7 +186,7 @@ func (h *handler) sessionLogin(w http.ResponseWriter, r *http.Request) {
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r.Context())
 	if err := h.iam.Logout(r.Context(), claims.SessionID); err != nil {
-		netx.Error(w, http.StatusInternalServerError, err)
+		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil {
@@ -203,7 +203,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 // POST /auth/logout-all — revokes every session of the user (all devices).
 func (h *handler) logoutAll(w http.ResponseWriter, r *http.Request) {
 	if err := h.iam.LogoutAll(r.Context(), claimsFrom(r.Context()).UserID); err != nil {
-		netx.Error(w, http.StatusInternalServerError, err)
+		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -212,7 +212,7 @@ func (h *handler) logoutAll(w http.ResponseWriter, r *http.Request) {
 // GET /api/me — who is calling, as seen by the handlers.
 func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	c := claimsFrom(r.Context())
-	netx.Response(w, http.StatusOK, map[string]any{
+	httpx.Response(w, http.StatusOK, map[string]any{
 		"user_id":     c.UserID,
 		"tenant_id":   c.TenantID,
 		"roles":       c.Roles,
@@ -227,7 +227,7 @@ func (h *handler) reports(w http.ResponseWriter, r *http.Request) {
 	if !h.allowed(w, r, "reports", "read") {
 		return
 	}
-	netx.Response(w, http.StatusOK, []map[string]any{{"month": "2026-08", "revenue": 12500}})
+	httpx.Response(w, http.StatusOK, []map[string]any{{"month": "2026-08", "revenue": 12500}})
 }
 
 // GET /api/sessions — needs sessions:list (admin only): the user's active
@@ -238,20 +238,20 @@ func (h *handler) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.iam.ListSessions(r.Context(), claimsFrom(r.Context()).UserID)
 	if err != nil {
-		netx.Error(w, http.StatusInternalServerError, err)
+		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
 	out := make([]map[string]any, 0, len(list))
 	for _, s := range list {
 		out = append(out, map[string]any{"id": s.ID, "created_at": s.CreatedAt, "user_agent": s.UserAgent})
 	}
-	netx.Response(w, http.StatusOK, out)
+	httpx.Response(w, http.StatusOK, out)
 }
 
 // allowed checks a permission against the roles in the claims (RBAC).
 func (h *handler) allowed(w http.ResponseWriter, r *http.Request, resource, action string) bool {
 	if !h.iam.RBAC().Enforce(*claimsFrom(r.Context()), resource, action) {
-		netx.Error(w, http.StatusForbidden, errForbidden)
+		httpx.Error(w, http.StatusForbidden, errForbidden)
 		return false
 	}
 	return true

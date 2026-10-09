@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 // demoToken is hardcoded for the example only. A real service validates a JWT
@@ -14,13 +14,13 @@ const demoToken = "secret-token"
 
 var errUnauthorized = errors.New("missing or invalid bearer token")
 
-// Auth guards private routes. It is registered with server.UseAuth, so netx
-// applies it only to routes declared through netx.PrivateRoutes.
+// Auth guards private routes. It is registered with server.UseAuth, so httpx
+// applies it only to routes declared through httpx.PrivateRoutes.
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token != demoToken {
-			netx.Error(w, http.StatusUnauthorized, errUnauthorized)
+			httpx.Error(w, http.StatusUnauthorized, errUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
