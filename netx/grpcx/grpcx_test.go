@@ -67,6 +67,12 @@ var echoDesc = grpc.ServiceDesc{
 // startServer serves impl on a random local port and returns the address.
 func startServer(t *testing.T, cfg ServerConfig, impl echoer) (Server, string) {
 	t.Helper()
+	return startServerWith(t, cfg, func(srv Server) { srv.RegisterService(&echoDesc, impl) })
+}
+
+// startServerWith is startServer with the services registered by register.
+func startServerWith(t *testing.T, cfg ServerConfig, register func(Server)) (Server, string) {
+	t.Helper()
 	if cfg.Addr == "" {
 		cfg.Addr = "127.0.0.1:0"
 	}
@@ -76,7 +82,7 @@ func startServer(t *testing.T, cfg ServerConfig, impl echoer) (Server, string) {
 	cfg.DisableTelemetry = true
 	srv, err := NewServer(cfg)
 	require.NoError(t, err)
-	srv.RegisterService(&echoDesc, impl)
+	register(srv)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -365,7 +371,7 @@ func writeSelfSigned(t *testing.T) (certFile, keyFile string) {
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 	}
