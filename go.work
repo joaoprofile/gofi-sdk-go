@@ -30,6 +30,7 @@ use (
 	./msq/provider/sqs
 	./netx
 	./netx/awssign
+	./netx/grpcx
 	./obs
 	./sqln
 	./sqln/rdsauth

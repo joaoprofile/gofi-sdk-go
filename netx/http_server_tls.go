@@ -37,6 +37,14 @@ type TLSConfig struct {
 // certReloadInterval bounds how often the certificate files are stat'ed.
 const certReloadInterval = time.Second
 
+// ServerTLSConfig builds the hardened server tls.Config described by c, the
+// same one the HTTP server uses: TLS 1.2+, forward-secret AEAD suites,
+// certificate reload on file change and optional mTLS. Other transports
+// (gRPC) reuse it and set their own NextProtos. A nil c returns nil.
+func ServerTLSConfig(c *TLSConfig) (*tls.Config, error) {
+	return serverTLSConfig(c)
+}
+
 // serverTLSConfig builds the server-side tls.Config: TLS 1.2+ (1.3 preferred
 // by the handshake), ECDHE+AEAD suites only for TLS 1.2, ALPN h2 and
 // http/1.1. A nil c returns nil (plain HTTP).

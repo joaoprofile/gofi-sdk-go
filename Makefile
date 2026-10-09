@@ -9,7 +9,7 @@ MODULE  := github.com/joaoprofile/gofi-sdk-go
 MODULES := gofi base base/bucket/oci base/bucket/s3 base/cloud/aws base/cloud/oci \
            base/secrets/awssm base/secrets/ocivault iam msq msq/provider/kafka \
            msq/provider/nats msq/provider/oci msq/provider/rabbitmq msq/provider/redis \
-           msq/provider/sqs netx netx/awssign obs sqln sqln/rdsauth
+           msq/provider/sqs netx netx/awssign netx/grpcx obs sqln sqln/rdsauth
 
 # Every module lives in a subdirectory, so every tag is <dir>/<version>; the
 # repository root has no module and gets no plain v* tag.
