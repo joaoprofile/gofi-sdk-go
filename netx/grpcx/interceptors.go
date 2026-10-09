@@ -2,7 +2,6 @@ package grpcx
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -20,10 +19,8 @@ import (
 )
 
 // RequestIDMetadata carries the request ID in both directions, the gRPC
-// counterpart of netx.RequestIDHeader.
+// counterpart of httpx.RequestIDHeader.
 const RequestIDMetadata = "x-request-id"
-
-const maxRequestIDLen = 64
 
 // unaryChain is the built-in chain, outermost first: recovery wraps
 // everything, the request ID is set before anything logs, logging sees the
@@ -90,8 +87,8 @@ func withRequestID(ctx context.Context) (context.Context, string) {
 			id = v[0]
 		}
 	}
-	if !validRequestID(id) {
-		id = rand.Text()
+	if !netx.ValidRequestID(id) {
+		id = netx.NewRequestID()
 	}
 	_ = grpc.SetTrailer(ctx, metadata.Pairs(RequestIDMetadata, id))
 	return context.WithValue(ctx, netx.RequestIDKey, id), id
@@ -107,23 +104,9 @@ func requestIDStream(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, ha
 	return handler(srv, &contextStream{ServerStream: ss, ctx: ctx})
 }
 
-func validRequestID(id string) bool {
-	if id == "" || len(id) > maxRequestIDLen {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-'
-		if !ok {
-			return false
-		}
-	}
-	return true
-}
-
 // --- logging ---
 
-// Logging follows netx.LoggingMiddleware: successful calls are silent; server
+// Logging follows httpx.LoggingMiddleware: successful calls are silent; server
 // faults are logged at Error, denied and throttled calls at Warn.
 func loggingUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	start := time.Now()

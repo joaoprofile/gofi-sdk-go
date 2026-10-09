@@ -52,28 +52,28 @@ func main() {
 }
 ```
 
-### An HTTP handler with `netx`
+### An HTTP handler with `netx/httpx`
 
-A handler is any type that implements `netx.RouterHandler` — it declares its own routes.
+A handler is any type that implements `httpx.RouterHandler` — it declares its own routes.
 
 ```go
 import (
     "net/http"
 
-    "github.com/joaoprofile/gofi-sdk-go/netx"
+    "github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 type HelloHandler struct{}
 
-func (h *HelloHandler) Handlers() []*netx.Route {
-    return netx.PublicRoutes("/hello",
-        netx.GET("/{name}").To(h.hello),
+func (h *HelloHandler) Handlers() []*httpx.Route {
+    return httpx.PublicRoutes("/hello",
+        httpx.GET("/{name}").To(h.hello),
     )
 }
 
 func (h *HelloHandler) hello(w http.ResponseWriter, r *http.Request) {
-    name := netx.GetPathParam("name", r)
-    netx.Response(w, http.StatusOK, map[string]string{"message": "hello, " + name})
+    name := httpx.GetPathParam("name", r)
+    httpx.Response(w, http.StatusOK, map[string]string{"message": "hello, " + name})
 }
 ```
 
@@ -110,7 +110,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 
 | Example | What it shows |
 |---------|---------------|
-| [examples/netx/api](examples/netx/api) | `netx` server through the `httpserver` component: several handlers, public/private routes, global and auth middlewares |
+| [examples/netx/api](examples/netx/api) | `httpx` server through the `httpserver` component: several handlers, public/private routes, global and auth middlewares |
 | [examples/sqln/search](examples/sqln/search) | Job (no HTTP) on PostgreSQL: migrations, `criteria` filters, join, pagination, single row and streaming |
 | [examples/sqln/filter-api](examples/sqln/filter-api) | HTTP API with client-driven dynamic filters, allowlisted by `sqln.FilterMapping` |
 | [examples/msq/rabbitmq](examples/msq/rabbitmq) | Producer and consumer as separate services on RabbitMQ, with retries and dead-letter queue |
@@ -205,7 +205,7 @@ examples/*                  → gofi modules via replace (each one its own modul
 | `.../obs`                                | library       | OpenTelemetry traces/metrics, `slog` logging        |
 | `.../sqln`                               | library       | SQL access, pagination, filters, cache, migrations  |
 | `.../msq`                                | library       | Broker abstraction and consumer pipeline            |
-| `.../netx`                               | library       | HTTP server, HTTP client, `Signature` interface     |
+| `.../netx`                               | library       | Shared TLS and request ID; `httpx` HTTP server/client |
 | `.../iam`                                | library       | JWT, sessions, RBAC, identity providers             |
 | `.../msq/provider/kafka`                 | provider      | Apache Kafka (CloudEvents binary)                   |
 | `.../msq/provider/rabbitmq`              | provider      | RabbitMQ                                            |
@@ -218,7 +218,7 @@ examples/*                  → gofi modules via replace (each one its own modul
 | `.../base/secrets/awssm`                 | provider      | AWS Secrets Manager (`secret://awssm/...`)          |
 | `.../base/secrets/ocivault`              | provider      | OCI Vault (`secret://ocivault/...`)                 |
 | `.../netx/awssign`                       | provider      | AWS SigV4 request signer                            |
-| `.../netx/grpcx`                         | library       | gRPC server and client with the netx defaults       |
+| `.../netx/grpcx`                         | library       | gRPC server and client with the httpx defaults      |
 | `.../sqln/rdsauth`                       | provider      | RDS / Aurora IAM authentication tokens              |
 | `.../base/cloud/aws`                     | cloud         | AWS credential chain                                |
 | `.../base/cloud/oci`                     | cloud         | OCI authentication modes                            |
@@ -254,7 +254,7 @@ svc, err := gofi.New("my-service").
         db,
         cache.New(),
         mq,
-        httpserver.New(":8080", &netx.WSConfig{Health: &netx.HealthConfig{}}).
+        httpserver.New(":8080", &httpx.WSConfig{Health: &httpx.HealthConfig{}}).
             Handlers(handlers...),
     ).
     Build() // returns every configuration error at startup
@@ -477,28 +477,28 @@ producer.SendMessage(ctx, msg)
 
 ---
 
-### `netx` — HTTP
+### `netx/httpx` — HTTP
 
-**Path:** `github.com/joaoprofile/gofi-sdk-go/netx`
+**Path:** `github.com/joaoprofile/gofi-sdk-go/netx/httpx` (package of the `netx` module; the `netx` root keeps only what HTTP and gRPC share: `netx.TLSConfig`, `netx.ServerTLSConfig`, `netx.RequestIDKey`, `netx.GetRequestID`)
 
 HTTP server and client based on `go-chi`. Includes ready-to-use middlewares, health probes and a pluggable request signer.
 
 | Export                          | Description                                          |
 | ------------------------------- | ---------------------------------------------------- |
-| `netx.NewServer(cfg)`           | Creates HTTP server with chi                         |
-| `netx.NewClient(cfg)`           | Creates HTTP client with retry and rate limit        |
-| `netx.NewRequest[T](...)`       | Typed request; `SetHeader`, `SetBody`, `SetSignature`, `Execute` |
-| `netx.Signature`                | Request signer interface (see below)                 |
-| `netx.CORSMiddleware(cfg)`      | Configurable CORS middleware                         |
-| `netx.NewRedisRateLimiter(...)` | Rate limiter via Redis                               |
-| `netx.LoggingMiddleware`        | Structured request logging                           |
-| `netx.SecurityHeaders`          | Security headers (CSP, HSTS, etc.)                   |
+| `httpx.NewServer(cfg)`          | Creates HTTP server with chi                         |
+| `httpx.NewClient(cfg)`          | Creates HTTP client with retry and rate limit        |
+| `httpx.NewRequest[T](...)`      | Typed request; `SetHeader`, `SetBody`, `SetSignature`, `Execute` |
+| `httpx.Signature`               | Request signer interface (see below)                 |
+| `httpx.CORSMiddleware(cfg)`     | Configurable CORS middleware                         |
+| `httpx.NewRedisRateLimiter(...)` | Rate limiter via Redis                               |
+| `httpx.LoggingMiddleware`       | Structured request logging                           |
+| `httpx.SecurityHeaders`         | Security headers (CSP, HSTS, etc.)                   |
 
 ```go
-import "github.com/joaoprofile/gofi-sdk-go/netx"
+import "github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 
-server := netx.NewServer(&netx.WSConfig{ServerPort: ":8080"})
-server.Use(netx.LoggingMiddleware(), netx.SecurityHeaders)
+server := httpx.NewServer(&httpx.WSConfig{ServerPort: ":8080"})
+server.Use(httpx.LoggingMiddleware(), httpx.SecurityHeaders)
 server.AddHandlers(myRouter)
 if err := server.ListenAndServe(); err != nil { // stops on SIGINT/SIGTERM or server.Shutdown
     log.Fatal(err)
@@ -523,11 +523,11 @@ limiter owns the pacing.
 
 #### Request signing
 
-Signing is an interface in `netx`, and each concrete signer lives in its own
+Signing is an interface in `httpx`, and each concrete signer lives in its own
 module so the core never links a cloud SDK:
 
 ```go
-// netx.Signature — body is the exact payload sent.
+// httpx.Signature — body is the exact payload sent.
 type Signature interface {
     Sign(originalRequest *http.Request, body []byte) (*http.Request, error)
 }
@@ -545,7 +545,7 @@ Pod Identity work without static keys. The signing name defaults to
 
 ```go
 import (
-    "github.com/joaoprofile/gofi-sdk-go/netx"
+    "github.com/joaoprofile/gofi-sdk-go/netx/httpx"
     "github.com/joaoprofile/gofi-sdk-go/netx/awssign"
 )
 
@@ -553,8 +553,8 @@ signer, err := awssign.New(ctx, awssign.Config{}) // default chain, execute-api
 // signer, err := awssign.New(ctx, awssign.Config{Service: "es"})       // OpenSearch
 // signer, err := awssign.NewWithConfig(existingAWSConfig, "execute-api") // reuse an aws.Config
 
-client, _ := netx.NewClient(&netx.HttpClientConfig{BaseURL: "https://abc.execute-api.us-east-1.amazonaws.com"})
-req := netx.NewRequest[Order](ctx, client, http.MethodPost, "/orders")
+client, _ := httpx.NewClient(&httpx.HttpClientConfig{BaseURL: "https://abc.execute-api.us-east-1.amazonaws.com"})
+req := httpx.NewRequest[Order](ctx, client, http.MethodPost, "/orders")
 req.SetBody(order)
 req.SetSignature(signer)
 created, err := req.Execute()

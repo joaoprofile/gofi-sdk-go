@@ -1,4 +1,4 @@
-// Package awssign signs netx requests with AWS Signature V4 (API Gateway IAM
+// Package awssign signs httpx client requests with AWS Signature V4 (API Gateway IAM
 // auth, OpenSearch, Lambda URLs, ...). Credentials resolve through base/cloud/aws,
 // so IRSA / Pod Identity work without static keys.
 package awssign
@@ -28,7 +28,7 @@ type Config struct {
 	AWS     cloudaws.Config
 }
 
-// Signer implements netx.Signature.
+// Signer implements httpx.Signature.
 type Signer struct {
 	signer  *v4.Signer
 	creds   awssdk.CredentialsProvider

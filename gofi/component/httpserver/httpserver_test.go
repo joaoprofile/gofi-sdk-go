@@ -9,6 +9,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 	"github.com/joaoprofile/gofi-sdk-go/gofi"
 	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,12 +31,12 @@ func (m *mockServer) Shutdown(context.Context) error { m.shutdowns++; return nil
 func (m *mockServer) AddHealthCheck(name string, _ func(context.Context) error) {
 	m.health = append(m.health, name)
 }
-func (m *mockServer) AddHandlers(...netx.RouterHandler) { m.calls = append(m.calls, "handlers") }
-func (m *mockServer) Use(...netx.Middleware)            { m.calls = append(m.calls, "use") }
-func (m *mockServer) UseAuth(netx.Middleware)           { m.calls = append(m.calls, "auth") }
+func (m *mockServer) AddHandlers(...httpx.RouterHandler) { m.calls = append(m.calls, "handlers") }
+func (m *mockServer) Use(...httpx.Middleware)            { m.calls = append(m.calls, "use") }
+func (m *mockServer) UseAuth(httpx.Middleware)           { m.calls = append(m.calls, "auth") }
 
 func TestNewCopiesConfigAndDefersServer(t *testing.T) {
-	cfg := &netx.WSConfig{MaxBodyBytes: 7}
+	cfg := &httpx.WSConfig{MaxBodyBytes: 7}
 	c := New(":9999", cfg)
 	assert.Empty(t, cfg.ServerPort, "the caller's config is not mutated")
 	assert.Equal(t, ":9999", c.cfg.ServerPort)
@@ -53,7 +54,7 @@ func TestChainingDelegatesToServer(t *testing.T) {
 
 func TestStartBuildsServerAndReplaysChaining(t *testing.T) {
 	var used []string
-	mw := func(name string) netx.Middleware {
+	mw := func(name string) httpx.Middleware {
 		return func(h http.Handler) http.Handler { used = append(used, name); return h }
 	}
 	c := New(":0").Use(mw("global")).UseAuth(mw("auth")).Handlers(routes{})
@@ -72,8 +73,8 @@ func TestStartBuildsServerAndReplaysChaining(t *testing.T) {
 
 type routes struct{}
 
-func (routes) Handlers() []*netx.Route {
-	return netx.PrivateRoutes("/p", netx.GET("/").To(func(http.ResponseWriter, *http.Request) {}))
+func (routes) Handlers() []*httpx.Route {
+	return httpx.PrivateRoutes("/p", httpx.GET("/").To(func(http.ResponseWriter, *http.Request) {}))
 }
 
 func TestStartRejectsInvalidEnv(t *testing.T) {
@@ -82,7 +83,7 @@ func TestStartRejectsInvalidEnv(t *testing.T) {
 	assert.ErrorContains(t, c.Start(context.Background(), rt), "HTTP_TRUSTED_PROXIES")
 	assert.Nil(t, c.Server())
 
-	c = New(":0", &netx.WSConfig{AllowedOrigins: []string{"*"}})
+	c = New(":0", &httpx.WSConfig{AllowedOrigins: []string{"*"}})
 	assert.ErrorContains(t, c.Start(context.Background(), gofi.NewRuntime(&environment.Environment{})), "AllowCredentials")
 }
 
@@ -113,7 +114,7 @@ func TestRunAndStopBeforeStart(t *testing.T) {
 func TestInsecureTransports(t *testing.T) {
 	prod := &environment.Environment{AppEnvironment: "prod", HTTPRequireTLS: true}
 	assert.Len(t, New(":0").InsecureTransports(prod), 1, "plaintext with HTTP_REQUIRE_TLS")
-	assert.Empty(t, New(":0", &netx.WSConfig{TLS: &netx.TLSConfig{}}).InsecureTransports(prod), "TLS in code")
+	assert.Empty(t, New(":0", &httpx.WSConfig{TLS: &netx.TLSConfig{}}).InsecureTransports(prod), "TLS in code")
 
 	withEnvTLS := *prod
 	withEnvTLS.HTTPTLSCertFile = "/tls/tls.crt"

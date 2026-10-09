@@ -23,7 +23,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/netx"
 )
 
-// Server is a gRPC server with the netx lifecycle. It is a
+// Server is a gRPC server with the httpx server lifecycle. It is a
 // grpc.ServiceRegistrar, so generated Register*Server functions accept it.
 type Server interface {
 	grpc.ServiceRegistrar

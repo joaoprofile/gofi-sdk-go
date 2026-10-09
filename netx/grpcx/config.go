@@ -37,7 +37,7 @@ type ServerConfig struct {
 	Addr string
 
 	// TLS enables TLS (and mTLS with ClientCAFile) with the same hardening
-	// and certificate reload as the netx HTTP server. ALPN is h2 only.
+	// and certificate reload as the httpx HTTP server. ALPN is h2 only.
 	TLS *netx.TLSConfig
 
 	// MaxRecvMsgSize and MaxSendMsgSize bound a single message

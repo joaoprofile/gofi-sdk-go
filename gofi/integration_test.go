@@ -12,7 +12,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/database"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/httpserver"
 	"github.com/joaoprofile/gofi-sdk-go/gofi/component/session"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	"github.com/joaoprofile/gofi-sdk-go/obs/logging"
 	sqlncache "github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 	"github.com/redis/go-redis/v9"
@@ -29,9 +29,9 @@ func (s *recordingServer) Shutdown(context.Context) error { return nil }
 func (s *recordingServer) AddHealthCheck(name string, _ func(context.Context) error) {
 	s.health = append(s.health, name)
 }
-func (s *recordingServer) AddHandlers(...netx.RouterHandler) {}
-func (s *recordingServer) Use(...netx.Middleware)            {}
-func (s *recordingServer) UseAuth(netx.Middleware)           {}
+func (s *recordingServer) AddHandlers(...httpx.RouterHandler) {}
+func (s *recordingServer) Use(...httpx.Middleware)            {}
+func (s *recordingServer) UseAuth(httpx.Middleware)           {}
 
 // The components are declared out of order; Build starts them by stage, cache
 // and session share one Redis client, and the HTTP server gets every check.

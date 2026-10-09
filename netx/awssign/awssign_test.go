@@ -17,10 +17,10 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	cloudaws "github.com/joaoprofile/gofi-sdk-go/base/cloud/aws"
-	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
-var _ netx.Signature = (*Signer)(nil)
+var _ httpx.Signature = (*Signer)(nil)
 
 func staticConfig(region string) awssdk.Config {
 	return awssdk.Config{

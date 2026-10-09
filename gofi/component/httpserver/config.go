@@ -9,6 +9,7 @@ import (
 
 	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
 // clientAuthModes maps HTTP_TLS_CLIENT_AUTH to tls.ClientAuthType.
@@ -20,7 +21,7 @@ var clientAuthModes = map[string]tls.ClientAuthType{
 	"require_and_verify": tls.RequireAndVerifyClientCert,
 }
 
-// ConfigFromEnv builds the netx.WSConfig fields set by the environment:
+// ConfigFromEnv builds the httpx.WSConfig fields set by the environment:
 //
 //   - HTTP_TLS_CERT_FILE / HTTP_TLS_KEY_FILE → TLS (both or neither)
 //   - HTTP_TLS_CLIENT_CA_FILE               → TLS.ClientCAFile (mTLS)
@@ -34,24 +35,24 @@ var clientAuthModes = map[string]tls.ClientAuthType{
 // HTTP_RATE_LIMIT_FAIL_CLOSED needs a rate limiter backend, which only code
 // can provide, so it is applied by New to the WSConfig.RateLimiter given there.
 // Invalid values are returned as errors, never panics.
-func ConfigFromEnv(env *environment.Environment) (netx.WSConfig, error) {
+func ConfigFromEnv(env *environment.Environment) (httpx.WSConfig, error) {
 	tlsCfg, err := tlsFromEnv(env)
 	if err != nil {
-		return netx.WSConfig{}, err
+		return httpx.WSConfig{}, err
 	}
-	cfg := netx.WSConfig{
+	cfg := httpx.WSConfig{
 		TLS:            tlsCfg,
 		TrustedProxies: splitCSV(env.HTTPTrustedProxies),
 		AllowedOrigins: splitCSV(cmp.Or(env.HTTPAllowedOrigins, env.AllowedOrigins)),
 	}
 	switch {
 	case env.HTTPMaxConcurrent < 0:
-		return netx.WSConfig{}, fmt.Errorf("HTTP_MAX_CONCURRENT=%d: must be >= 0", env.HTTPMaxConcurrent)
+		return httpx.WSConfig{}, fmt.Errorf("HTTP_MAX_CONCURRENT=%d: must be >= 0", env.HTTPMaxConcurrent)
 	case env.HTTPMaxConcurrent > 0:
-		cfg.StressControl = &netx.StressControlConfig{DefaultMaxConcurrent: env.HTTPMaxConcurrent}
+		cfg.StressControl = &httpx.StressControlConfig{DefaultMaxConcurrent: env.HTTPMaxConcurrent}
 	}
 	if err := cfg.Validate(); err != nil {
-		return netx.WSConfig{}, fmt.Errorf("HTTP_TRUSTED_PROXIES / HTTP_ALLOWED_ORIGINS: %w", err)
+		return httpx.WSConfig{}, fmt.Errorf("HTTP_TRUSTED_PROXIES / HTTP_ALLOWED_ORIGINS: %w", err)
 	}
 	return cfg, nil
 }
@@ -83,7 +84,7 @@ func tlsFromEnv(env *environment.Environment) (*netx.TLSConfig, error) {
 // the presence of a client CA.
 func clientAuth(mode string, hasCA bool) (tls.ClientAuthType, error) {
 	if mode == "" {
-		return tls.NoClientCert, nil // netx requires and verifies when a CA is set
+		return tls.NoClientCert, nil // netx.ServerTLSConfig requires and verifies when a CA is set
 	}
 	auth, ok := clientAuthModes[mode]
 	switch {
@@ -100,7 +101,7 @@ func clientAuth(mode string, hasCA bool) (tls.ClientAuthType, error) {
 // merge fills the fields code left unset with the environment's: code-provided
 // config always wins. The exceptions only tighten: failClosed
 // (HTTP_RATE_LIMIT_FAIL_CLOSED) turns on FailClosed of a code rate limiter.
-func merge(code, env netx.WSConfig, failClosed bool) netx.WSConfig {
+func merge(code, env httpx.WSConfig, failClosed bool) httpx.WSConfig {
 	out := code
 	if out.TLS == nil {
 		out.TLS = env.TLS
@@ -112,7 +113,7 @@ func merge(code, env netx.WSConfig, failClosed bool) netx.WSConfig {
 		out.AllowedOrigins = env.AllowedOrigins
 	}
 	if env.StressControl != nil {
-		sc := netx.StressControlConfig{}
+		sc := httpx.StressControlConfig{}
 		if out.StressControl != nil {
 			sc = *out.StressControl
 		}

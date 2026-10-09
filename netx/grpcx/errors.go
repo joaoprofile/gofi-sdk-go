@@ -21,7 +21,7 @@ const kindMetadataKey = "kind"
 const internalMessage = "internal error"
 
 // CodeOf maps an AppError kind to the gRPC status code, following the HTTP
-// status netx.RespondError uses for the same kind.
+// status httpx.RespondError uses for the same kind.
 func CodeOf(kind errs.ErrorKind) codes.Code {
 	switch kind {
 	case errs.KindValidation:

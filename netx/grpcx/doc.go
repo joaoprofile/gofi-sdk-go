@@ -1,5 +1,5 @@
 // Package grpcx serves and calls gRPC services with the same defaults as the
-// netx HTTP server: hardened TLS with certificate reload and optional mTLS,
+// httpx HTTP server: hardened TLS with certificate reload and optional mTLS,
 // request IDs, panic recovery, error-only logging, OpenTelemetry, graceful
 // shutdown with readiness draining and the standard gRPC health service.
 //

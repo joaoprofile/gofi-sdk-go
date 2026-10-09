@@ -6,6 +6,7 @@ import (
 
 	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 	"github.com/joaoprofile/gofi-sdk-go/netx"
+	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,7 @@ import (
 func TestConfigFromEnv_Empty(t *testing.T) {
 	cfg, err := ConfigFromEnv(&environment.Environment{})
 	require.NoError(t, err)
-	assert.Equal(t, netx.WSConfig{}, cfg)
+	assert.Equal(t, httpx.WSConfig{}, cfg)
 }
 
 func TestConfigFromEnv_Full(t *testing.T) {
@@ -77,21 +78,21 @@ func TestConfigFromEnv_Errors(t *testing.T) {
 
 // Code-provided config wins over the environment.
 func TestMergePrecedence(t *testing.T) {
-	env := netx.WSConfig{
+	env := httpx.WSConfig{
 		TLS:            &netx.TLSConfig{CertFile: "env.crt"},
 		TrustedProxies: []string{"private"},
 		AllowedOrigins: []string{"https://env.example.com"},
-		StressControl:  &netx.StressControlConfig{DefaultMaxConcurrent: 99},
+		StressControl:  &httpx.StressControlConfig{DefaultMaxConcurrent: 99},
 	}
 
-	got := merge(netx.WSConfig{}, env, false)
+	got := merge(httpx.WSConfig{}, env, false)
 	assert.Equal(t, env.TLS, got.TLS)
 	assert.Equal(t, env.TrustedProxies, got.TrustedProxies)
 	assert.Equal(t, env.AllowedOrigins, got.AllowedOrigins)
 	assert.Equal(t, 99, got.StressControl.DefaultMaxConcurrent)
 
-	codeStress := &netx.StressControlConfig{DefaultMaxConcurrent: 7, BufferBodyBytes: 1}
-	code := netx.WSConfig{
+	codeStress := &httpx.StressControlConfig{DefaultMaxConcurrent: 7, BufferBodyBytes: 1}
+	code := httpx.WSConfig{
 		TLS:            &netx.TLSConfig{CertFile: "code.crt"},
 		TrustedProxies: []string{"10.0.0.0/8"},
 		AllowedOrigins: []string{"https://code.example.com"},
@@ -111,24 +112,24 @@ func TestMergePrecedence(t *testing.T) {
 	assert.Zero(t, codeStress.DefaultMaxConcurrent)
 
 	// A code CORS policy is not mixed with env origins.
-	got = merge(netx.WSConfig{CORS: &netx.CorsConfig{}}, env, false)
+	got = merge(httpx.WSConfig{CORS: &httpx.CorsConfig{}}, env, false)
 	assert.Empty(t, got.AllowedOrigins)
 }
 
 func TestMergeRateLimitFailClosed(t *testing.T) {
-	assert.Nil(t, merge(netx.WSConfig{}, netx.WSConfig{}, true).RateLimiter, "no limiter without code")
+	assert.Nil(t, merge(httpx.WSConfig{}, httpx.WSConfig{}, true).RateLimiter, "no limiter without code")
 
-	rl := &netx.RedisRateLimiterConfig{KeyPrefix: "x"}
-	got := merge(netx.WSConfig{RateLimiter: rl}, netx.WSConfig{}, true)
+	rl := &httpx.RedisRateLimiterConfig{KeyPrefix: "x"}
+	got := merge(httpx.WSConfig{RateLimiter: rl}, httpx.WSConfig{}, true)
 	assert.True(t, got.RateLimiter.FailClosed)
 	assert.Equal(t, "x", got.RateLimiter.KeyPrefix)
 	assert.False(t, rl.FailClosed, "the caller's config is not mutated")
 
-	assert.Same(t, rl, merge(netx.WSConfig{RateLimiter: rl}, netx.WSConfig{}, false).RateLimiter)
+	assert.Same(t, rl, merge(httpx.WSConfig{RateLimiter: rl}, httpx.WSConfig{}, false).RateLimiter)
 }
 
 func TestComponentConfig(t *testing.T) {
-	c := New(":8080", &netx.WSConfig{AllowedOrigins: []string{"https://code.example.com"}})
+	c := New(":8080", &httpx.WSConfig{AllowedOrigins: []string{"https://code.example.com"}})
 	cfg, err := c.config(&environment.Environment{
 		HTTPAllowedOrigins: "https://env.example.com",
 		HTTPTrustedProxies: "private",

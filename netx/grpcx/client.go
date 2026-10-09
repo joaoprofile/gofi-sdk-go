@@ -291,7 +291,7 @@ func requestIDClientStream(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.
 
 func outgoingRequestID(ctx context.Context) context.Context {
 	id := netx.GetRequestID(ctx)
-	if !validRequestID(id) {
+	if !netx.ValidRequestID(id) {
 		return ctx
 	}
 	if md, ok := metadata.FromOutgoingContext(ctx); ok && len(md.Get(RequestIDMetadata)) > 0 {

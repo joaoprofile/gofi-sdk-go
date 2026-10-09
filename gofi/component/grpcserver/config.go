@@ -56,7 +56,7 @@ func ConfigFromEnv(env *environment.Environment) (*netx.TLSConfig, error) {
 // the presence of a client CA.
 func clientAuth(mode string, hasCA bool) (tls.ClientAuthType, error) {
 	if mode == "" {
-		return tls.NoClientCert, nil // netx requires and verifies when a CA is set
+		return tls.NoClientCert, nil // netx.ServerTLSConfig requires and verifies when a CA is set
 	}
 	auth, ok := clientAuthModes[mode]
 	switch {
