@@ -11,6 +11,7 @@ import (
 	stdlog "log"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -341,7 +342,28 @@ func (p *kafkaProducer) SendMessagesBatch(_ context.Context, msgs []*types.Messa
 	for _, m := range msgs {
 		batch = append(batch, encode(m))
 	}
-	return p.producer.SendMessages(batch)
+	return batchSendError(batch, p.producer.SendMessages(batch))
+}
+
+// batchSendError turns sarama's per-message errors into the indexes of the
+// failed messages, so the caller can retry or reject only those.
+func batchSendError(batch []*sarama.ProducerMessage, err error) error {
+	var perMessage sarama.ProducerErrors
+	if err == nil || !errors.As(err, &perMessage) {
+		return err
+	}
+	index := make(map[*sarama.ProducerMessage]int, len(batch))
+	for i, m := range batch {
+		index[m] = i
+	}
+	failed := make([]int, 0, len(perMessage))
+	for _, pe := range perMessage {
+		if i, ok := index[pe.Msg]; ok {
+			failed = append(failed, i)
+		}
+	}
+	slices.Sort(failed)
+	return &types.BatchSendError{Failed: failed, Err: err}
 }
 
 // encode writes CloudEvents binary mode: the value is the payload and the

@@ -621,3 +621,51 @@ func TestGroupHandlerConsumeClaimCountsDeliveriesAndSettlesReject(t *testing.T) 
 	assert.Equal(t, ids[0], ids[2], "the Id is stable across redeliveries")
 	assert.Equal(t, 2, session.markedCount, "a rejected record is committed")
 }
+
+// partialFailProducer rejects the messages at the given positions, the way
+// sarama's SyncProducer reports a partial batch failure.
+type partialFailProducer struct {
+	mockSyncProducer
+	fail []int
+}
+
+func (p *partialFailProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
+	var errs sarama.ProducerErrors
+	for _, i := range p.fail {
+		errs = append(errs, &sarama.ProducerError{Msg: msgs[i], Err: sarama.ErrNotLeaderForPartition})
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errs
+}
+
+// Without the failed indexes a caller cannot tell which messages of a batch
+// were delivered, and has to send them one by one to keep accounting right.
+func TestKafkaProducerSendMessagesBatch_ReportsTheFailedIndexes(t *testing.T) {
+	msgs := []*types.Message{
+		testMessageWithTopic("topic", "a"),
+		testMessageWithTopic("topic", "b"),
+		testMessageWithTopic("topic", "c"),
+		testMessageWithTopic("topic", "d"),
+	}
+	p := &kafkaProducer{producer: &partialFailProducer{fail: []int{3, 1}}}
+
+	err := p.SendMessagesBatch(context.Background(), msgs)
+
+	var batchErr *types.BatchSendError
+	require.ErrorAs(t, err, &batchErr)
+	assert.Equal(t, []int{1, 3}, batchErr.Failed)
+	assert.True(t, batchErr.FailedIndex(1))
+	assert.False(t, batchErr.FailedIndex(0))
+}
+
+func TestKafkaProducerSendMessagesBatch_NonPerMessageErrorStaysPlain(t *testing.T) {
+	p := &kafkaProducer{producer: &mockSyncProducer{batchErr: errors.New("closed")}}
+
+	err := p.SendMessagesBatch(context.Background(), []*types.Message{testMessageWithTopic("topic", "a")})
+
+	var batchErr *types.BatchSendError
+	assert.Error(t, err)
+	assert.False(t, errors.As(err, &batchErr), "without per-message detail the whole batch is failed")
+}

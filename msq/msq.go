@@ -44,6 +44,9 @@ type (
 	// BrokerEventType identifies the kind of BrokerEvent.
 	BrokerEventType = types.BrokerEventType
 
+	// BatchSendError reports which messages of a batch were not delivered.
+	BatchSendError = types.BatchSendError
+
 	// Producer sends messages to a broker.
 	Producer = port.Producer
 
