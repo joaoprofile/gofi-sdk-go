@@ -130,6 +130,14 @@ type TextStep struct {
 	Isolated bool
 }
 
+// Highlight markers wrap the matched words of TextHighlight. They are Unicode
+// private-use characters, absent from real text, so the markup can be split
+// from the text and the text escaped before any HTML is written.
+const (
+	HighlightStart = "\uE000"
+	HighlightEnd   = "\uE001"
+)
+
 // FullTextDialect is implemented by dialects with full-text search.
 type FullTextDialect interface {
 	// TextSearchValue renders q as the search string of TextMatch; ok is
@@ -141,6 +149,9 @@ type FullTextDialect interface {
 	TextMatch(idx *TextIndex, qualifier string, q TextQuery, bind func(any) string) (expr string, ok bool)
 	// TextRank renders the relevance of q in idx; higher is better.
 	TextRank(idx *TextIndex, qualifier string, q TextQuery, bind func(any) string) (expr string, ok bool)
+	// TextHighlight renders the whole text of column, one of idx's, with
+	// the words q matches wrapped in HighlightStart and HighlightEnd.
+	TextHighlight(idx *TextIndex, qualifier, column string, q TextQuery, bind func(any) string) (expr string, ok bool)
 	// TextIndexDDL renders the steps creating and dropping idx; comment is
 	// stored on the index, where TextIndexLookup reads it back.
 	TextIndexDDL(idx *TextIndex, comment string) ([]TextStep, error)

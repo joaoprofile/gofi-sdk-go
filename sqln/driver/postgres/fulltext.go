@@ -148,6 +148,22 @@ func (d PostgresDialect) TextRank(idx *driver.TextIndex, qualifier string, q dri
 	return "ts_rank_cd(" + document(idx, qualifier) + ", " + tsquery(idx, bind(v)) + ")", true
 }
 
+// headlineOptions mark every matched word of the whole text with the
+// private-use markers; the caller cuts excerpts.
+const headlineOptions = `'StartSel="` + driver.HighlightStart + `", StopSel="` + driver.HighlightEnd + `", HighlightAll=true'`
+
+// TextHighlight uses ts_headline with the index configuration, so it marks
+// what the search matches: stems ("cafés" for "cafe") and folded accents.
+// PostgreSQL evaluates it after ORDER BY … LIMIT: only the page pays for it.
+func (d PostgresDialect) TextHighlight(idx *driver.TextIndex, qualifier, column string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	v, ok := d.TextSearchValue(idx, q)
+	if !ok {
+		return "", false
+	}
+	return "ts_headline(" + regconfig(idx) + ", coalesce(" + qualify(qualifier, column) + ", ''), " +
+		tsquery(idx, bind(v)) + ", " + headlineOptions + ")", true
+}
+
 // indexName qualifies the index with the table's schema, where PostgreSQL creates it.
 func indexName(idx *driver.TextIndex) string {
 	if i := strings.LastIndexByte(idx.Table, '.'); i >= 0 {

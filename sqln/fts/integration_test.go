@@ -147,6 +147,34 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 	require.Len(t, hits, 1)
 	assert.Positive(t, hits[0].Relevance)
 
+	// Highlight: the same marked words on both databases, scanned into
+	// fts.Highlight and escaped by HTML.
+	type snippet struct {
+		ID      int64         `db:"id"`
+		Snippet fts.Highlight `db:"snippet"`
+	}
+	highlight := func(s fts.Search, column string) map[int64]string {
+		t.Helper()
+		rows, err := sqln.FindFromCriteria[snippet](ctx,
+			criteria.From("it_fts_products", "p").Select("p.id").SelectHighlight(s, column, "snippet").
+				Where(criteria.Match(s)).OrderBy(criteria.Asc("p.id")),
+		).WithConnection(conn).List()
+		require.NoError(t, err)
+		out := map[int64]string{}
+		for _, r := range rows {
+			out[r.ID] = r.Snippet.HTML()
+		}
+		return out
+	}
+	assert.Equal(t, map[int64]string{1: "Cafeteira Elétrica", 3: "<mark>Café</mark> em grãos"},
+		highlight(itIndex.Search("cafe"), "name"), "whole words: cafeteira is another word")
+	assert.Equal(t, map[int64]string{3: "<mark>café</mark> especial <mark>torrado</mark>"},
+		highlight(itIndex.Search("cafe torrado"), "description"))
+	assert.Equal(t, map[int64]string{2: "<mark>Notebook</mark> Gamer", 4: "Mouse sem fio"},
+		highlight(itIndex.Search("note").Mode(fts.Prefix), "name"))
+	assert.Equal(t, map[int64]string{2: "<mark>Notebook</mark> Gamer", 4: "Mouse sem fio"},
+		highlight(itIndex.Search("laptop"), "name"), "synonyms are marked")
+
 	// The plan reads the index.
 	query, args, err := criteria.From("it_fts_products", "p").Select("p.id").
 		Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)).Build(d)

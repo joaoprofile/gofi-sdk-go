@@ -2,6 +2,7 @@ package criteria
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
@@ -35,9 +36,21 @@ func (q *Query) SelectRelevance(s fts.Search, alias string) *Query {
 	return q
 }
 
+// SelectHighlight adds column, one of the index's, to the SELECT list as
+// alias, with the words s matches marked: scan it into an fts.Highlight and
+// render it with Highlight.HTML or Highlight.Fragments, which escape the
+// text. PostgreSQL marks stems as the search matches them (ts_headline);
+// MySQL marks the searched words and their accented forms. Both only pay for
+// the rows of the page. alias must be a column reference.
+func (q *Query) SelectHighlight(s fts.Search, column, alias string) *Query {
+	q.relevance = append(q.relevance, relevanceSelect{search: s, alias: alias, highlight: column})
+	return q
+}
+
 type relevanceSelect struct {
-	search fts.Search
-	alias  string
+	search    fts.Search
+	alias     string
+	highlight string // column to highlight; empty selects the relevance
 }
 
 // TextIndexes lists the full-text indexes q searches, so the caller can check
@@ -84,9 +97,17 @@ func appendIndex(out []*fts.Index, idx *fts.Index) []*fts.Index {
 	return append(out, idx)
 }
 
-// textExpr binds the search string of s and renders its match condition, or
-// its relevance when rank is set.
-func (b *builder) textExpr(s *fts.Search, rank bool) string {
+type textKind uint8
+
+const (
+	textMatch textKind = iota
+	textRank
+	textHighlight
+)
+
+// textExpr binds the search strings of s and renders its match condition,
+// relevance, or the highlighted column.
+func (b *builder) textExpr(s *fts.Search, kind textKind, column string) string {
 	fd, ok := b.dialect.(driver.FullTextDialect)
 	if !ok {
 		b.fail(fmt.Errorf("%w: %w: %T", ErrInvalidValue, fts.ErrUnsupported, b.dialect))
@@ -101,11 +122,20 @@ func (b *builder) textExpr(s *fts.Search, rank bool) string {
 	if !ok {
 		return ""
 	}
-	render := fd.TextMatch
-	if rank {
-		render = fd.TextRank
+	def := s.Index().Definition()
+	var expr string
+	switch kind {
+	case textRank:
+		expr, ok = fd.TextRank(def, qualifier, q, b.nextParam)
+	case textHighlight:
+		if !slices.ContainsFunc(def.Columns, func(c driver.TextColumn) bool { return c.Name == column }) {
+			b.fail(fmt.Errorf("%w: %q is not a column of full-text index %s", ErrInvalidField, column, def.Name))
+			return ""
+		}
+		expr, ok = fd.TextHighlight(def, qualifier, column, q, b.nextParam)
+	default:
+		expr, ok = fd.TextMatch(def, qualifier, q, b.nextParam)
 	}
-	expr, ok := render(s.Index().Definition(), qualifier, q, b.nextParam)
 	if !ok {
 		b.fail(fmt.Errorf("%w: %w", ErrInvalidValue, fts.ErrEmptySearch))
 		return ""

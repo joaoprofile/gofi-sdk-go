@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"embed"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -240,6 +241,91 @@ func (d MySQLDialect) TextRank(idx *driver.TextIndex, qualifier string, q driver
 	}
 	return "(" + strings.Join(parts, " + ") + ")", true
 }
+
+// TextHighlight wraps the matched words with REGEXP_REPLACE: MySQL has no
+// headline function. The pattern is built from the searched words (letters,
+// digits and marks only), each letter widened to its accented forms, as the
+// _ai_ collation compares them; whole words, a prefix marking the word it
+// starts. There is no
+// stemming, as in the search itself. Like the search, it skips negated
+// terms and the words InnoDB never matches.
+func (MySQLDialect) TextHighlight(idx *driver.TextIndex, qualifier, column string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	col := column
+	if qualifier != "" {
+		col = qualifier + "." + column
+	}
+	alts := highlightAlternatives(idx, q)
+	if len(alts) == 0 {
+		return "COALESCE(" + col + ", '')", true
+	}
+	pattern := `(?<![\p{L}\p{N}\p{M}])(?:` + strings.Join(alts, "|") + `)`
+	return "REGEXP_REPLACE(COALESCE(" + col + ", ''), " + bind(pattern) + ", " +
+		bind(driver.HighlightStart+"$0"+driver.HighlightEnd) + ", 1, 0, 'i')", true
+}
+
+func highlightAlternatives(idx *driver.TextIndex, q driver.TextQuery) []string {
+	seen := map[string]bool{}
+	var alts []string
+	add := func(w string, prefix bool) {
+		if (!prefix && !indexable(idx, w)) || (prefix && stopword(idx, w)) {
+			return
+		}
+		// A prefix marks the whole word it starts, as PostgreSQL does.
+		alt := accentClasses(w) + `[\p{L}\p{N}\p{M}]*`
+		if !prefix {
+			alt = accentClasses(w) + `(?![\p{L}\p{N}\p{M}])`
+		}
+		if !seen[alt] {
+			seen[alt] = true
+			alts = append(alts, alt)
+		}
+	}
+	for _, g := range q {
+		for _, t := range g {
+			if t.Negate {
+				continue
+			}
+			for _, words := range append([][]string{t.Words}, t.Synonyms...) {
+				for _, w := range words {
+					add(w, t.Prefix && len(t.Words) == 1)
+				}
+			}
+		}
+	}
+	return alts
+}
+
+// accentClasses widens each letter with accented forms to a class: "cafe"
+// becomes "caf[eàáâ…]". Words hold no regular expression metacharacters.
+func accentClasses(w string) string {
+	var b strings.Builder
+	for _, r := range w {
+		base := r
+		if f, ok := foldMap[r]; ok {
+			base = f
+		}
+		if forms, ok := accentForms[base]; ok {
+			b.WriteString("[" + string(base) + forms + "]")
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// accentForms lists the accented forms of each base letter of foldMap.
+var accentForms = func() map[rune]string {
+	m := map[rune]string{}
+	for r, base := range foldMap {
+		m[base] += string(r)
+	}
+	for base, forms := range m {
+		rs := []rune(forms)
+		slices.Sort(rs)
+		m[base] = string(rs)
+	}
+	return m
+}()
 
 // groupIndexName names the FULLTEXT index of a weight group.
 func groupIndexName(idx *driver.TextIndex, w driver.TextWeight) string {

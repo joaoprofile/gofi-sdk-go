@@ -206,7 +206,11 @@ func (q *Query) writeBody(b *builder) {
 		if !b.checkField(r.alias, false) {
 			return
 		}
-		b.write(", ", b.textExpr(&r.search, true), " AS ", r.alias)
+		kind := textRank
+		if r.highlight != "" {
+			kind = textHighlight
+		}
+		b.write(", ", b.textExpr(&r.search, kind, r.highlight), " AS ", r.alias)
 	}
 
 	// FROM
@@ -266,7 +270,7 @@ func (q *Query) writeOrderBy(b *builder) {
 		}
 		field := o.Field
 		if o.search != nil {
-			field = b.textExpr(o.search, true)
+			field = b.textExpr(o.search, textRank, "")
 		}
 		b.write(field, " ", driver.SortDirection(o.Direction))
 	}

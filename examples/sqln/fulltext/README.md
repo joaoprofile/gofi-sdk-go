@@ -80,6 +80,24 @@ databases).
 | Search as you type | `.Mode(fts.Prefix)` |
 | Only stopwords or punctuation | `fts.ErrEmptySearch` → empty page |
 
+### Highlighting matches
+
+```go
+type Hit struct {
+    ID      int64         `db:"id"`
+    Snippet fts.Highlight `db:"snippet"`
+}
+
+q.SelectHighlight(s, "description", "snippet")   // a column of the index
+hit.Snippet.Excerpt(30).HTML()                     // "… a <mark>café</mark> &lt;b&gt;…"
+```
+
+The database marks the matched words with private-use characters and the text
+comes back unescaped: `HTML()` escapes it and adds only `<mark>`, and
+`Fragments()` gives the runs for other renderers. Never write the raw value to
+a page. Both databases evaluate the highlight after `ORDER BY … LIMIT`, so only
+the rows of the page pay for it.
+
 ## PostgreSQL and MySQL
 
 The same `fts.Spec` and the same queries run on both; `DATABASE_DRIVER=mysql`
@@ -93,6 +111,7 @@ only changes what is rendered.
 | Stopwords | the language's list | the same list (PostgreSQL's), plus InnoDB's own |
 | Synonyms (`Spec.Synonyms`) | `( 'notebook' \| 'laptop' )` | `+(notebook laptop)` |
 | Proximity `"cafe coado"~3` | `<1>`…`<3>`, both orders | `"cafe coado"@4` |
+| Highlight (`SelectHighlight`) | `ts_headline`, marks stems | `REGEXP_REPLACE`, marks words and accented forms |
 | Stemming | yes | no: `cafés` does not find `café` |
 | Build without blocking writes | `Concurrently: true` (with `ExpressionIndex`) | not possible: the migration refuses it |
 

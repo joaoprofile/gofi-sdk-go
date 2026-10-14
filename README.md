@@ -419,6 +419,7 @@ up, down, err := fts.Migration(postgres.PostgresDialect{}, productSearch) // or 
 s := productSearch.Search(`cafe "moido na hora" -descafeinado`) // or .Mode(fts.Prefix) for search-as-you-type
 hits, err := sqln.FindFromCriteria[Product](ctx,
     criteria.From("products", "p").Select("p.id", "p.name").
+        SelectHighlight(s, "description", "snippet"). // scan into fts.Highlight; render with .HTML()
         Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)),
 ).List()
 

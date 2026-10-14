@@ -144,3 +144,36 @@ func TestTextIndexes(t *testing.T) {
 	assert.Equal(t, []*fts.Index{productSearch, categorySearch}, q.TextIndexes())
 	assert.Empty(t, criteria.From("products", "p").Where(criteria.Eq("p.id", 1)).TextIndexes())
 }
+
+func TestSelectHighlight(t *testing.T) {
+	s := productSearch.Search("cafe -usado")
+	sql, params, err := criteria.From("products", "p").Select("p.id").
+		SelectHighlight(s, "description", "snippet").Where(criteria.Match(s)).
+		Build(postgres.PostgresDialect{})
+	require.NoError(t, err)
+	assert.Equal(t, "SELECT p.id, ts_headline('gofi_portuguese_unaccent'::regconfig, coalesce(p.description, ''), "+pgQuery+"$1), "+
+		"'StartSel=\"\uE000\", StopSel=\"\uE001\", HighlightAll=true') AS snippet FROM products p WHERE p.ftx_products_search_tsv @@ "+pgQuery+"$2)", sql)
+	assert.Equal(t, []any{"'cafe' & !'usado'", "'cafe' & !'usado'"}, params)
+
+	sql, params, err = criteria.From("products", "p").Select("p.id").
+		SelectHighlight(productSearch.Search("cafe eletri").Mode(fts.Prefix), "name", "snippet").
+		Build(mysql.MySQLDialect{})
+	require.NoError(t, err)
+	assert.Equal(t, "SELECT p.id, REGEXP_REPLACE(COALESCE(p.name, ''), ?, ?, 1, 0, 'i') AS snippet FROM products p", sql)
+	assert.Equal(t, []any{
+		`(?<![\p{L}\p{N}\p{M}])(?:[cçćč][aàáâãäåā]f[eèéêëēė][\p{L}\p{N}\p{M}]*|[eèéêëēė]l[eèéêëēė]tr[iìíîïī][\p{L}\p{N}\p{M}]*)`,
+		"\uE000$0\uE001",
+	}, params)
+
+	_, _, err = criteria.From("products", "p").SelectHighlight(productSearch.Search("cafe"), "password", "x").Build(postgres.PostgresDialect{})
+	assert.ErrorIs(t, err, criteria.ErrInvalidField, "only an indexed column")
+	assert.Equal(t, []*fts.Index{productSearch}, criteria.From("products", "p").SelectHighlight(productSearch.Search("a"), "name", "h").TextIndexes())
+}
+
+func TestSelectHighlight_MySQLWholeWords(t *testing.T) {
+	_, params, err := criteria.From("products", "p").
+		SelectHighlight(productSearch.Search("café -usado de"), "name", "h").Build(mysql.MySQLDialect{})
+	require.NoError(t, err)
+	assert.Equal(t, `(?<![\p{L}\p{N}\p{M}])(?:[cçćč][aàáâãäåā]f[eèéêëēė](?![\p{L}\p{N}\p{M}]))`, params[0],
+		"negated terms and stopwords are not marked, as they do not match")
+}

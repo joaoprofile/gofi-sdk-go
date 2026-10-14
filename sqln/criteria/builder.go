@@ -82,7 +82,7 @@ func (b *builder) writePredicate(p Predicate) {
 
 	// Full-text match on an fts.Index.
 	case driver.Search:
-		b.write(b.textExpr(p.search, false))
+		b.write(b.textExpr(p.search, textMatch, ""))
 
 	// Membership — a typed slice binds as one array where the dialect allows.
 	case driver.In, driver.NotIn:
