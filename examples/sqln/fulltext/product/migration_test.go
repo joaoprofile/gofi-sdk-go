@@ -9,19 +9,19 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 )
 
-var update = flag.Bool("update", false, "rewrite the full-text migration from product.Search")
+var update = flag.Bool("update", false, "rewrite the full-text migration from searchIndex")
 
-// TestMigrationIsCurrent fails when Search changed and its migration was not
+// TestMigrationIsCurrent fails when searchIndex changed and its migration was not
 // regenerated (go generate ./...): the build catches the drift before the
 // connection would refuse the search with fts.ErrIndexOutdated.
 func TestMigrationIsCurrent(t *testing.T) {
 	const dir, version, name = "../.migrations", 2, "products_search"
 	if *update {
-		if err := fts.WriteMigration(dir, version, name, postgres.PostgresDialect{}, Search); err != nil {
+		if err := fts.WriteMigration(dir, version, name, postgres.PostgresDialect{}, searchIndex); err != nil {
 			t.Fatal(err)
 		}
 	}
-	up, down, err := fts.Migration(postgres.PostgresDialect{}, Search)
+	up, down, err := fts.Migration(postgres.PostgresDialect{}, searchIndex)
 	if err != nil {
 		t.Fatal(err)
 	}

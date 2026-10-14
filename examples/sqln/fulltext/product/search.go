@@ -13,10 +13,11 @@ import (
 
 //go:generate go test -run TestMigrationIsCurrent -update .
 
-// Search is the full-text index of the catalog. The migration in
-// .migrations is rendered from it (see migration_test.go), and every query
-// below reads it, so the searched document is always the indexed one.
-var Search = fts.MustIndex("products", fts.Spec{
+// searchIndex is the full-text index of the catalog. Declared at package
+// level with MustIndex, it is registered: gofi's database component checks
+// it when the service starts. The migration in .migrations is rendered from
+// it (see migration_test.go), and every query below reads it.
+var searchIndex = fts.MustIndex("products", fts.Spec{
 	Name:     "ftx_products_search",
 	Columns:  []fts.Column{{Name: "name", Weight: fts.A}, {Name: "description", Weight: fts.B}},
 	Language: fts.Portuguese,
@@ -39,7 +40,7 @@ func NewRepository() *Repository { return &Repository{} }
 // first. An empty search (only punctuation or stopwords) is an empty page,
 // not an error.
 func (r *Repository) Find(ctx context.Context, term string, mode fts.Mode, page, size uint16) (*sqln.Page[Hit], error) {
-	s := Search.Search(term).Mode(mode)
+	s := searchIndex.Search(term).Mode(mode)
 	q := criteria.From("products", "p").
 		Select("p.id", "p.name").
 		SelectRelevance(s, "relevance").

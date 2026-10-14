@@ -7,6 +7,7 @@ import (
 
 	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 )
 
 // ConfigFromEnv builds a connection.Config from the DATABASE_* environment variables.
@@ -43,13 +44,38 @@ func ConfigFromEnv(env *environment.Environment) (connection.Config, error) {
 	if err != nil {
 		return connection.Config{}, fmt.Errorf("DATABASE_*: %w", err)
 	}
-	cfg := connection.Config{Driver: name, DSN: dsn, Pool: pool, QueryTimeout: env.DatabaseQueryTimeout}
+	policy, err := fullTextPolicy(env)
+	if err != nil {
+		return connection.Config{}, err
+	}
+	cfg := connection.Config{
+		Driver: name, DSN: dsn, Pool: pool, QueryTimeout: env.DatabaseQueryTimeout,
+		FullText: connection.FullTextConfig{Policy: policy},
+	}
 	if replica != nil {
 		if cfg.ReadDSN, err = connection.BuildDSN(driver, *replica); err != nil {
 			return connection.Config{}, fmt.Errorf("DATABASE_READ_*: %w", err)
 		}
 	}
 	return cfg, nil
+}
+
+// fullTextPolicy reads DATABASE_FULLTEXT_POLICY. ensure creates missing
+// indexes outside migrations, so it is refused in stage and prod.
+func fullTextPolicy(env *environment.Environment) (fts.Policy, error) {
+	switch p := strings.ToLower(strings.TrimSpace(env.DatabaseFullTextPolicy)); p {
+	case "", "verify":
+		return fts.Verify, nil
+	case "trust":
+		return fts.Trust, nil
+	case "ensure":
+		if t := env.GetEnvironmentType(); t == environment.ENV_PROD || t == environment.ENV_STAGE {
+			return 0, fmt.Errorf("DATABASE_FULLTEXT_POLICY=ensure is not allowed in %s: create full-text indexes through migrations", t)
+		}
+		return fts.Ensure, nil
+	default:
+		return 0, fmt.Errorf("DATABASE_FULLTEXT_POLICY=%q, want verify, ensure or trust", p)
+	}
 }
 
 // driverName is DATABASE_DRIVER, postgres when empty.

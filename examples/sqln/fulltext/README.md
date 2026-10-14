@@ -9,7 +9,7 @@ fulltext/
 ├── .env                      # DATABASE_* (read automatically outside prod/stage)
 ├── .migrations/
 │   ├── 000001_create_catalog.*   # schema + seed data
-│   └── 000002_products_search.*  # rendered from product.Search: do not edit
+│   └── 000002_products_search.*  # rendered from searchIndex: do not edit
 ├── compose.yaml              # PostgreSQL on localhost:5433
 ├── main.go                   # gofi.New().With(database.New()) → searches → Shutdown
 └── product/
@@ -57,18 +57,23 @@ from that same definition.
 | When | What fails | How |
 |------|------------|-----|
 | `go test` | The index changed, its migration did not | `migration_test.go` compares `.migrations/000002_*` with `fts.Migration`; `go generate ./...` rewrites them |
-| First search on a connection | The migration was not applied, or was applied from another definition | The connection reads the index comment (`gofi-fts:v1:<hash of the DDL>`) from the catalog: `fts.ErrIndexMissing` / `fts.ErrIndexOutdated`, and the search never runs |
-| Connection open (optional) | Same, at startup | `connection.Config.FullText.Indexes` checks them right after the migrations |
+| Service startup | The migration was not applied, or was applied from another definition | `fts.MustIndex` registers the index; `database.New()` reads its comment (`gofi-fts:v1:<hash of the DDL>`) from the catalog right after the migrations: `fts.ErrIndexMissing` / `fts.ErrIndexOutdated` stop the service |
+| Every search | Same, for indexes built at run time (`fts.NewIndex`) | The connection checks each index once before its first search; the search never runs without it |
 
-`connection.Config.FullText.Policy` selects `fts.Verify` (default), `fts.Ensure`
-(creates a missing index — development and tests only) or `fts.Trust` (no
-check, for mocked databases).
+Declare the index at package level, in the package that searches it (here
+the repository): any package linked into the binary registers its indexes,
+nothing to list in `main`. With several databases,
+`database.New(database.WithFullText(idx...))` checks only the given ones.
+
+`DATABASE_FULLTEXT_POLICY` selects `verify` (default), `ensure` (creates a
+missing index — refused in `stage`/`prod`) or `trust` (no check, for mocked
+databases).
 
 ## What it shows
 
 | Search | sqln API |
 |--------|----------|
-| Index definition (weights, language, accent folding) | `fts.MustIndex`, `fts.Spec` |
+| Index definition (weights, language, accent folding), checked at startup | `fts.MustIndex`, `fts.Spec` |
 | Migration from the definition | `fts.WriteMigration` / `fts.Migration` |
 | Match, rank, page by relevance | `criteria.Match`, `Query.SelectRelevance`, `pagination.NewSort("relevance", DESC)` |
 | `cafe eletrica`, `"phrase"`, `-word`, `a OR b` | `fts.Websearch` (default) |
@@ -78,5 +83,6 @@ check, for mocked databases).
 On MySQL the same code renders `MATCH(p.name, p.description) AGAINST (? IN BOOLEAN MODE)`
 and a `FULLTEXT` index: accents fold through an `_ai_` collation, words below
 `innodb_ft_min_token_size` and InnoDB stopwords are dropped from the search,
-and column weights do not apply. golang-migrate needs `multiStatements=true` in
-the MySQL DSN when a migration file holds several statements.
+and column weights do not apply. `DATABASE_MIGRATION=true` works the same:
+sqln enables `multiStatements` on the migration pool only, never on the
+query pools.

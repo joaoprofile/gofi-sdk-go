@@ -111,11 +111,11 @@ func TestCommentTracksTheDefinition(t *testing.T) {
 
 	reweighted := spec
 	reweighted.Columns = []fts.Column{{Name: "name", Weight: fts.B}}
-	c3, _ := fts.MustIndex("products", reweighted).Comment(pg)
+	c3, _ := mustNew(t, "products", reweighted).Comment(pg)
 	assert.NotEqual(t, c1, c3, "a weight changes the PostgreSQL document")
 
 	m1, _ := base.Comment(my)
-	m3, _ := fts.MustIndex("products", reweighted).Comment(my)
+	m3, _ := mustNew(t, "products", reweighted).Comment(my)
 	assert.Equal(t, m1, m3, "MySQL ignores weights: no migration needed")
 }
 
@@ -130,4 +130,40 @@ func TestWriteMigration(t *testing.T) {
 	assert.Equal(t, "ALTER TABLE products DROP INDEX ftx_products_search;\n", string(down))
 
 	assert.Error(t, fts.WriteMigration(dir, 1, "../escape", mysql.MySQLDialect{}, products))
+}
+
+// mustNew builds an index without registering it, for definitions that
+// deliberately differ from a declared one.
+func mustNew(t *testing.T, table string, spec fts.Spec) *fts.Index {
+	t.Helper()
+	idx, err := fts.NewIndex(table, spec)
+	require.NoError(t, err)
+	return idx
+}
+
+func TestMustIndexRegisters(t *testing.T) {
+	spec := fts.Spec{Name: "ftx_registry_a", Columns: []fts.Column{{Name: "name"}}}
+	a := fts.MustIndex("registry_t", spec)
+	assert.Contains(t, fts.Registered(), a)
+	assert.NotPanics(t, func() { fts.MustIndex("registry_t", spec) }, "the same definition twice is allowed")
+	assert.Len(t, slicesFilter(fts.Registered(), "ftx_registry_a"), 1)
+
+	other := spec
+	other.Language = fts.English
+	assert.PanicsWithError(t, "fts: invalid index: ftx_registry_a on registry_t is declared twice with different definitions",
+		func() { fts.MustIndex("registry_t", other) })
+	assert.NotPanics(t, func() { fts.MustIndex("other_table", other) }, "same name on another table")
+
+	unregistered := mustNew(t, "registry_t", fts.Spec{Name: "ftx_registry_b", Columns: []fts.Column{{Name: "name"}}})
+	assert.NotContains(t, fts.Registered(), unregistered)
+}
+
+func slicesFilter(indexes []*fts.Index, name string) []*fts.Index {
+	var out []*fts.Index
+	for _, idx := range indexes {
+		if idx.Name() == name {
+			out = append(out, idx)
+		}
+	}
+	return out
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/gofi/config/core"
 	"github.com/joaoprofile/gofi-sdk-go/obs/metrics"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
@@ -28,11 +29,37 @@ type Component struct {
 	db       *sql.DB
 	replica  *sql.DB // set when DATABASE_READ_HOST is configured
 	injected bool
+
+	textIndexes []*fts.Index        // set by WithFullText; nil uses registered
+	registered  func() []*fts.Index // fts.Registered; replaced in tests
+}
+
+// Option configures a Component built by New.
+type Option func(*Component)
+
+// WithFullText checks exactly these full-text indexes at startup instead of
+// every index declared with fts.MustIndex: use it when the service talks to
+// several databases. With no index, nothing is checked at startup.
+func WithFullText(indexes ...*fts.Index) Option {
+	return func(c *Component) {
+		c.textIndexes = append([]*fts.Index{}, indexes...)
+	}
 }
 
 // New opens the database from DATABASE_* (see ConfigFromEnv) during Build.
-// With DATABASE_MIGRATION=true it runs the migrations in .migrations first.
-func New() *Component { return &Component{} }
+// With DATABASE_MIGRATION=true it runs the migrations in .migrations first,
+// then checks the full-text indexes declared with fts.MustIndex in the
+// packages linked into the binary (see WithFullText): a missing or outdated
+// index fails the startup. DATABASE_FULLTEXT_POLICY selects verify
+// (default), ensure (creates missing indexes; refused in stage and prod) or
+// trust (no check).
+func New(opts ...Option) *Component {
+	c := &Component{registered: fts.Registered}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
+}
 
 // FromDB uses a *sql.DB opened by the caller, who owns and closes it. It gets
 // the same health check and pool metrics, but is not made the global sqln
@@ -92,6 +119,10 @@ func (c *Component) open(rt *gofi.Runtime) error {
 	cfg, err := ConfigFromEnv(env)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
+	}
+	cfg.FullText.Indexes = c.textIndexes
+	if cfg.FullText.Indexes == nil {
+		cfg.FullText.Indexes = c.registered()
 	}
 	var opts []connection.Option
 	if env.DatabaseMigration {

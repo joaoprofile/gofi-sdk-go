@@ -165,7 +165,11 @@ func NewConnection(cfg Config, opts ...Option) (*Connection, error) {
 	if opt.migrationConfig != nil {
 		// A dedicated pool: golang-migrate pins one connection until closed, and
 		// closing it also closes the *sql.DB it was given.
-		migrationDB, err := driver.Open(cfg)
+		migrationCfg := cfg
+		if mc, ok := driver.(MigrationConfigurer); ok {
+			migrationCfg = mc.MigrationConfig(cfg)
+		}
+		migrationDB, err := driver.Open(migrationCfg)
 		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("migration bootstrap failed: %w", err)

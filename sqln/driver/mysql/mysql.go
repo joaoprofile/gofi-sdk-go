@@ -17,9 +17,7 @@ import (
 //
 //	import _ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/mysql"
 //
-// Requires the go-sql-driver/mysql driver in go.mod:
-//
-//	go get github.com/go-sql-driver/mysql
+// It links go-sql-driver/mysql and registers the MySQL migrations.
 type Driver struct{}
 
 const defaultPort = 3306

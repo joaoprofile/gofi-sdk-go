@@ -17,6 +17,7 @@ import (
 	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/mysql"
 	_ "github.com/joaoprofile/gofi-sdk-go/sqln/driver/postgres"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/pagination"
 )
 
@@ -132,7 +133,8 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 	assert.Contains(t, explain(t, db, driver, query, args), "ftx_it_fts_products")
 
 	// A changed definition is detected, never silently searched.
-	changed := fts.MustIndex("it_fts_products", fts.Spec{Name: "ftx_it_fts_products", Columns: []fts.Column{{Name: "name"}}})
+	changed, err := fts.NewIndex("it_fts_products", fts.Spec{Name: "ftx_it_fts_products", Columns: []fts.Column{{Name: "name"}}})
+	require.NoError(t, err)
 	assert.ErrorIs(t, fts.Check(ctx, db, d, changed), fts.ErrIndexOutdated)
 
 	// Down drops it; Create (the Ensure policy) brings it back.
@@ -174,4 +176,64 @@ func explain(t *testing.T, db *sql.DB, driver connection.DriverName, query strin
 	}
 	require.NoError(t, rows.Err())
 	return strings.Join(plan, " ")
+}
+
+func TestIntegration_PostgresBootMigratesAndChecks(t *testing.T) {
+	dsn := os.Getenv("GOFI_IT_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GOFI_IT_POSTGRES_DSN not set")
+	}
+	bootScenario(t, connection.DriverPostgres, dsn, `CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name text)`)
+}
+
+func TestIntegration_MySQLBootMigratesAndChecks(t *testing.T) {
+	dsn := os.Getenv("GOFI_IT_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("GOFI_IT_MYSQL_DSN not set")
+	}
+	bootScenario(t, connection.DriverMySQL, dsn,
+		`CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name varchar(200)) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci`)
+}
+
+// bootScenario opens a connection the way gofi's database component does:
+// migrations first (a multi-statement file, then the index rendered by
+// WriteMigration), then the startup check of the declared index.
+func bootScenario(t *testing.T, driver connection.DriverName, dsn, createTable string) {
+	ctx := context.Background()
+	d, ok := connection.GetDriver(driver)
+	require.True(t, ok)
+	idx, err := fts.NewIndex("it_fts_boot", fts.Spec{Name: "ftx_it_fts_boot", Columns: []fts.Column{{Name: "name"}}, Language: fts.Portuguese})
+	require.NoError(t, err)
+
+	reset := func() {
+		raw, err := d.Open(connection.Config{DSN: dsn})
+		require.NoError(t, err)
+		defer raw.Close()
+		for _, s := range []string{"DROP TABLE IF EXISTS it_fts_boot", "DROP TABLE IF EXISTS schema_migrations"} {
+			_, err := raw.ExecContext(ctx, s)
+			require.NoError(t, err, s)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/000001_boot_table.up.sql",
+		[]byte(createTable+";\nINSERT INTO it_fts_boot (id, name) VALUES (1, 'Café Expresso'), (2, 'Chá Verde');\n"), 0o600))
+	require.NoError(t, os.WriteFile(dir+"/000001_boot_table.down.sql", []byte("DROP TABLE it_fts_boot;\n"), 0o600))
+	require.NoError(t, fts.WriteMigration(dir, 2, "boot_search", d.Dialect(), idx))
+
+	cfg := connection.Config{Driver: driver, DSN: dsn, FullText: connection.FullTextConfig{Indexes: []*fts.Index{idx}}}
+	_, err = connection.NewConnection(cfg)
+	require.ErrorIs(t, err, fts.ErrIndexMissing, "without migrations the startup fails")
+
+	conn, err := connection.NewConnection(cfg, connection.WithMigrations(migrate.Config{Path: dir}))
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	rows, err := sqln.FindFromCriteria[itProduct](ctx,
+		criteria.From("it_fts_boot", "b").Select("b.id").Where(criteria.Match(idx.Search("cafe"))),
+	).WithConnection(conn).List()
+	require.NoError(t, err)
+	assert.Equal(t, []itProduct{{ID: 1}}, rows)
 }

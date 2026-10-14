@@ -28,6 +28,12 @@ type Driver interface {
 	Dialect() driver.Dialect
 }
 
+// MigrationConfigurer is implemented by drivers whose migration pool needs a
+// configuration the query pools must not have, e.g. MySQL's multiStatements.
+type MigrationConfigurer interface {
+	MigrationConfig(cfg Config) Config
+}
+
 var drivers = map[DriverName]Driver{}
 
 func RegisterDriver(d Driver) {

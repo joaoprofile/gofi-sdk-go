@@ -405,9 +405,10 @@ for u, err := range sqln.Find[User](ctx, "SELECT id, name FROM users").All() {
     process(u)
 }
 
-// Full-text search: the index is declared once; its migration and every query
-// are rendered from it, and a search fails (fts.ErrIndexMissing) unless the
-// index exists in the database as defined.
+// Full-text search: the index is declared once, at package level (e.g. in the
+// repository); its migration and every query are rendered from it.
+// database.New() checks every declared index at startup and the service
+// does not start when one is missing or outdated (fts.ErrIndexMissing).
 var productSearch = fts.MustIndex("products", fts.Spec{
     Name:     "ftx_products_search",
     Columns:  []fts.Column{{Name: "name", Weight: fts.A}, {Name: "description", Weight: fts.B}},
@@ -803,6 +804,7 @@ warning, unless `HTTP_REQUIRE_TLS=true` / `GRPC_REQUIRE_TLS=true`. See [SECURITY
 | `GOFI_ALLOW_INSECURE_TRANSPORT` | in `prod`/`stage`, CSV of `database,cache,messaging,otlp,bucket,tls,http,grpc` or `all`: refusal becomes a warning |
 | `DATABASE_SSL_MODE` | empty means `verify-full` (`disable` for a local host) |
 | `DATABASE_SSL_ROOT_CERT` / `DATABASE_SSL_CERT` / `DATABASE_SSL_KEY` | server CA and client certificate (mTLS), PEM |
+| `DATABASE_FULLTEXT_POLICY` | `verify` (default): full-text indexes declared with `fts.MustIndex` are checked at startup and before searches; `ensure` creates missing ones (refused in `prod`/`stage`); `trust` skips the check |
 | `DATABASE_STATEMENT_TIMEOUT` / `DATABASE_QUERY_TIMEOUT` | PostgreSQL `statement_timeout`; query timeout when the `ctx` has no deadline (default 30s, negative disables) |
 | `MESSAGING_TLS_CA_FILE` / `_CERT_FILE` / `_KEY_FILE` / `_SERVER_NAME` | any of them enables TLS to the broker (CA, mTLS, SNI) |
 | `MESSAGING_TLS_INSECURE_SKIP_VERIFY` / `MESSAGING_ALLOW_PLAINTEXT_SASL` | development only; refused in `prod` |

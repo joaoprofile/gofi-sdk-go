@@ -107,6 +107,9 @@ type Environment struct {
 	// bounds sqln queries without a deadline (0 = sqln default, negative = none).
 	DatabaseStatementTimeout time.Duration `env:"DATABASE_STATEMENT_TIMEOUT"`
 	DatabaseQueryTimeout     time.Duration `env:"DATABASE_QUERY_TIMEOUT"`
+	// DatabaseFullTextPolicy is verify (default), ensure or trust: what the
+	// connection does before searching a full-text index (sqln/fts.Policy).
+	DatabaseFullTextPolicy string `env:"DATABASE_FULLTEXT_POLICY"`
 	// Read replica; user, password and database are shared with the primary.
 	DatabaseReadHost string `env:"DATABASE_READ_HOST"`
 	DatabaseReadPort int    `env:"DATABASE_READ_PORT"`

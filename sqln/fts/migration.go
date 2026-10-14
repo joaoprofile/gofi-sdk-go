@@ -33,8 +33,8 @@ func Statements(d driver.Dialect, indexes ...*Index) (up, down []string, err err
 }
 
 // Migration renders Statements as the bodies of an up and a down migration
-// file. On MySQL, golang-migrate needs multiStatements=true in the DSN to
-// run a file with several statements.
+// file, run by sqln/migrate like any other (on MySQL, connection enables
+// multiStatements for the migration pool).
 func Migration(d driver.Dialect, indexes ...*Index) (up, down string, err error) {
 	u, dn, err := Statements(d, indexes...)
 	if err != nil {

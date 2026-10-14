@@ -90,8 +90,10 @@ type Spec struct {
 	MinTokenSize int
 }
 
-// Index is a validated full-text index definition. Declare each one once, as
-// a package variable, and share it between the migration and the queries.
+// Index is a validated full-text index definition. Declare each one once
+// with MustIndex, as a package-level variable (in the repository that
+// searches it, for instance), and share it between the migration and the
+// queries.
 type Index struct {
 	def driver.TextIndex
 }
@@ -102,7 +104,9 @@ var (
 	tableRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}(\.[A-Za-z_][A-Za-z0-9_]{0,62})?$`)
 )
 
-// NewIndex validates spec for table (name or schema.name, unquoted).
+// NewIndex validates spec for table (name or schema.name, unquoted). It does
+// not register the index (see MustIndex): use it for indexes built at run
+// time and in tests.
 func NewIndex(table string, spec Spec) (*Index, error) {
 	if !tableRe.MatchString(table) {
 		return nil, fmt.Errorf("%w: table %q must be name or schema.name", ErrInvalidIndex, table)
@@ -166,9 +170,15 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 	}}, nil
 }
 
-// MustIndex is NewIndex for package-level definitions; it panics on an invalid spec.
+// MustIndex declares an index: it validates spec like NewIndex and registers
+// the index (see Registered), so the service checks it at startup. Call it
+// at package level; it panics on an invalid spec, and on a table and name
+// already declared with another definition.
 func MustIndex(table string, spec Spec) *Index {
 	idx, err := NewIndex(table, spec)
+	if err == nil {
+		err = register(idx)
+	}
 	if err != nil {
 		panic(err)
 	}
