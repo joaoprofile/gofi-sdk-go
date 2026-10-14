@@ -7,6 +7,7 @@ import (
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 )
 
 // ErrInvalidFilter is wrapped by Build for every rejected filter or sort.
@@ -27,6 +28,15 @@ type Field struct {
 	Ops []string `json:"ops,omitempty"`
 	// Sortable allows the name as a sort field.
 	Sortable bool `json:"sortable,omitempty"`
+
+	// Search maps the name to a full-text index, the only way the SEARCH
+	// condition is accepted. Column may stay empty for a search-only name.
+	Search *fts.Index `json:"-"`
+	// SearchMode reads the value; fts.Websearch by default.
+	SearchMode fts.Mode `json:"-"`
+	// SearchOn is the alias of the index's table in the base query; empty
+	// leaves the indexed columns unqualified.
+	SearchOn string `json:"-"`
 
 	// UI metadata, passed through untouched.
 	Label      string `json:"label,omitempty"`
@@ -94,7 +104,7 @@ func Build(base string, args []any, filters *Filters, m Mapping, dialect FilterD
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidFilter, err)
 	}
-	return &QueryParam{Query: base + " AND ( " + clause + " )", Params: params}, nil
+	return &QueryParam{Query: base + " AND ( " + clause + " )", Params: params, Indexes: criteria.TextIndexes(predicates)}, nil
 }
 
 // checkedPredicate enforces lim on a condition filter, then resolves it.
@@ -123,15 +133,18 @@ func (m Mapping) predicate(f *Filter) (criteria.Predicate, error) {
 	if !ok {
 		return criteria.Predicate{}, fmt.Errorf("field %q is not in the mapping", f.Field)
 	}
-	if !driver.IsIdentifier(field.Column) {
-		return criteria.Predicate{}, fmt.Errorf("mapping for %q has an invalid column %q", f.Field, field.Column)
-	}
 	cond := f.Condition
 	if f.Value == nil && cond == "" {
 		cond = IsNull
 	}
 	if len(field.Ops) > 0 && !slices.Contains(field.Ops, cond) {
 		return criteria.Predicate{}, fmt.Errorf("condition %q is not allowed for field %q", cond, f.Field)
+	}
+	if cond == Search {
+		return field.searchPredicate(f)
+	}
+	if !driver.IsIdentifier(field.Column) {
+		return criteria.Predicate{}, fmt.Errorf("mapping for %q has an invalid column %q", f.Field, field.Column)
 	}
 	resolved := *f
 	resolved.Field = field.Column
@@ -140,6 +153,18 @@ func (m Mapping) predicate(f *Filter) (criteria.Predicate, error) {
 		return p, fmt.Errorf("field %q: invalid condition %q or value", f.Field, f.Condition)
 	}
 	return p, nil
+}
+
+// searchPredicate matches the value on the field's full-text index.
+func (field Field) searchPredicate(f *Filter) (criteria.Predicate, error) {
+	if field.Search == nil {
+		return criteria.Predicate{}, fmt.Errorf("field %q has no full-text index", f.Field)
+	}
+	term, ok := f.Value.(string)
+	if !ok {
+		return criteria.Predicate{}, fmt.Errorf("field %q: SEARCH requires a string", f.Field)
+	}
+	return criteria.Match(field.Search.Search(term).Mode(field.SearchMode).On(field.SearchOn)), nil
 }
 
 // SortColumn resolves a sort field through the mapping; an empty field

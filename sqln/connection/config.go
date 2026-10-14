@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
@@ -23,6 +24,21 @@ type Config struct {
 	// QueryTimeout bounds each query run by sqln whose context has no
 	// deadline. Zero uses DefaultQueryTimeout; negative disables it.
 	QueryTimeout time.Duration
+	// FullText decides how searches on full-text indexes are checked.
+	FullText FullTextConfig
+}
+
+// FullTextConfig applies an fts.Policy to the full-text indexes searched
+// through a connection.
+type FullTextConfig struct {
+	// Policy defaults to fts.Verify: each index is checked in the catalog the
+	// first time it is searched, and the search fails when it is missing or
+	// was built from another definition.
+	Policy fts.Policy
+	// Indexes are checked (or created, with fts.Ensure) when the connection
+	// opens, after migrations, so a missing index fails the startup instead
+	// of the first search.
+	Indexes []*fts.Index
 }
 
 // DefaultQueryTimeout bounds queries when Config.QueryTimeout is zero.
@@ -51,6 +67,16 @@ type Option func(*options)
 
 type options struct {
 	migrationConfig *migrate.Config
+	textPolicy      *fts.Policy
+}
+
+// WithFullTextPolicy sets the full-text policy of a connection built by
+// NewRaw (Config.FullText does it for NewConnection); use fts.Trust with a
+// mocked database.
+func WithFullTextPolicy(p fts.Policy) Option {
+	return func(o *options) {
+		o.textPolicy = &p
+	}
 }
 
 func WithMigrations(cfg migrate.Config) Option {

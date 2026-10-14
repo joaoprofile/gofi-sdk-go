@@ -19,6 +19,7 @@ updates:
       - "/examples/netx/api"
       - "/examples/obs"
       - "/examples/sqln/filter-api"
+      - "/examples/sqln/fulltext"
       - "/examples/sqln/search"
       - "/gofi"
       - "/iam"

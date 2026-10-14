@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 )
 
 // Predicate represents a single WHERE/HAVING condition or a logical connector (AND/OR).
@@ -21,6 +22,7 @@ type Predicate struct {
 	children []Predicate // non-empty only for Group predicate
 	raw      bool        // field is a trusted expression, written without validation
 	literal  bool        // LIKE value is literal text matched as a substring
+	search   *fts.Search // non-nil only for Match
 	err      error       // invalid constructor input, reported by Build
 }
 

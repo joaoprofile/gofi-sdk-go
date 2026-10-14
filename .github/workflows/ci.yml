@@ -43,6 +43,7 @@ jobs:
           - sqln/rdsauth
           - examples/netx/api
           - examples/sqln/search
+          - examples/sqln/fulltext
           - examples/sqln/filter-api
           - examples/msq/rabbitmq/producer
           - examples/msq/rabbitmq/consumer
@@ -107,7 +108,7 @@ jobs:
           git /repo --no-banner --redact --exit-code 1
           --log-opts="--full-history --all -- . :(exclude)MIT*"
 
-  # Provider contracts against real brokers and PostgreSQL.
+  # Provider contracts against real brokers, PostgreSQL and MySQL.
   integration:
     runs-on: ubuntu-latest
     env:
@@ -116,7 +117,15 @@ jobs:
       GOFI_IT_REDIS_ADDR: localhost:6379
       GOFI_IT_KAFKA_BROKERS: localhost:9092
       GOFI_IT_NATS_URL: nats://localhost:4222
+      GOFI_IT_MYSQL_DSN: root:pw@tcp(localhost:3306)/it
     services:
+      mysql:
+        image: mysql:8.4
+        ports: ["3306:3306"]
+        env:
+          MYSQL_ROOT_PASSWORD: pw
+          MYSQL_DATABASE: it
+        options: --health-cmd "mysqladmin ping -h 127.0.0.1 -ppw" --health-interval 5s --health-retries 30
       rabbitmq:
         image: rabbitmq:3.13-alpine
         ports: ["5672:5672"]

@@ -15,7 +15,8 @@ type builder struct {
 	dialect driver.FilterDialect
 	params  []any
 	sb      *strings.Builder
-	err     error // first invalid field or value; the SQL is discarded when set
+	err     error               // first invalid field or value; the SQL is discarded when set
+	tables  map[string][]string // table → qualifiers in the query, for Match
 }
 
 // ErrInvalidField is returned by Build when a predicate or order field is not
@@ -64,7 +65,7 @@ func (b *builder) writePredicate(p Predicate) {
 		b.fail(p.err)
 		return
 	}
-	if p.operator != driver.Group && !b.checkField(p.field, p.raw) {
+	if p.operator != driver.Group && p.operator != driver.Search && !b.checkField(p.field, p.raw) {
 		return
 	}
 	switch p.operator {
@@ -78,6 +79,10 @@ func (b *builder) writePredicate(p Predicate) {
 		b.write("(")
 		b.writeClause(p.children)
 		b.write(")")
+
+	// Full-text match on an fts.Index.
+	case driver.Search:
+		b.write(b.textExpr(p.search, false))
 
 	// Membership — a typed slice binds as one array where the dialect allows.
 	case driver.In, driver.NotIn:

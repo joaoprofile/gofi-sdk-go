@@ -10,6 +10,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/sqln/cache"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/mapping"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/pagination"
 )
@@ -33,6 +34,7 @@ type manager[T any] struct {
 	criteriaQuery *criteria.Query // non-nil when created via FindFromCriteria; built lazily
 	cacheScope    string          // mixed into the cache key; see WithCacheScope
 	err           error           // criteria build failure, returned by the execution methods
+	textIndexes   []*fts.Index    // full-text indexes searched; required before running
 }
 
 //  Constructors
@@ -42,7 +44,7 @@ func Find[T any](ctx context.Context, query string, params ...any) *manager[T] {
 }
 
 func FindWithFilter[T any](ctx context.Context, params *QueryParam) *manager[T] {
-	return &manager[T]{ctx: ctx, query: params.Query, args: params.Params}
+	return &manager[T]{ctx: ctx, query: params.Query, args: params.Params, textIndexes: params.Indexes}
 }
 
 func NewCustomQuery[T any](ctx context.Context, query string, params ...any) *manager[T] {
@@ -99,6 +101,14 @@ func (q *manager[T]) WithCacheScope(scope string) *manager[T] {
 func (q *manager[T]) WithCountQuery(query string, args ...any) *manager[T] {
 	q.countQuery = query
 	q.countArgs = args
+	return q
+}
+
+// RequireTextIndex declares the full-text indexes a hand-written query
+// searches (e.g. through criteria.BuildClause with criteria.Match), so they
+// are checked like those of a criteria query before it runs.
+func (q *manager[T]) RequireTextIndex(indexes ...*fts.Index) *manager[T] {
+	q.textIndexes = append(q.textIndexes, indexes...)
 	return q
 }
 
@@ -307,6 +317,7 @@ func (q *manager[T]) resolveFromCriteria(conn *connection.Connection) {
 	if q.criteriaQuery == nil {
 		return
 	}
+	q.textIndexes = append(q.textIndexes, q.criteriaQuery.TextIndexes()...)
 	if q.page != nil {
 		q.query, q.args, q.err = q.criteriaQuery.BuildBase(conn.Dialect())
 	} else {
@@ -337,7 +348,23 @@ func (q *manager[T]) validate(instance *sql.DB) error {
 	if q.query == "" {
 		return errors.New(ErrMsgQueryIsEmpty)
 	}
-	return nil
+	return q.requireTextIndexes()
+}
+
+// requireTextIndexes applies the connection's full-text policy to the
+// indexes the query searches (see connection.RequireTextIndexes).
+func (q *manager[T]) requireTextIndexes() error {
+	if len(q.textIndexes) == 0 {
+		return nil
+	}
+	conn := q.conn
+	if conn == nil {
+		var err error
+		if conn, err = connection.Global(); err != nil {
+			return err
+		}
+	}
+	return conn.RequireTextIndexes(q.ctx, q.textIndexes...)
 }
 
 func (q *manager[T]) connection() *connection.Connection {

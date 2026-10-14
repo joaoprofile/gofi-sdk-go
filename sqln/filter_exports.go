@@ -76,6 +76,10 @@ const (
 
 const Between = driver.Between
 
+// Search matches a full-text index; accepted only on a FilterField whose
+// Search is set.
+const Search = driver.Search
+
 // Null Check Operators
 
 const (

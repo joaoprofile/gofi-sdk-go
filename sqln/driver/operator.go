@@ -27,6 +27,10 @@ const (
 	NotLike     = "!~~"      // literal case-sensitive NOT LIKE, all databases
 )
 
+// Search matches a full-text index (fts.Index); the dynamic filter accepts
+// it only on a field mapped to an index.
+const Search = "SEARCH"
+
 // Range Operator
 
 // Between accepts:
@@ -70,6 +74,7 @@ var AllowedOperators = map[string]struct{}{
 	In: {}, NotIn: {},
 	Contains: {}, NotContains: {},
 	Like: {}, NotLike: {},
+	Search:  {},
 	Between: {},
 	IsNull:  {}, IsNotNull: {},
 	IsTrue: {}, IsFalse: {},

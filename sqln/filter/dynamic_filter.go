@@ -12,6 +12,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/sqln/connection"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/criteria"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 )
 
 const timeLayout = time.RFC3339
@@ -57,6 +58,9 @@ const (
 )
 
 const Between = driver.Between
+
+// Search matches a full-text index; see Field.Search.
+const Search = driver.Search
 
 const (
 	IsNull    = driver.IsNull
@@ -156,6 +160,9 @@ func (f *Filters) Add(filter ...*Filter) *Filters {
 type QueryParam struct {
 	Query  string
 	Params []any
+	// Indexes are the full-text indexes the filters search; sqln's
+	// FindWithFilter checks them before running the query.
+	Indexes []*fts.Index
 }
 
 // Predicate Conversion

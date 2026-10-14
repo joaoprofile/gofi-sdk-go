@@ -8,9 +8,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
+	"github.com/joaoprofile/gofi-sdk-go/sqln/fts"
 	"github.com/joaoprofile/gofi-sdk-go/sqln/migrate"
 )
 
@@ -26,6 +28,8 @@ type Connection struct {
 	stopMonitor func()
 	id          string
 	timeout     time.Duration // resolved Config.QueryTimeout; <= 0 disables it
+	textPolicy  fts.Policy
+	textReady   sync.Map // *fts.Index → struct{}: passed textPolicy
 }
 
 // QueryTimeout is the bound sqln applies to queries whose context has no
@@ -87,8 +91,48 @@ func (c *Connection) Dialect() driver.Dialect {
 // Useful when integrating with legacy code that manages the pool itself.
 // Its ID is random: the pool's database is unknown, so cached results are not
 // shared with other connections or processes.
-func NewRaw(db *sql.DB, d Driver) *Connection {
-	return &Connection{db: db, driver: d, id: "raw:" + rand.Text(), timeout: DefaultQueryTimeout}
+func NewRaw(db *sql.DB, d Driver, opts ...Option) *Connection {
+	var opt options
+	for _, o := range opts {
+		o(&opt)
+	}
+	c := &Connection{db: db, driver: d, id: "raw:" + rand.Text(), timeout: DefaultQueryTimeout}
+	if opt.textPolicy != nil {
+		c.textPolicy = *opt.textPolicy
+	}
+	return c
+}
+
+// RequireTextIndexes applies the connection's full-text policy (see
+// FullTextConfig) to each index not yet accepted: with fts.Verify it fails
+// with fts.ErrIndexMissing, fts.ErrIndexOutdated or fts.ErrServerConfig when
+// the index is not in the database as defined. An accepted index is not
+// checked again on this connection; a failure is, so applying the migration
+// fixes it without a restart.
+func (c *Connection) RequireTextIndexes(ctx context.Context, indexes ...*fts.Index) error {
+	if c.textPolicy == fts.Trust {
+		return nil
+	}
+	var pending []*fts.Index
+	for _, idx := range indexes {
+		if _, ok := c.textReady.Load(idx); !ok {
+			pending = append(pending, idx)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	ctx, cancel := c.WithQueryTimeout(ctx)
+	defer cancel()
+	var errs []error
+	for _, idx := range pending {
+		if err := fts.Apply(ctx, c.textPolicy, c.db, c.Dialect(), idx); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		c.textReady.Store(idx, struct{}{})
+	}
+	return errors.Join(errs...)
 }
 
 func NewConnection(cfg Config, opts ...Option) (*Connection, error) {
@@ -135,14 +179,22 @@ func NewConnection(cfg Config, opts ...Option) (*Connection, error) {
 		}
 	}
 
-	return &Connection{
+	conn := &Connection{
 		db:          db,
 		readDB:      readDB,
 		driver:      driver,
 		stopMonitor: startPoolMonitor(db, 30*time.Second),
 		id:          dsnID(cfg.Driver, cfg.DSN),
 		timeout:     resolveQueryTimeout(cfg.QueryTimeout),
-	}, nil
+		textPolicy:  cfg.FullText.Policy,
+	}
+	if len(cfg.FullText.Indexes) > 0 {
+		if err := conn.RequireTextIndexes(context.Background(), cfg.FullText.Indexes...); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("full-text indexes: %w", err)
+		}
+	}
+	return conn, nil
 }
 
 // open opens and pings a pool for cfg.

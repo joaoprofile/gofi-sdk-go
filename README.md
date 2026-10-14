@@ -113,6 +113,7 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 | [examples/netx/api](examples/netx/api) | `httpx` server through the `httpserver` component: several handlers, public/private routes, global and auth middlewares |
 | [examples/grpc](examples/grpc) | gRPC with `grpcx`: a `Person` entity and photos through unary, server, client and bidirectional streams; a gRPC-only server, an HTTP + gRPC server in one gofi service, and a client |
 | [examples/sqln/search](examples/sqln/search) | Job (no HTTP) on PostgreSQL: migrations, `criteria` filters, join, pagination, single row and streaming |
+| [examples/sqln/fulltext](examples/sqln/fulltext) | Job on PostgreSQL: a full-text index, its generated migration (checked by a test), ranked and paged searches with phrases, exclusions, alternatives and prefixes |
 | [examples/sqln/filter-api](examples/sqln/filter-api) | HTTP API with client-driven dynamic filters, allowlisted by `sqln.FilterMapping` |
 | [examples/msq/rabbitmq](examples/msq/rabbitmq) | Producer and consumer as separate services on RabbitMQ, with retries and dead-letter queue |
 | [examples/msq/kafka](examples/msq/kafka) | Same pair on Kafka: message keys, consumer groups |
@@ -361,7 +362,7 @@ logging.Info("service started", slog.String("port", ":8080"))
 
 **Path:** `github.com/joaoprofile/gofi-sdk-go/sqln`
 
-Data access layer for SQL with support for PostgreSQL (pgx/v5), MySQL, SQL Server, and Oracle. Includes pagination, allowlisted dynamic filters, query caching (Redis or in-memory), migrations, a read replica (`DATABASE_READ_HOST`), per-connection passwords for IAM tokens (`sqln/rdsauth`) and transaction retries on serialization conflicts.
+Data access layer for SQL with support for PostgreSQL (pgx/v5), MySQL, SQL Server, and Oracle. Includes pagination, allowlisted dynamic filters, full-text search (PostgreSQL and MySQL), query caching (Redis or in-memory), migrations, a read replica (`DATABASE_READ_HOST`), per-connection passwords for IAM tokens (`sqln/rdsauth`) and transaction retries on serialization conflicts.
 
 | Sub-package   | Responsibility                                     |
 | ------------- | -------------------------------------------------- |
@@ -374,6 +375,7 @@ Data access layer for SQL with support for PostgreSQL (pgx/v5), MySQL, SQL Serve
 | `cache`       | Query result caching (Redis or in-memory)          |
 | `criteria`    | Chainable query builder by predicates              |
 | `filter`      | Dynamic filters from requests (allowlist mapping)  |
+| `fts`         | Full-text indexes: definition, migration, checks   |
 | `transaction` | Transaction management with context propagation    |
 | `migrate`     | Running migrations via filesystem                  |
 
@@ -402,6 +404,22 @@ for u, err := range sqln.Find[User](ctx, "SELECT id, name FROM users").All() {
     if err != nil { return err }
     process(u)
 }
+
+// Full-text search: the index is declared once; its migration and every query
+// are rendered from it, and a search fails (fts.ErrIndexMissing) unless the
+// index exists in the database as defined.
+var productSearch = fts.MustIndex("products", fts.Spec{
+    Name:     "ftx_products_search",
+    Columns:  []fts.Column{{Name: "name", Weight: fts.A}, {Name: "description", Weight: fts.B}},
+    Language: fts.Portuguese,
+    Unaccent: true,
+})
+up, down, err := fts.Migration(postgres.PostgresDialect{}, productSearch) // or fts.WriteMigration
+s := productSearch.Search(`cafe "moido na hora" -descafeinado`) // or .Mode(fts.Prefix) for search-as-you-type
+hits, err := sqln.FindFromCriteria[Product](ctx,
+    criteria.From("products", "p").Select("p.id", "p.name").
+        Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)),
+).List()
 
 // Retry the whole transaction on serialization failures and deadlocks.
 tx := transaction.New(transaction.Options{Isolation: sql.LevelSerializable, MaxRetries: 3})

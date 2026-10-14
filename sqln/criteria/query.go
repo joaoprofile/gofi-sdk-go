@@ -42,16 +42,17 @@ import (
 //	        Where(criteria.Eq("u.active", true)),
 //	).WithPage(pageRequest).PagedList()
 type Query struct {
-	selects []string
-	table   string
-	alias   string
-	joins   []joinClause
-	where   []Predicate
-	group   []string
-	having  []Predicate
-	order   []Order
-	limit   int
-	offset  int
+	selects   []string
+	relevance []relevanceSelect
+	table     string
+	alias     string
+	joins     []joinClause
+	where     []Predicate
+	group     []string
+	having    []Predicate
+	order     []Order
+	limit     int
+	offset    int
 }
 
 type joinClause struct {
@@ -192,12 +193,20 @@ func (q *Query) BuildBase(d driver.FilterDialect) (string, []any, error) {
 
 // writeBody writes: SELECT … FROM … JOIN … WHERE … GROUP BY … HAVING …
 func (q *Query) writeBody(b *builder) {
+	b.tables = q.tableQualifiers()
+
 	// SELECT
 	if len(q.selects) == 0 {
 		b.write("SELECT *")
 	} else {
 		b.write("SELECT ")
 		writeList(b.sb, q.selects)
+	}
+	for _, r := range q.relevance {
+		if !b.checkField(r.alias, false) {
+			return
+		}
+		b.write(", ", b.textExpr(&r.search, true), " AS ", r.alias)
 	}
 
 	// FROM
@@ -249,14 +258,37 @@ func (q *Query) writeOrderBy(b *builder) {
 	}
 	b.write(" ORDER BY ")
 	for i, o := range q.order {
-		if !b.checkField(o.Field, o.raw) {
+		if o.search == nil && !b.checkField(o.Field, o.raw) {
 			return
 		}
 		if i > 0 {
 			b.write(", ")
 		}
-		b.write(o.Field, " ", driver.SortDirection(o.Direction))
+		field := o.Field
+		if o.search != nil {
+			field = b.textExpr(o.search, true)
+		}
+		b.write(field, " ", driver.SortDirection(o.Direction))
 	}
+}
+
+// tableQualifiers maps each table of FROM and JOIN to the names its columns
+// are qualified by: the alias, or the table itself.
+func (q *Query) tableQualifiers() map[string][]string {
+	m := make(map[string][]string, 1+len(q.joins))
+	add := func(table, alias string) {
+		if alias == "" {
+			alias = table
+		}
+		m[table] = append(m[table], alias)
+	}
+	add(q.table, q.alias)
+	for _, j := range q.joins {
+		if j.joinType != "LEFT JOIN LATERAL" {
+			add(j.table, j.alias)
+		}
+	}
+	return m
 }
 
 func (q *Query) writeLimitOffset(sb *strings.Builder) {

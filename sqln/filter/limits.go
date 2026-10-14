@@ -28,7 +28,7 @@ func WithMaxFilters(n int) Option { return func(l *limits) { l.maxFilters = n } 
 // WithMaxInValues bounds the elements of a list value (IN, NOT IN, …).
 func WithMaxInValues(n int) Option { return func(l *limits) { l.maxInValues = n } }
 
-// WithMaxLikeLength bounds the characters of a Contains/Like value.
+// WithMaxLikeLength bounds the characters of a Contains/Like/Search value.
 func WithMaxLikeLength(n int) Option { return func(l *limits) { l.maxLikeLength = n } }
 
 func newLimits(opts []Option) limits {
@@ -48,7 +48,7 @@ func newLimits(opts []Option) limits {
 	return l
 }
 
-var likeConditions = []string{Contains, NotContains, Like, NotLike}
+var likeConditions = []string{Contains, NotContains, Like, NotLike, Search}
 
 // countConditions counts the filters that are not AND/OR separators.
 func countConditions(filters []*Filter) int {

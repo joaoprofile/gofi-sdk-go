@@ -1,5 +1,7 @@
 package criteria
 
+import "github.com/joaoprofile/gofi-sdk-go/sqln/fts"
+
 const (
 	ASC  = "ASC"
 	DESC = "DESC"
@@ -13,7 +15,8 @@ const (
 type Order struct {
 	Field     string
 	Direction string
-	raw       bool // Field is a trusted expression, written without validation
+	raw       bool        // Field is a trusted expression, written without validation
+	search    *fts.Search // non-nil only for ByRelevance
 }
 
 // Raw marks Field as a trusted SQL expression (e.g. COUNT(*)) written as is.
