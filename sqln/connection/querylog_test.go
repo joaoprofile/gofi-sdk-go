@@ -36,6 +36,7 @@ func TestLogQueries(t *testing.T) {
 	assert.Same(t, q, Logged(q), "wrapped once")
 	_, _ = q.QueryContext(ctx, "SELECT p.id\n  FROM products p\n  WHERE p.name = $1 AND p.price <= $2 AND p.data = $3 AND p.x IS $4",
 		"café", 100.5, []byte{1, 2}, nil)
+	assert.Equal(t, "2000000", formatArg(2e6))
 	out := buf.String()
 	assert.Contains(t, out, `op=query`)
 	assert.Contains(t, out, `sql="SELECT p.id FROM products p WHERE p.name = $1 AND p.price <= $2 AND p.data = $3 AND p.x IS $4"`, "one line")

@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/joaoprofile/gofi-sdk-go/base/environment"
 	"github.com/joaoprofile/gofi-sdk-go/gofi"
@@ -54,7 +55,9 @@ func WithFullText(indexes ...*fts.Index) Option {
 // index fails the startup. DATABASE_FULLTEXT_POLICY selects verify
 // (default), ensure (creates missing indexes; refused in stage and prod) or
 // trust (no check). DATABASE_LOG_QUERIES=true logs every SQL statement
-// sqln runs, with its arguments and duration (refused in stage and prod).
+// sqln runs, with its arguments and duration, and
+// DATABASE_LOG_QUERIES_PRETTY=true prints them indented, one argument per
+// line, to stderr (both refused in stage and prod).
 func New(opts ...Option) *Component {
 	c := &Component{registered: fts.Registered}
 	for _, o := range opts {
@@ -129,6 +132,10 @@ func (c *Component) open(rt *gofi.Runtime) error {
 	// DATABASE_LOG_QUERIES: every statement sqln runs, as the database gets it.
 	if env.DatabaseLogQueries {
 		connection.LogQueries(slog.Default())
+	}
+	// DATABASE_LOG_QUERIES_PRETTY: the same statements laid out for reading.
+	if env.DatabaseLogQueriesPretty {
+		connection.PrintQueries(os.Stderr)
 	}
 	var opts []connection.Option
 	if env.DatabaseMigration {

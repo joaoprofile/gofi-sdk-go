@@ -113,6 +113,9 @@ type Environment struct {
 	// DatabaseLogQueries logs every SQL statement sqln runs, with its
 	// arguments (development only: refused in stage and prod).
 	DatabaseLogQueries bool `env:"DATABASE_LOG_QUERIES"`
+	// DatabaseLogQueriesPretty prints each statement laid out for reading
+	// (indented SQL, one argument per line) to stderr; same restriction.
+	DatabaseLogQueriesPretty bool `env:"DATABASE_LOG_QUERIES_PRETTY"`
 	// Read replica; user, password and database are shared with the primary.
 	DatabaseReadHost string `env:"DATABASE_READ_HOST"`
 	DatabaseReadPort int    `env:"DATABASE_READ_PORT"`

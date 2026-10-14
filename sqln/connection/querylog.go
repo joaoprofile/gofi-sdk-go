@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -23,19 +24,20 @@ func LogQueries(logger *slog.Logger) {
 	queryLog.Store(logger)
 }
 
-// Logged returns q logging its statements while LogQueries is on.
+// Logged returns q logging its statements while LogQueries or PrintQueries
+// is on.
 func Logged(q Querier) Querier {
-	if l := queryLog.Load(); l != nil {
-		if _, ok := q.(*loggingQuerier); !ok {
-			return &loggingQuerier{q: q, log: l}
-		}
+	if queryLog.Load() == nil && queryPrint.Load() == nil {
+		return q
 	}
-	return q
+	if _, ok := q.(*loggingQuerier); ok {
+		return q
+	}
+	return &loggingQuerier{q: q}
 }
 
 type loggingQuerier struct {
-	q   Querier
-	log *slog.Logger
+	q Querier
 }
 
 func (l *loggingQuerier) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -69,10 +71,18 @@ func (l *loggingQuerier) PrepareContext(ctx context.Context, query string) (*sql
 }
 
 func (l *loggingQuerier) record(ctx context.Context, op, query string, args []any, start time.Time, err error) {
+	elapsed := time.Since(start)
+	if p := queryPrint.Load(); p != nil {
+		p.print(op, query, args, elapsed, err)
+	}
+	logger := queryLog.Load()
+	if logger == nil {
+		return
+	}
 	attrs := []slog.Attr{
 		slog.String("op", op),
 		slog.String("sql", strings.Join(strings.Fields(query), " ")),
-		slog.Duration("duration", time.Since(start)),
+		slog.Duration("duration", elapsed),
 	}
 	if len(args) > 0 {
 		attrs = append(attrs, slog.String("args", formatArgs(args)))
@@ -82,7 +92,7 @@ func (l *loggingQuerier) record(ctx context.Context, op, query string, args []an
 		level = slog.LevelWarn
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	l.log.LogAttrs(ctx, level, "sql", attrs...)
+	logger.LogAttrs(ctx, level, "sql", attrs...)
 }
 
 // maxArgLength bounds each logged argument, in characters.
@@ -95,20 +105,27 @@ func formatArgs(args []any) string {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		var v string
-		switch x := a.(type) {
-		case string:
-			v = fmt.Sprintf("%q", truncate(x))
-		case []byte:
-			v = fmt.Sprintf("<%d bytes>", len(x))
-		case nil:
-			v = "NULL"
-		default:
-			v = truncate(fmt.Sprintf("%v", x))
-		}
-		fmt.Fprintf(&b, "$%d=%s", i+1, v)
+		fmt.Fprintf(&b, "$%d=%s", i+1, formatArg(a))
 	}
 	return b.String()
+}
+
+// formatArg writes one argument: text quoted, bytes as their length.
+func formatArg(a any) string {
+	switch x := a.(type) {
+	case string:
+		return fmt.Sprintf("%q", truncate(x))
+	case []byte:
+		return fmt.Sprintf("<%d bytes>", len(x))
+	case nil:
+		return "NULL"
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64) // 2000000, not 2e+06
+	case float32:
+		return strconv.FormatFloat(float64(x), 'f', -1, 32)
+	default:
+		return truncate(fmt.Sprintf("%v", x))
+	}
 }
 
 func truncate(s string) string {

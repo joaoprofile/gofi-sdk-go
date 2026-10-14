@@ -81,11 +81,18 @@ func fullTextPolicy(env *environment.Environment) (fts.Policy, error) {
 	}
 }
 
-// checkQueryLog refuses DATABASE_LOG_QUERIES in stage and prod: the logged
-// arguments may hold personal data.
+// checkQueryLog refuses DATABASE_LOG_QUERIES and DATABASE_LOG_QUERIES_PRETTY
+// in stage and prod: the logged arguments may hold personal data.
 func checkQueryLog(env *environment.Environment) error {
-	if t := env.GetEnvironmentType(); env.DatabaseLogQueries && (t == environment.ENV_PROD || t == environment.ENV_STAGE) {
+	t := env.GetEnvironmentType()
+	if t != environment.ENV_PROD && t != environment.ENV_STAGE {
+		return nil
+	}
+	switch {
+	case env.DatabaseLogQueries:
 		return fmt.Errorf("DATABASE_LOG_QUERIES is not allowed in %s: it logs query arguments", t)
+	case env.DatabaseLogQueriesPretty:
+		return fmt.Errorf("DATABASE_LOG_QUERIES_PRETTY is not allowed in %s: it prints query arguments", t)
 	}
 	return nil
 }

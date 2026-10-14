@@ -111,8 +111,37 @@ level=INFO msg=sql op=query sql="SELECT COUNT(*) FROM (SELECT p.id, … WHERE p.
   duration=1.2ms args="$1=\"'parque' & 'barigui'\" … $4=[apartamento] …"
 ```
 
-It is refused in `stage` and `prod`: the arguments may hold personal data. In
-code, `connection.LogQueries(logger)` turns it on and `connection.LogQueries(nil)` off.
+`DATABASE_LOG_QUERIES_PRETTY=true` prints the same statements to stderr laid
+out for reading — colored in a terminal:
+
+```
+┌─ sql · query · 6.3ms
+│ SELECT
+│   COUNT(*)
+│ FROM (
+│   SELECT
+│     p.id,
+│     …
+│   FROM properties p
+│     JOIN neighborhoods n ON n.id = p.neighborhood_id
+│     …
+│   WHERE p.active IS TRUE
+│     AND p.property_type = ANY($4)
+│     AND p.bedrooms = $7
+│     AND p.price <= $8
+│     AND p.ftx_properties_search_tsv @@ to_tsquery('gofi_portuguese_unaccent'::regconfig, $9)
+│ ) tb
+├─ args
+│   $4 = [casa]
+│   $7 = 2
+│   $8 = 2000000
+│   $9 = "'piscina'"
+└─
+```
+
+Both are refused in `stage` and `prod`: the arguments may hold personal data.
+In code, `connection.LogQueries(logger)` and `connection.PrintQueries(os.Stderr)`
+turn them on, and `nil` off.
 
 ## API
 

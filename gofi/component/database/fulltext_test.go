@@ -87,4 +87,7 @@ func TestQueryLogRefusedInCloud(t *testing.T) {
 		assert.Equal(t, ok, err == nil, env)
 	}
 	assert.NoError(t, checkQueryLog(&environment.Environment{AppEnvironment: "prod"}), "off is always fine")
+	assert.ErrorContains(t, checkQueryLog(&environment.Environment{DatabaseLogQueriesPretty: true, AppEnvironment: "stage"}),
+		"DATABASE_LOG_QUERIES_PRETTY")
+	assert.NoError(t, checkQueryLog(&environment.Environment{DatabaseLogQueriesPretty: true, AppEnvironment: "dev"}))
 }
