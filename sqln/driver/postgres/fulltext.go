@@ -226,7 +226,26 @@ func (PostgresDialect) TextIndexDDL(idx *driver.TextIndex, comment string) ([]dr
 			Down: []string{"DROP INDEX IF EXISTS " + indexName(idx)},
 		})
 	}
+	if idx.Suggest {
+		lex := idx.LexiconTable()
+		steps = append(steps, driver.TextStep{
+			Up: []string{
+				"CREATE EXTENSION IF NOT EXISTS pg_trgm",
+				"CREATE TABLE " + lex + " (term text PRIMARY KEY, word text NOT NULL, ndoc integer NOT NULL)",
+				"CREATE INDEX " + idx.Name + "_lexg ON " + lex + " USING GIN (term gin_trgm_ops)",
+			},
+			Down: []string{"DROP TABLE IF EXISTS " + lex},
+		})
+	}
 	return steps, nil
+}
+
+// TextCandidates uses pg_trgm's % operator, served by the GIN trigram index
+// (pg_trgm.similarity_threshold, 0.3 by default).
+func (PostgresDialect) TextCandidates(idx *driver.TextIndex, key string, bind func(any) string) string {
+	p := bind(key)
+	return "SELECT word, term, ndoc FROM " + idx.LexiconTable() + " WHERE term % " + p +
+		" ORDER BY similarity(term, " + p + ") DESC, ndoc DESC LIMIT 50"
 }
 
 // TextIndexLookup finds a valid GIN index of that name on the table,
@@ -240,6 +259,18 @@ JOIN pg_am am ON am.oid = ic.relam
 WHERE i.indrelid = to_regclass($1) AND ic.relname = $2 AND am.amname = 'gin' AND i.indisvalid`, []any{idx.Table, idx.Name}
 }
 
-// TextChecks is empty: the configuration and the extension are dependencies
-// of the index, which cannot exist without them.
-func (PostgresDialect) TextChecks(*driver.TextIndex) []driver.TextCheck { return nil }
+// TextChecks requires the lexicon of Suggest; the configuration and the
+// extensions are dependencies of the index or lexicon, which cannot exist
+// without them.
+func (PostgresDialect) TextChecks(idx *driver.TextIndex) []driver.TextCheck {
+	if !idx.Suggest {
+		return nil
+	}
+	return []driver.TextCheck{{
+		Query: "SELECT CASE WHEN to_regclass($1) IS NULL THEN 'missing' ELSE 'present' END",
+		Args:  []any{idx.LexiconTable()},
+		Want:  "present",
+		What:  "lexicon " + idx.LexiconTable(),
+		Index: true,
+	}}
+}

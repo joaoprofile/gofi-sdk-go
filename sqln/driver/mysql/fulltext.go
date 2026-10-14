@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"embed"
 	"errors"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,35 +59,8 @@ var languageStopwords = sync.OnceValue(func() map[string]map[string]bool {
 	return out
 })
 
-// fold removes the accents of Latin letters, as an _ai_ collation compares
-// them, so "nao" is the stopword "não".
-func fold(s string) string {
-	if !strings.ContainsFunc(s, func(r rune) bool { return r >= 0xC0 }) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		if f, ok := foldMap[r]; ok {
-			b.WriteRune(f)
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-var foldMap = func() map[rune]rune {
-	m := map[rune]rune{}
-	for base, accented := range map[rune]string{
-		'a': "àáâãäåā", 'c': "çćč", 'e': "èéêëēė", 'i': "ìíîïī", 'n': "ñń",
-		'o': "òóôõöøō", 'u': "ùúûüū", 'y': "ýÿ", 's': "śš", 'z': "źżž",
-	} {
-		for _, r := range accented {
-			m[r] = base
-		}
-	}
-	return m
-}()
+// fold compares words as an _ai_ collation does, so "nao" is the stopword "não".
+func fold(s string) string { return driver.FoldAccents(s) }
 
 func stopword(idx *driver.TextIndex, w string) bool {
 	return languageStopwords()[idx.Language][fold(w)]
@@ -300,32 +272,14 @@ func highlightAlternatives(idx *driver.TextIndex, q driver.TextQuery) []string {
 func accentClasses(w string) string {
 	var b strings.Builder
 	for _, r := range w {
-		base := r
-		if f, ok := foldMap[r]; ok {
-			base = f
-		}
-		if forms, ok := accentForms[base]; ok {
-			b.WriteString("[" + string(base) + forms + "]")
+		if forms := driver.AccentForms(r); forms != "" {
+			b.WriteString("[" + forms + "]")
 			continue
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
 }
-
-// accentForms lists the accented forms of each base letter of foldMap.
-var accentForms = func() map[rune]string {
-	m := map[rune]string{}
-	for r, base := range foldMap {
-		m[base] += string(r)
-	}
-	for base, forms := range m {
-		rs := []rune(forms)
-		slices.Sort(rs)
-		m[base] = string(rs)
-	}
-	return m
-}()
 
 // groupIndexName names the FULLTEXT index of a weight group.
 func groupIndexName(idx *driver.TextIndex, w driver.TextWeight) string {
@@ -358,7 +312,24 @@ func (MySQLDialect) TextIndexDDL(idx *driver.TextIndex, comment string) ([]drive
 		step.Down = append(step.Down, "ALTER TABLE "+idx.Table+" DROP INDEX "+name)
 	}
 	step.Down = append(step.Down, "ALTER TABLE "+idx.Table+" DROP INDEX "+idx.Name)
-	return []driver.TextStep{step}, nil
+	steps := []driver.TextStep{step}
+	if idx.Suggest {
+		lex := idx.LexiconTable()
+		steps = append(steps, driver.TextStep{
+			Up: []string{"CREATE TABLE " + lex + " (term VARCHAR(64) PRIMARY KEY, word VARCHAR(64) NOT NULL, ndoc INT NOT NULL, " +
+				"FULLTEXT INDEX " + idx.Name + "_lexg (term) WITH PARSER ngram) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci"},
+			Down: []string{"DROP TABLE IF EXISTS " + lex},
+		})
+	}
+	return steps, nil
+}
+
+// TextCandidates uses the lexicon's ngram FULLTEXT index: terms sharing the
+// most n-grams with key come first.
+func (MySQLDialect) TextCandidates(idx *driver.TextIndex, key string, bind func(any) string) string {
+	m := "MATCH(term) AGAINST (" + bind(key) + " IN NATURAL LANGUAGE MODE)"
+	return "SELECT word, term, ndoc FROM " + idx.LexiconTable() + " WHERE " + m +
+		" ORDER BY MATCH(term) AGAINST (" + bind(key) + " IN NATURAL LANGUAGE MODE) DESC, ndoc DESC LIMIT 50"
 }
 
 // schemaTable splits schema.table; the schema defaults to DATABASE().
@@ -396,6 +367,16 @@ WHERE TABLE_SCHEMA = ` + schema + ` AND TABLE_NAME = ? AND INDEX_NAME = ? AND IN
 			Args:  append(append([]any{}, args...), name),
 			Want:  strconv.Itoa(len(cols)),
 			What:  "columns of weight index " + name,
+			Index: true,
+		})
+	}
+	if idx.Suggest {
+		lexSchema, lexArgs := schemaTable(&driver.TextIndex{Table: idx.LexiconTable()})
+		checks = append(checks, driver.TextCheck{
+			Query: "SELECT CAST(COUNT(*) AS CHAR) FROM information_schema.TABLES WHERE TABLE_SCHEMA = " + lexSchema + " AND TABLE_NAME = ?",
+			Args:  lexArgs,
+			Want:  "1",
+			What:  "lexicon " + idx.LexiconTable(),
 			Index: true,
 		})
 	}

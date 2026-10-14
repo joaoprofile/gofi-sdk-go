@@ -1,5 +1,7 @@
 package driver
 
+import "strings"
+
 // TextWeight ranks the matches of one indexed column; A ranks highest. The
 // zero value leaves the column unweighted, which ranks as D.
 type TextWeight byte
@@ -67,6 +69,16 @@ type TextIndex struct {
 	VectorColumn string // PostgreSQL StoredVector: the generated column
 	MinTokenSize int    // MySQL: innodb_ft_min_token_size the index was built with
 	Concurrently bool   // build without blocking writes (PostgreSQL)
+	Suggest      bool   // keep a lexicon of the indexed words for spelling suggestions
+}
+
+// LexiconTable is the table of the indexed words of idx (Suggest), next to
+// the indexed table: term (the folded word, key), word, ndoc (rows holding it).
+func (idx *TextIndex) LexiconTable() string {
+	if i := strings.LastIndexByte(idx.Table, '.'); i >= 0 {
+		return idx.Table[:i+1] + idx.Name + "_lex"
+	}
+	return idx.Name + "_lex"
 }
 
 // WeightGroups returns the columns by effective weight, A first, or nil when
@@ -160,4 +172,7 @@ type FullTextDialect interface {
 	TextIndexLookup(idx *TextIndex) (query string, args []any)
 	// TextChecks lists the requirements of idx beyond the index itself.
 	TextChecks(idx *TextIndex) []TextCheck
+	// TextCandidates selects word, term and ndoc of up to 50 lexicon entries
+	// whose term resembles key, through the lexicon's similarity index.
+	TextCandidates(idx *TextIndex, key string, bind func(any) string) string
 }

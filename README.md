@@ -422,6 +422,8 @@ hits, err := sqln.FindFromCriteria[Product](ctx,
         SelectHighlight(s, "description", "snippet"). // scan into fts.Highlight; render with .HTML()
         Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)),
 ).List()
+// Spec.Suggest + fts.RefreshLexicon (job): "did you mean" when nothing matched.
+fixed, changed, err := sqln.SuggestSearch(ctx, s)
 
 // Retry the whole transaction on serialization failures and deadlocks.
 tx := transaction.New(transaction.Options{Isolation: sql.LevelSerializable, MaxRetries: 3})

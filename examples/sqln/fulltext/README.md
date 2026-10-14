@@ -80,6 +80,20 @@ databases).
 | Search as you type | `.Mode(fts.Prefix)` |
 | Only stopwords or punctuation | `fts.ErrEmptySearch` → empty page |
 
+### Did you mean
+
+With `Suggest: true` the migration adds a lexicon table (`<name>_lex`).
+`fts.RefreshLexicon` fills it from the indexed columns: run it from a job,
+after bulk loads or periodically. When a search finds nothing:
+
+```go
+if page.TotalElements == 0 {
+    if fixed, ok, err := sqln.SuggestSearch(ctx, s); err == nil && ok {
+        // "Showing results for <fixed.Term()>": run fixed instead
+    }
+}
+```
+
 ### Highlighting matches
 
 ```go
@@ -112,6 +126,7 @@ only changes what is rendered.
 | Synonyms (`Spec.Synonyms`) | `( 'notebook' \| 'laptop' )` | `+(notebook laptop)` |
 | Proximity `"cafe coado"~3` | `<1>`…`<3>`, both orders | `"cafe coado"@4` |
 | Highlight (`SelectHighlight`) | `ts_headline`, marks stems | `REGEXP_REPLACE`, marks words and accented forms |
+| Did you mean (`Spec.Suggest`) | lexicon + `pg_trgm` | lexicon + `ngram` FULLTEXT; same choice (pg_trgm similarity, in Go) |
 | Stemming | yes | no: `cafés` does not find `café` |
 | Build without blocking writes | `Concurrently: true` (with `ExpressionIndex`) | not possible: the migration refuses it |
 

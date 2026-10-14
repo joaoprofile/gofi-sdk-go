@@ -96,6 +96,10 @@ type Spec struct {
 	// of its group, on both databases. They apply to queries only, so
 	// changing them needs no migration.
 	Synonyms [][]string
+	// Suggest keeps a lexicon of the indexed words (table <Name>_lex, created
+	// by the migration and filled by RefreshLexicon), from which Suggest
+	// corrects misspelled searches. Name is then limited to 58 characters.
+	Suggest bool
 	// Concurrently builds the index without blocking writes (PostgreSQL
 	// CREATE INDEX CONCURRENTLY, in a migration file of its own). It needs
 	// ExpressionIndex, since StoredVector rewrites the table anyway. MySQL
@@ -165,6 +169,9 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 	if !columnRe.MatchString(vec) || seen[strings.ToLower(vec)] {
 		return nil, fmt.Errorf("%w: %s: invalid vector column %q", ErrInvalidIndex, spec.Name, vec)
 	}
+	if spec.Suggest && len(spec.Name) > 58 {
+		return nil, fmt.Errorf("%w: %s: with Suggest the name is limited to 58 characters", ErrInvalidIndex, spec.Name)
+	}
 	if spec.Concurrently && spec.Strategy != ExpressionIndex {
 		return nil, fmt.Errorf("%w: %s: Concurrently needs ExpressionIndex (StoredVector rewrites the table)", ErrInvalidIndex, spec.Name)
 	}
@@ -189,6 +196,7 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 		VectorColumn: vec,
 		MinTokenSize: minToken,
 		Concurrently: spec.Concurrently,
+		Suggest:      spec.Suggest,
 	}}, nil
 }
 

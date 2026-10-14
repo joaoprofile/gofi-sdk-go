@@ -52,6 +52,7 @@ var itIndex = fts.MustIndex("it_fts_products", fts.Spec{
 	Language: fts.Portuguese,
 	Unaccent: true,
 	Synonyms: [][]string{{"notebook", "laptop"}},
+	Suggest:  true,
 })
 
 func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTable string) {
@@ -175,6 +176,32 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 	assert.Equal(t, map[int64]string{2: "<mark>Notebook</mark> Gamer", 4: "Mouse sem fio"},
 		highlight(itIndex.Search("laptop"), "name"), "synonyms are marked")
 
+	// Did you mean: the same correction on both databases.
+	n, err := fts.RefreshLexicon(ctx, db, d, itIndex)
+	require.NoError(t, err)
+	assert.Positive(t, n)
+	for term, want := range map[string]string{
+		"cafeteria eletrica": "cafeteira eletrica",
+		"notbook -mause":     "notebook -mause", // negated words are not corrected
+		`"mause" gamer`:      `"mouse" gamer`,
+	} {
+		got, changed, err := fts.Suggest(ctx, db, d, itIndex.Search(term))
+		require.NoError(t, err, term)
+		assert.True(t, changed, term)
+		assert.Equal(t, want, got.Term(), term)
+	}
+	for _, term := range []string{"cafe", "elétrica", "xyzzyqw", "de"} {
+		got, changed, err := fts.Suggest(ctx, db, d, itIndex.Search(term))
+		require.NoError(t, err, term)
+		assert.False(t, changed, term)
+		assert.Equal(t, term, got.Term())
+	}
+	fixed, _, err := fts.Suggest(ctx, db, d, itIndex.Search("cafeteria"))
+	require.NoError(t, err)
+	ids, err := search(fixed)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, ids, "the corrected search finds what the typo missed")
+
 	// The plan reads the index.
 	query, args, err := criteria.From("it_fts_products", "p").Select("p.id").
 		Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)).Build(d)
@@ -190,7 +217,7 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 	exec(down...)
 	assert.ErrorIs(t, fts.Check(ctx, db, d, itIndex), fts.ErrIndexMissing)
 	require.NoError(t, fts.Create(ctx, db, d, itIndex))
-	ids, err := search(itIndex.Search("cafe"))
+	ids, err = search(itIndex.Search("cafe"))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{1, 3}, ids)
 }

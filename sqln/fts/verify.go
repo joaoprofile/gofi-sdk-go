@@ -24,8 +24,10 @@ const (
 	Trust
 )
 
-// Querier is the part of *sql.DB, *sql.Tx and *sql.Conn the checks use.
+// Querier is the part of *sql.DB, *sql.Tx and *sql.Conn the checks and
+// suggestions use.
 type Querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

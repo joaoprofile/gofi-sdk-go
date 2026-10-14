@@ -229,3 +229,30 @@ func TestConcurrently(t *testing.T) {
 	assert.ErrorIs(t, err, fts.ErrInvalidIndex)
 	assert.ErrorIs(t, err, mysql.ErrConcurrentIndex)
 }
+
+func TestSuggestLexiconDDL(t *testing.T) {
+	idx := mustNew(t, "shop.products", fts.Spec{Name: "ftx_p", Columns: []fts.Column{{Name: "name"}}, Suggest: true})
+	assert.Equal(t, "shop.ftx_p_lex", idx.Definition().LexiconTable())
+
+	up, down, err := fts.Statements(postgres.PostgresDialect{}, idx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
+		"CREATE TABLE shop.ftx_p_lex (term text PRIMARY KEY, word text NOT NULL, ndoc integer NOT NULL)",
+		"CREATE INDEX ftx_p_lexg ON shop.ftx_p_lex USING GIN (term gin_trgm_ops)",
+	}, up[len(up)-3:])
+	assert.Equal(t, "DROP TABLE IF EXISTS shop.ftx_p_lex", down[0], "dropped first")
+
+	up, _, err = fts.Statements(mysql.MySQLDialect{}, idx)
+	require.NoError(t, err)
+	assert.Equal(t, "CREATE TABLE shop.ftx_p_lex (term VARCHAR(64) PRIMARY KEY, word VARCHAR(64) NOT NULL, ndoc INT NOT NULL, "+
+		"FULLTEXT INDEX ftx_p_lexg (term) WITH PARSER ngram) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci", up[len(up)-1])
+
+	_, err = fts.NewIndex("products", fts.Spec{Name: "f2345678901234567890123456789012345678901234567890123456789", Columns: []fts.Column{{Name: "name"}}, Suggest: true})
+	assert.ErrorIs(t, err, fts.ErrInvalidIndex, "the lexicon names must fit 63 characters")
+
+	_, err = fts.RefreshLexicon(t.Context(), nil, postgres.PostgresDialect{}, products)
+	assert.ErrorIs(t, err, fts.ErrInvalidIndex, "products has no Suggest")
+	_, _, err = fts.Suggest(t.Context(), nil, postgres.PostgresDialect{}, products.Search("x"))
+	assert.ErrorIs(t, err, fts.ErrInvalidIndex)
+}
