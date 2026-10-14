@@ -9,7 +9,7 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/netx/httpx"
 )
 
-//go:embed index.html app.js app.css
+//go:embed index.html app.js app.css favicon.svg
 var files embed.FS
 
 // Handler serves the page and its assets.
@@ -21,6 +21,7 @@ func (Handler) Handlers() []*httpx.Route {
 		httpx.GET("/").To(serve("index.html", "text/html; charset=utf-8")),
 		httpx.GET("/app.js").To(serve("app.js", "text/javascript; charset=utf-8")),
 		httpx.GET("/app.css").To(serve("app.css", "text/css; charset=utf-8")),
+		httpx.GET("/favicon.svg").To(serve("favicon.svg", "image/svg+xml")),
 	)
 }
 

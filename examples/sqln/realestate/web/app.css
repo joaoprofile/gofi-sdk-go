@@ -8,6 +8,7 @@
   --border: #dfe4ea;
   --accent: #0d7a5f;
   --accent-ink: #ffffff;
+  --accent-hover: #0a654f;
   --accent-soft: #e3f4ee;
   --link: #1a4fd6;
   --crumb: #0d7a5f;
@@ -33,6 +34,7 @@
     --border: #2e3642;
     --accent: #3cc49b;
     --accent-ink: #0b1f19;
+    --accent-hover: #52d3ab;
     --accent-soft: #163a30;
     --link: #8fb4ff;
     --crumb: #5fd3ad;
@@ -91,13 +93,21 @@ body.searched .masthead {
   text-decoration: none;
 }
 
-.brand-mark { width: 52px; height: 52px; color: var(--accent); }
-.brand-name { font-size: 40px; font-weight: 700; letter-spacing: -.02em; }
-.brand-dot { color: var(--accent); }
+/* Logo: a house holding a list. */
+.brand-mark { width: 54px; height: 54px; flex: none; }
+.mark-tile { fill: var(--accent); }
+.mark-line { fill: none; stroke: var(--accent-ink); stroke-linecap: round; stroke-linejoin: round; }
+.mark-dot { fill: var(--accent-ink); }
+.brand:hover .mark-tile { fill: var(--accent-hover); }
+
+.brand-name { font-size: 40px; letter-spacing: -.035em; line-height: 1; white-space: nowrap; }
+.brand-lista { font-weight: 400; color: var(--muted); }
+.brand-imovel { font-weight: 800; color: var(--text); }
+.brand-tld { font-weight: 600; color: var(--accent); font-size: .62em; letter-spacing: -.01em; margin-left: 1px; }
 
 body.searched .brand { width: var(--brand-w); flex: none; }
-body.searched .brand-mark { width: 30px; height: 30px; }
-body.searched .brand-name { font-size: 22px; }
+body.searched .brand-mark { width: 32px; height: 32px; }
+body.searched .brand-name { font-size: 21px; }
 
 .search {
   position: relative;

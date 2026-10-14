@@ -74,7 +74,7 @@
     document.body.classList.replace("searched", "home");
     els.intro.hidden = false;
     els.results.hidden = true;
-    document.title = "Busca de Imóveis";
+    document.title = "listaimovel.com";
   }
 
   function syncURL(q, page, push) {
@@ -89,7 +89,7 @@
   // ── Rendering ────────────────────────────────────────────────────────
 
   function render(data, seconds) {
-    document.title = `${data.query} – Busca de Imóveis`;
+    document.title = `${data.query} – listaimovel.com`;
     els.error.hidden = true;
 
     const total = data.total;

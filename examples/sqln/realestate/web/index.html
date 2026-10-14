@@ -3,21 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Busca de Imóveis</title>
+  <title>listaimovel.com</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <meta name="description" content="Encontre imóveis digitando tudo o que você procura em uma frase.">
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
 </head>
 <body class="home">
   <header class="masthead">
-    <a class="brand" href="/" id="brand" aria-label="Início">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M4 15.5 16 5l12 10.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M8 13.5V27h16V13.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>
-        <circle cx="16" cy="19" r="3.4" fill="none" stroke="currentColor" stroke-width="2.4"/>
-        <path d="m18.5 21.5 3 3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    <a class="brand" href="/" id="brand" aria-label="listaimovel.com — início">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <rect class="mark-tile" width="40" height="40" rx="11"/>
+        <path class="mark-line" d="M9.5 19.5 20 10.5l10.5 9" stroke-width="3.2"/>
+        <circle class="mark-dot" cx="14.2" cy="23" r="1.7"/>
+        <path class="mark-line" d="M18.4 23h8.4" stroke-width="2.6"/>
+        <circle class="mark-dot" cx="14.2" cy="29" r="1.7"/>
+        <path class="mark-line" d="M18.4 29h6" stroke-width="2.6"/>
       </svg>
-      <span class="brand-name">Achei<span class="brand-dot">.</span>imóveis</span>
+      <span class="brand-name"><span class="brand-lista">lista</span><span class="brand-imovel">imovel</span><span class="brand-tld">.com</span></span>
     </a>
 
     <form id="search" class="search" role="search" action="/" method="get">
@@ -67,7 +70,7 @@
   </main>
 
   <footer class="foot">
-    Exemplo do <strong>gofi-sdk</strong> · busca full-text do <code>sqln</code> sobre PostgreSQL
+    <strong>listaimovel.com</strong> · exemplo do <strong>gofi-sdk</strong> · busca full-text do <code>sqln</code> sobre PostgreSQL
   </footer>
 </body>
 </html>
