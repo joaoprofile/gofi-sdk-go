@@ -18,8 +18,9 @@ import (
 // it when the service starts. The migration in .migrations is rendered from
 // it (see migration_test.go), and every query below reads it.
 var searchIndex = fts.MustIndex("products", fts.Spec{
-	Name:     "ftx_products_search",
-	Columns:  []fts.Column{{Name: "name", Weight: fts.A}, {Name: "description", Weight: fts.B}},
+	Name: "ftx_products_search",
+	Columns: []fts.Column{{Name: "name", Weight: fts.A},
+		{Name: "description", Weight: fts.B}},
 	Language: fts.Portuguese,
 	Unaccent: true, // "cafe" finds "café"
 })
