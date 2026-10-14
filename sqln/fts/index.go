@@ -10,8 +10,9 @@ import (
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
 )
 
-// Weight ranks the matches of a column; A ranks highest. Only PostgreSQL
-// applies weights; the zero value leaves the column unweighted.
+// Weight ranks the matches of a column; A ranks highest, an unweighted
+// column ranks as D. PostgreSQL labels the vector; MySQL adds one FULLTEXT
+// index per weight group and sums their relevance with the same factors.
 type Weight = driver.TextWeight
 
 const (
@@ -33,8 +34,9 @@ const (
 	ExpressionIndex = driver.ExpressionIndex
 )
 
-// Language selects stemming and stopwords. PostgreSQL applies it; MySQL's
-// built-in parser has none and ignores it.
+// Language selects stopwords and, on PostgreSQL, stemming. MySQL has no
+// stemmer: searches drop the language's stopwords (PostgreSQL's lists), so
+// both ignore the same words, but "cafés" does not find "café" there.
 type Language string
 
 const (
@@ -77,8 +79,9 @@ type Spec struct {
 	Columns []Column
 	// Language defaults to Simple.
 	Language Language
-	// Unaccent folds accents (PostgreSQL, needs the unaccent extension, which
-	// the migration creates). MySQL folds them through an _ai_ collation.
+	// Unaccent folds accents: PostgreSQL through the unaccent extension,
+	// which the migration creates; MySQL through the column collation, which
+	// the check requires to be accent-insensitive (_ai_, or a legacy _ci).
 	Unaccent bool
 	// Strategy defaults to StoredVector.
 	Strategy Strategy
@@ -88,6 +91,11 @@ type Spec struct {
 	// DefaultMinTokenSize when zero. Shorter words are dropped from searches:
 	// MySQL would otherwise require a word it never indexed and match nothing.
 	MinTokenSize int
+	// Concurrently builds the index without blocking writes (PostgreSQL
+	// CREATE INDEX CONCURRENTLY, in a migration file of its own). It needs
+	// ExpressionIndex, since StoredVector rewrites the table anyway. MySQL
+	// cannot: rendering its migration fails.
+	Concurrently bool
 }
 
 // Index is a validated full-text index definition. Declare each one once
@@ -151,6 +159,9 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 	if !columnRe.MatchString(vec) || seen[strings.ToLower(vec)] {
 		return nil, fmt.Errorf("%w: %s: invalid vector column %q", ErrInvalidIndex, spec.Name, vec)
 	}
+	if spec.Concurrently && spec.Strategy != ExpressionIndex {
+		return nil, fmt.Errorf("%w: %s: Concurrently needs ExpressionIndex (StoredVector rewrites the table)", ErrInvalidIndex, spec.Name)
+	}
 	minToken := spec.MinTokenSize
 	if minToken == 0 {
 		minToken = DefaultMinTokenSize
@@ -167,6 +178,7 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 		Strategy:     spec.Strategy,
 		VectorColumn: vec,
 		MinTokenSize: minToken,
+		Concurrently: spec.Concurrently,
 	}}, nil
 }
 
@@ -202,13 +214,24 @@ func (i *Index) Definition() *driver.TextIndex {
 const commentPrefix = "gofi-fts:v1:"
 
 // Comment returns the comment the migration stores on the index for d: a
-// hash of its DDL, so Verify detects an index built from another definition.
+// hash of its DDL, so Check detects an index built from another definition.
+// Concurrently only changes how the index is built, not what it holds, so
+// it is left out of the hash.
 func (i *Index) Comment(d driver.Dialect) (string, error) {
 	fd, err := fullText(d)
 	if err != nil {
 		return "", err
 	}
-	up, _ := fd.TextIndexDDL(&i.def, "")
+	def := i.def
+	def.Concurrently = false
+	steps, err := fd.TextIndexDDL(&def, "")
+	if err != nil {
+		return "", err
+	}
+	var up []string
+	for _, s := range steps {
+		up = append(up, s.Up...)
+	}
 	sum := sha256.Sum256([]byte(strings.Join(up, ";\n")))
 	return commentPrefix + hex.EncodeToString(sum[:8]), nil
 }

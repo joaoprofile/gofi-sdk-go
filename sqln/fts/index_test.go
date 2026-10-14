@@ -92,8 +92,28 @@ func TestStatementsMySQL(t *testing.T) {
 	up, down, err := fts.Statements(mysql.MySQLDialect{}, products)
 	require.NoError(t, err)
 	comment, _ := products.Comment(mysql.MySQLDialect{})
-	assert.Equal(t, []string{"ALTER TABLE products ADD FULLTEXT INDEX ftx_products_search (name, description) COMMENT '" + comment + "'"}, up)
-	assert.Equal(t, []string{"ALTER TABLE products DROP INDEX ftx_products_search"}, down)
+	assert.Equal(t, []string{
+		"ALTER TABLE products ADD FULLTEXT INDEX ftx_products_search (name, description) COMMENT '" + comment + "'",
+		"ALTER TABLE products ADD FULLTEXT INDEX ftx_products_search_wa (name)",
+		"ALTER TABLE products ADD FULLTEXT INDEX ftx_products_search_wb (description)",
+	}, up, "one index per weight group, for the ranking")
+	assert.Equal(t, []string{
+		"ALTER TABLE products DROP INDEX ftx_products_search_wa",
+		"ALTER TABLE products DROP INDEX ftx_products_search_wb",
+		"ALTER TABLE products DROP INDEX ftx_products_search",
+	}, down)
+
+	// Same weight everywhere (or none): no group index.
+	plain := mustNew(t, "products", fts.Spec{Name: "ftx_plain", Columns: []fts.Column{{Name: "name", Weight: fts.B}, {Name: "sku", Weight: fts.B}}})
+	up, _, err = fts.Statements(mysql.MySQLDialect{}, plain)
+	require.NoError(t, err)
+	assert.Len(t, up, 1)
+
+	// Unweighted columns rank as D, below a weighted one.
+	mixed := mustNew(t, "products", fts.Spec{Name: "ftx_mixed", Columns: []fts.Column{{Name: "name", Weight: fts.A}, {Name: "sku"}, {Name: "notes", Weight: fts.D}}})
+	up, _, err = fts.Statements(mysql.MySQLDialect{}, mixed)
+	require.NoError(t, err)
+	assert.Equal(t, "ALTER TABLE products ADD FULLTEXT INDEX ftx_mixed_wd (sku, notes)", up[2])
 
 	_, _, err = fts.Statements(oracle.OracleDialect{}, products)
 	assert.ErrorIs(t, err, fts.ErrUnsupported)
@@ -127,7 +147,9 @@ func TestWriteMigration(t *testing.T) {
 	assert.Contains(t, string(up), "ADD FULLTEXT INDEX ftx_products_search")
 	down, err := os.ReadFile(filepath.Join(dir, "20261014_products_search.down.sql"))
 	require.NoError(t, err)
-	assert.Equal(t, "ALTER TABLE products DROP INDEX ftx_products_search;\n", string(down))
+	assert.Equal(t, "ALTER TABLE products DROP INDEX ftx_products_search_wa;\n\n"+
+		"ALTER TABLE products DROP INDEX ftx_products_search_wb;\n\n"+
+		"ALTER TABLE products DROP INDEX ftx_products_search;\n", string(down))
 
 	assert.Error(t, fts.WriteMigration(dir, 1, "../escape", mysql.MySQLDialect{}, products))
 }
@@ -166,4 +188,44 @@ func slicesFilter(indexes []*fts.Index, name string) []*fts.Index {
 		}
 	}
 	return out
+}
+
+func TestConcurrently(t *testing.T) {
+	_, err := fts.NewIndex("products", fts.Spec{Name: "ftx_c", Columns: []fts.Column{{Name: "name"}}, Concurrently: true})
+	assert.ErrorIs(t, err, fts.ErrInvalidIndex, "StoredVector rewrites the table: Concurrently needs ExpressionIndex")
+
+	spec := fts.Spec{Name: "ftx_c", Columns: []fts.Column{{Name: "name"}}, Language: fts.Portuguese, Unaccent: true, Strategy: fts.ExpressionIndex}
+	blocking := mustNew(t, "products", spec)
+	spec.Concurrently = true
+	idx := mustNew(t, "products", spec)
+
+	pg := postgres.PostgresDialect{}
+	c1, _ := blocking.Comment(pg)
+	c2, _ := idx.Comment(pg)
+	assert.Equal(t, c1, c2, "how the index is built is not part of what it holds")
+
+	files, err := fts.Migrations(pg, idx)
+	require.NoError(t, err)
+	require.Len(t, files, 3, "configuration, then the concurrent index alone, then its comment")
+	assert.Contains(t, files[0].Up, "CREATE TEXT SEARCH CONFIGURATION")
+	assert.Equal(t, "SELECT 1;\n", files[0].Down, "the shared configuration is kept")
+	assert.Equal(t, "CREATE INDEX CONCURRENTLY ftx_c ON products USING GIN ((to_tsvector('gofi_portuguese_unaccent'::regconfig, coalesce(name, ''))));\n", files[1].Up)
+	assert.Equal(t, "DROP INDEX CONCURRENTLY IF EXISTS ftx_c;\n", files[1].Down)
+	assert.Equal(t, "COMMENT ON INDEX ftx_c IS '"+c2+"';\n", files[2].Up)
+
+	_, _, err = fts.Migration(pg, idx)
+	assert.ErrorContains(t, err, "several files")
+
+	dir := t.TempDir()
+	require.NoError(t, fts.WriteMigration(dir, 7, "search", pg, idx))
+	for _, f := range []string{"000007_search", "000008_search_2", "000009_search_3"} {
+		for _, ext := range []string{".up.sql", ".down.sql"} {
+			_, err := os.Stat(filepath.Join(dir, f+ext))
+			assert.NoError(t, err, f+ext)
+		}
+	}
+
+	_, _, err = fts.Statements(mysql.MySQLDialect{}, idx)
+	assert.ErrorIs(t, err, fts.ErrInvalidIndex)
+	assert.ErrorIs(t, err, mysql.ErrConcurrentIndex)
 }

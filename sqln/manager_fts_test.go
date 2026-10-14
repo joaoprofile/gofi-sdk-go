@@ -19,33 +19,19 @@ import (
 var productIndex = fts.MustIndex("products", fts.Spec{Name: "ftx_products", Columns: []fts.Column{{Name: "name"}}})
 
 // ftsDialect is the fake dialect with PostgreSQL's full-text rendering.
-type ftsDialect struct{ fakeDialect }
+type ftsDialect struct {
+	fakeDialect
+	sqln_driver.FullTextDialect
+}
 
-var pgText = postgres.PostgresDialect{}
-
-func (ftsDialect) TextSearchValue(i *sqln_driver.TextIndex, q sqln_driver.TextQuery) (string, bool) {
-	return pgText.TextSearchValue(i, q)
-}
-func (ftsDialect) TextMatch(i *sqln_driver.TextIndex, q, p string) string {
-	return pgText.TextMatch(i, q, p)
-}
-func (ftsDialect) TextRank(i *sqln_driver.TextIndex, q, p string) string {
-	return pgText.TextRank(i, q, p)
-}
-func (ftsDialect) TextIndexDDL(i *sqln_driver.TextIndex, c string) ([]string, []string) {
-	return pgText.TextIndexDDL(i, c)
-}
-func (ftsDialect) TextIndexLookup(i *sqln_driver.TextIndex) (string, []any) {
-	return pgText.TextIndexLookup(i)
-}
-func (ftsDialect) TextChecks(i *sqln_driver.TextIndex) []sqln_driver.TextCheck { return nil }
+var pgFTS = ftsDialect{FullTextDialect: postgres.PostgresDialect{}}
 
 const ftsDriverName = "sqln-fts-testdriver"
 
 type ftsConnDriver struct{ fakeConnDriver }
 
 func (ftsConnDriver) Name() connection.DriverName  { return ftsDriverName }
-func (ftsConnDriver) Dialect() sqln_driver.Dialect { return ftsDialect{} }
+func (ftsConnDriver) Dialect() sqln_driver.Dialect { return pgFTS }
 
 var registerFTS sync.Once
 
@@ -96,7 +82,7 @@ func TestFullText_FilterAndRawQueriesRequireTheIndex(t *testing.T) {
 	conn := ftsConn(t)
 	qp, err := BuildQuery("SELECT * FROM products p WHERE p.active", nil,
 		NewFilters().Add(NewFilter("q", Search, "cafe")),
-		FilterMapping{"q": {Search: productIndex, SearchOn: "p"}}, ftsDialect{})
+		FilterMapping{"q": {Search: productIndex, SearchOn: "p"}}, pgFTS)
 	require.NoError(t, err)
 	assert.Equal(t, []*fts.Index{productIndex}, qp.Indexes)
 	_, err = FindWithFilter[mappedItem](context.Background(), qp).WithConnection(conn).List()

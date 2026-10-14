@@ -126,6 +126,20 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 	assert.EqualValues(t, 2, page.TotalElements)
 	assert.Equal(t, []itProduct{{ID: 3}}, page.Content, "café in the name and twice in the description ranks first")
 
+	// Terms in different weighted columns still rank: "cafe" is in the
+	// description of 1, "eletrica" in its name.
+	type scored struct {
+		ID        int64   `db:"id"`
+		Relevance float64 `db:"relevance"`
+	}
+	both := itIndex.Search("cafe eletrica")
+	hits, err := sqln.FindFromCriteria[scored](ctx,
+		criteria.From("it_fts_products", "p").Select("p.id").SelectRelevance(both, "relevance").Where(criteria.Match(both)),
+	).WithConnection(conn).List()
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	assert.Positive(t, hits[0].Relevance)
+
 	// The plan reads the index.
 	query, args, err := criteria.From("it_fts_products", "p").Select("p.id").
 		Where(criteria.Match(s)).OrderBy(criteria.ByRelevance(s)).Build(d)
@@ -183,7 +197,20 @@ func TestIntegration_PostgresBootMigratesAndChecks(t *testing.T) {
 	if dsn == "" {
 		t.Skip("GOFI_IT_POSTGRES_DSN not set")
 	}
-	bootScenario(t, connection.DriverPostgres, dsn, `CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name text)`)
+	bootScenario(t, connection.DriverPostgres, dsn, `CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name text)`,
+		fts.Spec{Name: "ftx_it_fts_boot", Columns: []fts.Column{{Name: "name"}}, Language: fts.Portuguese})
+}
+
+// CREATE INDEX CONCURRENTLY cannot run inside a transaction block: it must
+// reach golang-migrate in a file of its own.
+func TestIntegration_PostgresConcurrentMigration(t *testing.T) {
+	dsn := os.Getenv("GOFI_IT_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GOFI_IT_POSTGRES_DSN not set")
+	}
+	bootScenario(t, connection.DriverPostgres, dsn, `CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name text)`,
+		fts.Spec{Name: "ftx_it_fts_boot", Columns: []fts.Column{{Name: "name"}}, Language: fts.Portuguese,
+			Unaccent: true, Strategy: fts.ExpressionIndex, Concurrently: true})
 }
 
 func TestIntegration_MySQLBootMigratesAndChecks(t *testing.T) {
@@ -192,17 +219,43 @@ func TestIntegration_MySQLBootMigratesAndChecks(t *testing.T) {
 		t.Skip("GOFI_IT_MYSQL_DSN not set")
 	}
 	bootScenario(t, connection.DriverMySQL, dsn,
-		`CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name varchar(200)) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci`)
+		`CREATE TABLE it_fts_boot (id bigint PRIMARY KEY, name varchar(200), notes text) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+		fts.Spec{Name: "ftx_it_fts_boot", Columns: []fts.Column{{Name: "name", Weight: fts.A}, {Name: "notes", Weight: fts.C}},
+			Language: fts.Portuguese, Unaccent: true})
+}
+
+// Unaccent on MySQL needs an accent-insensitive collation: the index works,
+// but "cafe" would not find "café", so the check refuses it.
+func TestIntegration_MySQLAccentSensitiveCollation(t *testing.T) {
+	dsn := os.Getenv("GOFI_IT_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("GOFI_IT_MYSQL_DSN not set")
+	}
+	ctx := context.Background()
+	conn, err := connection.NewConnection(connection.Config{Driver: connection.DriverMySQL, DSN: dsn})
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	db, d := conn.DB(), conn.Dialect()
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS it_fts_cs")
+	_, err = db.ExecContext(ctx, "CREATE TABLE it_fts_cs (id int PRIMARY KEY, name varchar(100)) DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_as_cs")
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS it_fts_cs") })
+
+	idx, err := fts.NewIndex("it_fts_cs", fts.Spec{Name: "ftx_it_fts_cs", Columns: []fts.Column{{Name: "name"}}, Unaccent: true})
+	require.NoError(t, err)
+	err = fts.Create(ctx, db, d, idx)
+	assert.ErrorIs(t, err, fts.ErrServerConfig)
+	assert.ErrorContains(t, err, "collation of name is utf8mb4_0900_as_cs")
 }
 
 // bootScenario opens a connection the way gofi's database component does:
 // migrations first (a multi-statement file, then the index rendered by
 // WriteMigration), then the startup check of the declared index.
-func bootScenario(t *testing.T, driver connection.DriverName, dsn, createTable string) {
+func bootScenario(t *testing.T, driver connection.DriverName, dsn, createTable string, spec fts.Spec) {
 	ctx := context.Background()
 	d, ok := connection.GetDriver(driver)
 	require.True(t, ok)
-	idx, err := fts.NewIndex("it_fts_boot", fts.Spec{Name: "ftx_it_fts_boot", Columns: []fts.Column{{Name: "name"}}, Language: fts.Portuguese})
+	idx, err := fts.NewIndex("it_fts_boot", spec)
 	require.NoError(t, err)
 
 	reset := func() {

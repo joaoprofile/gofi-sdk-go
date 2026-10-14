@@ -103,13 +103,22 @@ func tsTerm(t driver.TextTerm) string {
 	return s
 }
 
-func (PostgresDialect) TextMatch(idx *driver.TextIndex, qualifier, param string) string {
-	return document(idx, qualifier) + " @@ " + tsquery(idx, param)
+func (d PostgresDialect) TextMatch(idx *driver.TextIndex, qualifier string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	v, ok := d.TextSearchValue(idx, q)
+	if !ok {
+		return "", false
+	}
+	return document(idx, qualifier) + " @@ " + tsquery(idx, bind(v)), true
 }
 
-// TextRank uses cover density, which rewards matched words close together.
-func (PostgresDialect) TextRank(idx *driver.TextIndex, qualifier, param string) string {
-	return "ts_rank_cd(" + document(idx, qualifier) + ", " + tsquery(idx, param) + ")"
+// TextRank uses cover density, which rewards matched words close together;
+// the column weights apply through the setweight labels of the document.
+func (d PostgresDialect) TextRank(idx *driver.TextIndex, qualifier string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	v, ok := d.TextSearchValue(idx, q)
+	if !ok {
+		return "", false
+	}
+	return "ts_rank_cd(" + document(idx, qualifier) + ", " + tsquery(idx, bind(v)) + ")", true
 }
 
 // indexName qualifies the index with the table's schema, where PostgreSQL creates it.
@@ -122,49 +131,70 @@ func indexName(idx *driver.TextIndex) string {
 
 // TextIndexDDL creates, for Unaccent, the extension and a configuration
 // copied from the language whose words pass through unaccent before the
-// stemmer; the configuration is shared and kept on down.
-func (PostgresDialect) TextIndexDDL(idx *driver.TextIndex, comment string) (up, down []string) {
+// stemmer; the configuration is shared and kept on down. A Concurrently
+// index is built in an isolated step: CREATE INDEX CONCURRENTLY cannot run
+// inside a transaction block, so its comment follows in a step of its own.
+func (PostgresDialect) TextIndexDDL(idx *driver.TextIndex, comment string) ([]driver.TextStep, error) {
+	var steps []driver.TextStep
 	if idx.Unaccent {
 		cfg := textConfig(idx)
 		stem := idx.Language + "_stem"
 		if idx.Language == "simple" {
 			stem = "simple"
 		}
-		up = append(up,
+		steps = append(steps, driver.TextStep{Up: []string{
 			"CREATE EXTENSION IF NOT EXISTS unaccent",
-			"DO $$\nBEGIN\n"+
-				"  IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = '"+cfg+"') THEN\n"+
-				"    CREATE TEXT SEARCH CONFIGURATION "+cfg+" (COPY = "+idx.Language+");\n"+
-				"    ALTER TEXT SEARCH CONFIGURATION "+cfg+" ALTER MAPPING FOR hword, hword_part, word WITH unaccent, "+stem+";\n"+
-				"  END IF;\n"+
-				"END $$")
+			"DO $$\nBEGIN\n" +
+				"  IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = '" + cfg + "') THEN\n" +
+				"    CREATE TEXT SEARCH CONFIGURATION " + cfg + " (COPY = " + idx.Language + ");\n" +
+				"    ALTER TEXT SEARCH CONFIGURATION " + cfg + " ALTER MAPPING FOR hword, hword_part, word WITH unaccent, " + stem + ";\n" +
+				"  END IF;\n" +
+				"END $$",
+		}})
 	}
-	if idx.Strategy == driver.StoredVector {
-		up = append(up,
-			"ALTER TABLE "+idx.Table+" ADD COLUMN "+idx.VectorColumn+" tsvector GENERATED ALWAYS AS ("+vectorExpr(idx, "")+") STORED",
-			"CREATE INDEX "+idx.Name+" ON "+idx.Table+" USING GIN ("+idx.VectorColumn+")")
-	} else {
-		up = append(up, "CREATE INDEX "+idx.Name+" ON "+idx.Table+" USING GIN (("+vectorExpr(idx, "")+"))")
-	}
+	var commentStmt []string
 	if comment != "" {
-		up = append(up, "COMMENT ON INDEX "+indexName(idx)+" IS '"+strings.ReplaceAll(comment, "'", "''")+"'")
+		commentStmt = []string{"COMMENT ON INDEX " + indexName(idx) + " IS '" + strings.ReplaceAll(comment, "'", "''") + "'"}
 	}
-
-	down = append(down, "DROP INDEX IF EXISTS "+indexName(idx))
-	if idx.Strategy == driver.StoredVector {
-		down = append(down, "ALTER TABLE "+idx.Table+" DROP COLUMN IF EXISTS "+idx.VectorColumn)
+	switch {
+	case idx.Strategy == driver.StoredVector:
+		steps = append(steps, driver.TextStep{
+			Up: append([]string{
+				"ALTER TABLE " + idx.Table + " ADD COLUMN " + idx.VectorColumn + " tsvector GENERATED ALWAYS AS (" + vectorExpr(idx, "") + ") STORED",
+				"CREATE INDEX " + idx.Name + " ON " + idx.Table + " USING GIN (" + idx.VectorColumn + ")",
+			}, commentStmt...),
+			Down: []string{
+				"DROP INDEX IF EXISTS " + indexName(idx),
+				"ALTER TABLE " + idx.Table + " DROP COLUMN IF EXISTS " + idx.VectorColumn,
+			},
+		})
+	case idx.Concurrently:
+		steps = append(steps, driver.TextStep{
+			Up:       []string{"CREATE INDEX CONCURRENTLY " + idx.Name + " ON " + idx.Table + " USING GIN ((" + vectorExpr(idx, "") + "))"},
+			Down:     []string{"DROP INDEX CONCURRENTLY IF EXISTS " + indexName(idx)},
+			Isolated: true,
+		})
+		if commentStmt != nil {
+			steps = append(steps, driver.TextStep{Up: commentStmt})
+		}
+	default:
+		steps = append(steps, driver.TextStep{
+			Up:   append([]string{"CREATE INDEX " + idx.Name + " ON " + idx.Table + " USING GIN ((" + vectorExpr(idx, "") + "))"}, commentStmt...),
+			Down: []string{"DROP INDEX IF EXISTS " + indexName(idx)},
+		})
 	}
-	return up, down
+	return steps, nil
 }
 
-// TextIndexLookup finds a GIN index of that name on the table, resolved
-// through the search_path like the queries are.
+// TextIndexLookup finds a valid GIN index of that name on the table,
+// resolved through the search_path like the queries are. A CONCURRENTLY
+// build that failed leaves an invalid index, which reads as missing.
 func (PostgresDialect) TextIndexLookup(idx *driver.TextIndex) (string, []any) {
 	return `SELECT COALESCE(obj_description(i.indexrelid, 'pg_class'), '')
 FROM pg_index i
 JOIN pg_class ic ON ic.oid = i.indexrelid
 JOIN pg_am am ON am.oid = ic.relam
-WHERE i.indrelid = to_regclass($1) AND ic.relname = $2 AND am.amname = 'gin'`, []any{idx.Table, idx.Name}
+WHERE i.indrelid = to_regclass($1) AND ic.relname = $2 AND am.amname = 'gin' AND i.indisvalid`, []any{idx.Table, idx.Name}
 }
 
 // TextChecks is empty: the configuration and the extension are dependencies

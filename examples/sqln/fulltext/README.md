@@ -80,9 +80,21 @@ databases).
 | Search as you type | `.Mode(fts.Prefix)` |
 | Only stopwords or punctuation | `fts.ErrEmptySearch` → empty page |
 
-On MySQL the same code renders `MATCH(p.name, p.description) AGAINST (? IN BOOLEAN MODE)`
-and a `FULLTEXT` index: accents fold through an `_ai_` collation, words below
-`innodb_ft_min_token_size` and InnoDB stopwords are dropped from the search,
-and column weights do not apply. `DATABASE_MIGRATION=true` works the same:
-sqln enables `multiStatements` on the migration pool only, never on the
-query pools.
+## PostgreSQL and MySQL
+
+The same `fts.Spec` and the same queries run on both; `DATABASE_DRIVER=mysql`
+only changes what is rendered.
+
+| | PostgreSQL | MySQL |
+|---|---|---|
+| Match | `vector @@ to_tsquery(...)`, GIN index | `MATCH(...) AGAINST (? IN BOOLEAN MODE)`, `FULLTEXT` index |
+| Weights A–D | `setweight` labels, `ts_rank_cd` | one `FULLTEXT` index per weight group, relevance summed with the same factors (1.0, 0.4, 0.2, 0.1) |
+| Accents | `unaccent` text search configuration | accent-insensitive collation, required by the check |
+| Stopwords | the language's list | the same list (PostgreSQL's), plus InnoDB's own |
+| Stemming | yes | no: `cafés` does not find `café` |
+| Build without blocking writes | `Concurrently: true` (with `ExpressionIndex`) | not possible: the migration refuses it |
+
+Words below `innodb_ft_min_token_size` are dropped from MySQL searches, and
+`DATABASE_MIGRATION=true` works the same: sqln enables `multiStatements` on the
+migration pool only, never on the query pools. Relevance values are not
+comparable between the databases; the order they produce is.

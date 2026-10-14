@@ -101,7 +101,11 @@ func check(ctx context.Context, db Querier, d driver.Dialect, fd driver.FullText
 			return fmt.Errorf("fts: checking %s for %s: %w", c.What, idx.def.Name, err)
 		}
 		if v != c.Want {
-			return fmt.Errorf("%w: %s is %s, %s needs %s", ErrServerConfig, c.What, v, idx.def.Name, c.Want)
+			kind := ErrServerConfig
+			if c.Index {
+				kind = ErrIndexMissing
+			}
+			return fmt.Errorf("%w: %s is %s, %s needs %s", kind, c.What, v, idx.def.Name, c.Want)
 		}
 	}
 	return nil

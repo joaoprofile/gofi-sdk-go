@@ -61,9 +61,20 @@ func TestMatch_MySQL(t *testing.T) {
 		Where(criteria.Match(s)).
 		Build(mysql.MySQLDialect{})
 	require.NoError(t, err)
-	assert.Equal(t, "SELECT *, MATCH(products.name, products.description) AGAINST (? IN BOOLEAN MODE) AS score"+
+	assert.Equal(t, "SELECT *, (MATCH(products.name) AGAINST (? IN BOOLEAN MODE) * 1.0"+
+		" + MATCH(products.description) AGAINST (? IN BOOLEAN MODE) * 0.4) AS score"+
 		" FROM products WHERE MATCH(products.name, products.description) AGAINST (? IN BOOLEAN MODE)", sql)
-	assert.Equal(t, []any{`+cafe -"de vidro"`, `+cafe -"de vidro"`}, params)
+	// The weight groups rank the positive terms without operators: a term
+	// required by the search may sit in another group.
+	assert.Equal(t, []any{"cafe", "cafe", `+cafe -"de vidro"`}, params)
+}
+
+func TestMatch_MySQLUnweightedRank(t *testing.T) {
+	s := categorySearch.Search("livros infantis")
+	sql, params, err := criteria.From("categories", "c").SelectRelevance(s, "score").Where(criteria.Match(s)).Build(mysql.MySQLDialect{})
+	require.NoError(t, err)
+	assert.Equal(t, "SELECT *, MATCH(c.title) AGAINST (? IN BOOLEAN MODE) AS score FROM categories c WHERE MATCH(c.title) AGAINST (? IN BOOLEAN MODE)", sql)
+	assert.Equal(t, []any{"+livros +infantis", "+livros +infantis"}, params)
 }
 
 func TestMatch_InsideGroupAndBuildBase(t *testing.T) {

@@ -92,7 +92,7 @@ func (b *builder) textExpr(s *fts.Search, rank bool) string {
 		b.fail(fmt.Errorf("%w: %w: %T", ErrInvalidValue, fts.ErrUnsupported, b.dialect))
 		return ""
 	}
-	value, err := s.Value(b.dialect)
+	q, err := s.Query()
 	if err != nil {
 		b.fail(fmt.Errorf("%w: %w", ErrInvalidValue, err))
 		return ""
@@ -101,12 +101,16 @@ func (b *builder) textExpr(s *fts.Search, rank bool) string {
 	if !ok {
 		return ""
 	}
-	def := s.Index().Definition()
-	param := b.nextParam(value)
+	render := fd.TextMatch
 	if rank {
-		return fd.TextRank(def, qualifier, param)
+		render = fd.TextRank
 	}
-	return fd.TextMatch(def, qualifier, param)
+	expr, ok := render(s.Index().Definition(), qualifier, q, b.nextParam)
+	if !ok {
+		b.fail(fmt.Errorf("%w: %w", ErrInvalidValue, fts.ErrEmptySearch))
+		return ""
+	}
+	return expr
 }
 
 // qualifier is the alias set by Search.On, else the alias of the index's

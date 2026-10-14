@@ -1,8 +1,12 @@
 package mysql
 
 import (
+	"bufio"
+	"embed"
+	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
@@ -10,10 +14,14 @@ import (
 
 var _ driver.FullTextDialect = MySQLDialect{}
 
-// stopwords is InnoDB's default stopword list
-// (information_schema.INNODB_FT_DEFAULT_STOPWORD). A required stopword is
-// never indexed, so "+cafe +the" would match nothing: searches drop them.
-var stopwords = map[string]bool{
+// ErrConcurrentIndex reports a full-text index asked to build without
+// blocking writes, which InnoDB cannot do.
+var ErrConcurrentIndex = errors.New("mysql: a FULLTEXT index cannot be added without blocking writes; schedule the migration or drop Concurrently")
+
+// innodbStopwords is InnoDB's default stopword list
+// (information_schema.INNODB_FT_DEFAULT_STOPWORD). The index never holds
+// them, so a required one would match nothing: searches drop them.
+var innodbStopwords = map[string]bool{
 	"a": true, "about": true, "an": true, "are": true, "as": true, "at": true, "be": true,
 	"by": true, "com": true, "de": true, "en": true, "for": true, "from": true, "how": true,
 	"i": true, "in": true, "is": true, "it": true, "la": true, "of": true, "on": true,
@@ -22,10 +30,73 @@ var stopwords = map[string]bool{
 	"und": true, "www": true,
 }
 
-// indexable reports whether InnoDB indexes w: shorter words and stopwords are
-// skipped, and requiring one would match nothing.
+// stopwordFiles are PostgreSQL's lists (see stopwords/README.md): searches
+// drop the stopwords of the index language, as PostgreSQL does, on top of
+// InnoDB's list. A per-index InnoDB stopword table is not used: a table
+// rebuild (OPTIMIZE, ALTER … FORCE) silently reverts it to the default list.
+//
+//go:embed stopwords/*.stop
+var stopwordFiles embed.FS
+
+var languageStopwords = sync.OnceValue(func() map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	entries, _ := stopwordFiles.ReadDir("stopwords")
+	for _, e := range entries {
+		f, err := stopwordFiles.Open("stopwords/" + e.Name())
+		if err != nil {
+			continue
+		}
+		words := map[string]bool{}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			if w := strings.TrimSpace(sc.Text()); w != "" {
+				words[fold(strings.ToLower(w))] = true
+			}
+		}
+		_ = f.Close()
+		out[strings.TrimSuffix(e.Name(), ".stop")] = words
+	}
+	return out
+})
+
+// fold removes the accents of Latin letters, as an _ai_ collation compares
+// them, so "nao" is the stopword "não".
+func fold(s string) string {
+	if !strings.ContainsFunc(s, func(r rune) bool { return r >= 0xC0 }) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if f, ok := foldMap[r]; ok {
+			b.WriteRune(f)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+var foldMap = func() map[rune]rune {
+	m := map[rune]rune{}
+	for base, accented := range map[rune]string{
+		'a': "àáâãäåā", 'c': "çćč", 'e': "èéêëēė", 'i': "ìíîïī", 'n': "ñń",
+		'o': "òóôõöøō", 'u': "ùúûüū", 'y': "ýÿ", 's': "śš", 'z': "źżž",
+	} {
+		for _, r := range accented {
+			m[r] = base
+		}
+	}
+	return m
+}()
+
+func stopword(idx *driver.TextIndex, w string) bool {
+	return languageStopwords()[idx.Language][fold(w)]
+}
+
+// indexable reports whether InnoDB indexes w and the language keeps it:
+// shorter words and stopwords would be required words never matched.
 func indexable(idx *driver.TextIndex, w string) bool {
-	return utf8.RuneCountInString(w) >= idx.MinTokenSize && !stopwords[w]
+	return utf8.RuneCountInString(w) >= idx.MinTokenSize && !innodbStopwords[w] && !stopword(idx, w)
 }
 
 // TextSearchValue renders q in boolean mode syntax: +word, -word, word*,
@@ -41,7 +112,11 @@ func (MySQLDialect) TextSearchValue(idx *driver.TextIndex, q driver.TextQuery) (
 			if !ok {
 				continue
 			}
-			terms = append(terms, s)
+			op := "+"
+			if t.Negate {
+				op = "-"
+			}
+			terms = append(terms, op+s)
 			positive = positive || !t.Negate
 		}
 		if positive {
@@ -57,18 +132,15 @@ func (MySQLDialect) TextSearchValue(idx *driver.TextIndex, q driver.TextQuery) (
 	return "(" + strings.Join(groups, ") (") + ")", true
 }
 
-// booleanTerm drops a word InnoDB does not index. A phrase keeps its
-// stopwords (InnoDB matches them in phrases) unless it has no other word;
-// a prefix is kept, since it matches longer indexed words.
+// booleanTerm renders t without its operator, or false when InnoDB would not
+// match it. A phrase keeps its stopwords (InnoDB matches them in phrases)
+// unless it has no other word; a prefix is kept, since it matches longer
+// indexed words, unless it is a stopword of the language (PostgreSQL drops it).
 func booleanTerm(idx *driver.TextIndex, t driver.TextTerm) (string, bool) {
-	op := "+"
-	if t.Negate {
-		op = "-"
-	}
 	if len(t.Words) > 1 {
 		for _, w := range t.Words {
 			if indexable(idx, w) {
-				return op + `"` + strings.Join(t.Words, " ") + `"`, true
+				return `"` + strings.Join(t.Words, " ") + `"`, true
 			}
 		}
 		return "", false
@@ -78,20 +150,32 @@ func booleanTerm(idx *driver.TextIndex, t driver.TextTerm) (string, bool) {
 	}
 	w := t.Words[0]
 	if t.Prefix {
-		return op + w + "*", true
+		return w + "*", !stopword(idx, w)
 	}
-	if !indexable(idx, w) {
-		return "", false
-	}
-	return op + w, true
+	return w, indexable(idx, w)
 }
 
-// match lists exactly the index columns: MySQL only searches a column list
-// some FULLTEXT index covers in the same set.
-func match(idx *driver.TextIndex, qualifier, param string) string {
+// rankValue lists the positive terms of q without operators: a weight group
+// holds only some columns, and a required term found in another group would
+// zero its relevance.
+func rankValue(idx *driver.TextIndex, q driver.TextQuery) string {
+	var terms []string
+	for _, g := range q {
+		for _, t := range g {
+			if s, ok := booleanTerm(idx, t); ok && !t.Negate {
+				terms = append(terms, s)
+			}
+		}
+	}
+	return strings.Join(terms, " ")
+}
+
+// match lists exactly the columns of a FULLTEXT index: MySQL only searches
+// a column list some index covers in the same set.
+func match(cols []driver.TextColumn, qualifier, param string) string {
 	var b strings.Builder
 	b.WriteString("MATCH(")
-	for i, c := range idx.Columns {
+	for i, c := range cols {
 		if i > 0 {
 			b.WriteString(", ")
 		}
@@ -104,45 +188,117 @@ func match(idx *driver.TextIndex, qualifier, param string) string {
 	return b.String()
 }
 
-func (MySQLDialect) TextMatch(idx *driver.TextIndex, qualifier, param string) string {
-	return match(idx, qualifier, param)
-}
-
-// TextRank is the relevance MATCH returns; column weights do not apply.
-func (MySQLDialect) TextRank(idx *driver.TextIndex, qualifier, param string) string {
-	return match(idx, qualifier, param)
-}
-
-func (MySQLDialect) TextIndexDDL(idx *driver.TextIndex, comment string) (up, down []string) {
-	cols := make([]string, len(idx.Columns))
-	for i, c := range idx.Columns {
-		cols[i] = c.Name
+func (d MySQLDialect) TextMatch(idx *driver.TextIndex, qualifier string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	v, ok := d.TextSearchValue(idx, q)
+	if !ok {
+		return "", false
 	}
-	stmt := "ALTER TABLE " + idx.Table + " ADD FULLTEXT INDEX " + idx.Name + " (" + strings.Join(cols, ", ") + ")"
+	return match(idx.Columns, qualifier, bind(v)), true
+}
+
+// TextRank is the relevance MATCH returns. With column weights, it sums the
+// relevance in each weight group's own index times the weight's factor.
+func (d MySQLDialect) TextRank(idx *driver.TextIndex, qualifier string, q driver.TextQuery, bind func(any) string) (string, bool) {
+	v, ok := d.TextSearchValue(idx, q)
+	if !ok {
+		return "", false
+	}
+	groups := idx.WeightGroups()
+	if groups == nil {
+		return match(idx.Columns, qualifier, bind(v)), true
+	}
+	rv := rankValue(idx, q)
+	parts := make([]string, len(groups))
+	for i, cols := range groups {
+		parts[i] = match(cols, qualifier, bind(rv)) + " * " + cols[0].Weight.Factor()
+	}
+	return "(" + strings.Join(parts, " + ") + ")", true
+}
+
+// groupIndexName names the FULLTEXT index of a weight group.
+func groupIndexName(idx *driver.TextIndex, w driver.TextWeight) string {
+	return idx.Name + "_w" + strings.ToLower(string(w.Effective()))
+}
+
+func columnList(cols []driver.TextColumn) string {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = c.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// TextIndexDDL adds the FULLTEXT index searched by TextMatch and, with
+// column weights, one index per weight group for TextRank. InnoDB builds one
+// FULLTEXT index per statement.
+func (MySQLDialect) TextIndexDDL(idx *driver.TextIndex, comment string) ([]driver.TextStep, error) {
+	if idx.Concurrently {
+		return nil, ErrConcurrentIndex
+	}
+	main := "ALTER TABLE " + idx.Table + " ADD FULLTEXT INDEX " + idx.Name + " (" + columnList(idx.Columns) + ")"
 	if comment != "" {
-		stmt += " COMMENT '" + strings.ReplaceAll(comment, "'", "''") + "'"
+		main += " COMMENT '" + strings.ReplaceAll(comment, "'", "''") + "'"
 	}
-	return []string{stmt}, []string{"ALTER TABLE " + idx.Table + " DROP INDEX " + idx.Name}
+	step := driver.TextStep{Up: []string{main}}
+	for _, cols := range idx.WeightGroups() {
+		name := groupIndexName(idx, cols[0].Weight)
+		step.Up = append(step.Up, "ALTER TABLE "+idx.Table+" ADD FULLTEXT INDEX "+name+" ("+columnList(cols)+")")
+		step.Down = append(step.Down, "ALTER TABLE "+idx.Table+" DROP INDEX "+name)
+	}
+	step.Down = append(step.Down, "ALTER TABLE "+idx.Table+" DROP INDEX "+idx.Name)
+	return []driver.TextStep{step}, nil
+}
+
+// schemaTable splits schema.table; the schema defaults to DATABASE().
+func schemaTable(idx *driver.TextIndex) (schemaExpr string, args []any) {
+	if schema, table, ok := strings.Cut(idx.Table, "."); ok {
+		return "?", []any{schema, table}
+	}
+	return "DATABASE()", []any{idx.Table}
 }
 
 // TextIndexLookup finds a FULLTEXT index of that name on the table, in the
 // table's schema or the current database.
 func (MySQLDialect) TextIndexLookup(idx *driver.TextIndex) (string, []any) {
-	schema, table, ok := strings.Cut(idx.Table, ".")
-	const q = `SELECT INDEX_COMMENT FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = %s AND TABLE_NAME = ? AND INDEX_NAME = ? AND INDEX_TYPE = 'FULLTEXT'
-LIMIT 1`
-	if !ok {
-		return strings.Replace(q, "%s", "DATABASE()", 1), []any{schema, idx.Name}
-	}
-	return strings.Replace(q, "%s", "?", 1), []any{schema, table, idx.Name}
+	schema, args := schemaTable(idx)
+	return `SELECT INDEX_COMMENT FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = ` + schema + ` AND TABLE_NAME = ? AND INDEX_NAME = ? AND INDEX_TYPE = 'FULLTEXT'
+LIMIT 1`, append(args, idx.Name)
 }
 
-// TextChecks requires the token size searches assume when dropping words.
+// TextChecks requires the token size searches assume when dropping words,
+// the weight group indexes TextRank reads and, with Unaccent, accent-
+// insensitive collations: MySQL folds accents only through the collation.
 func (MySQLDialect) TextChecks(idx *driver.TextIndex) []driver.TextCheck {
-	return []driver.TextCheck{{
+	checks := []driver.TextCheck{{
 		Query: "SELECT CAST(@@innodb_ft_min_token_size AS CHAR)",
 		Want:  strconv.Itoa(idx.MinTokenSize),
 		What:  "innodb_ft_min_token_size",
 	}}
+	schema, args := schemaTable(idx)
+	for _, cols := range idx.WeightGroups() {
+		name := groupIndexName(idx, cols[0].Weight)
+		checks = append(checks, driver.TextCheck{
+			Query: `SELECT CAST(COUNT(*) AS CHAR) FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = ` + schema + ` AND TABLE_NAME = ? AND INDEX_NAME = ? AND INDEX_TYPE = 'FULLTEXT'`,
+			Args: append(append([]any{}, args...), name),
+			Want:  strconv.Itoa(len(cols)),
+			What:  "columns of weight index " + name,
+			Index: true,
+		})
+	}
+	if idx.Unaccent {
+		for _, c := range idx.Columns {
+			checks = append(checks, driver.TextCheck{
+				Query: `SELECT CASE WHEN COLLATION_NAME LIKE '%\_as\_%' OR COLLATION_NAME LIKE '%\_bin' OR COLLATION_NAME LIKE '%\_cs'
+	THEN COLLATION_NAME ELSE 'accent-insensitive' END
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = ` + schema + ` AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+				Args: append(append([]any{}, args...), c.Name),
+				Want: "accent-insensitive",
+				What: "collation of " + c.Name,
+			})
+		}
+	}
+	return checks
 }

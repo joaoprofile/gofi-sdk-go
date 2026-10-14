@@ -1,7 +1,7 @@
 package driver
 
 // TextWeight ranks the matches of one indexed column; A ranks highest. The
-// zero value leaves the column unweighted. Only PostgreSQL applies weights.
+// zero value leaves the column unweighted, which ranks as D.
 type TextWeight byte
 
 const (
@@ -10,6 +10,30 @@ const (
 	WeightC TextWeight = 'C'
 	WeightD TextWeight = 'D'
 )
+
+// Effective is w, or D for an unweighted column.
+func (w TextWeight) Effective() TextWeight {
+	if w == 0 {
+		return WeightD
+	}
+	return w
+}
+
+// Factor is the share of a match in a column of weight w, the defaults of
+// PostgreSQL's ts_rank ({0.1, 0.2, 0.4, 1.0} for D, C, B, A); dialects that
+// emulate weights use the same factors so both rank alike.
+func (w TextWeight) Factor() string {
+	switch w.Effective() {
+	case WeightA:
+		return "1.0"
+	case WeightB:
+		return "0.4"
+	case WeightC:
+		return "0.2"
+	default:
+		return "0.1"
+	}
+}
 
 // TextColumn is one column of a full-text index.
 type TextColumn struct {
@@ -38,10 +62,31 @@ type TextIndex struct {
 	Table        string // table or schema.table
 	Columns      []TextColumn
 	Language     string // text search language, e.g. "portuguese"
-	Unaccent     bool   // PostgreSQL: fold accents through the unaccent extension
+	Unaccent     bool   // fold accents (PostgreSQL unaccent, MySQL _ai_ collation)
 	Strategy     TextStrategy
 	VectorColumn string // PostgreSQL StoredVector: the generated column
 	MinTokenSize int    // MySQL: innodb_ft_min_token_size the index was built with
+	Concurrently bool   // build without blocking writes (PostgreSQL)
+}
+
+// WeightGroups returns the columns by effective weight, A first, or nil when
+// every column has the same weight.
+func (idx *TextIndex) WeightGroups() [][]TextColumn {
+	byWeight := map[TextWeight][]TextColumn{}
+	for _, c := range idx.Columns {
+		w := c.Weight.Effective()
+		byWeight[w] = append(byWeight[w], c)
+	}
+	if len(byWeight) < 2 {
+		return nil
+	}
+	var groups [][]TextColumn
+	for _, w := range []TextWeight{WeightA, WeightB, WeightC, WeightD} {
+		if cols := byWeight[w]; len(cols) > 0 {
+			groups = append(groups, cols)
+		}
+	}
+	return groups
 }
 
 // TextTerm is one word or, with several words, one phrase of a search.
@@ -66,24 +111,36 @@ type TextCheck struct {
 	Args  []any
 	Want  string
 	What  string // describes the requirement in errors
+	// Index marks a part of the index itself (e.g. a MySQL weight group
+	// index): a mismatch means the index is missing, not misconfigured.
+	Index bool
+}
+
+// TextStep is a group of DDL statements that run together. An Isolated
+// step holds statements that cannot run inside a transaction block, such as
+// CREATE INDEX CONCURRENTLY: each gets a migration file of its own.
+type TextStep struct {
+	Up, Down []string
+	Isolated bool
 }
 
 // FullTextDialect is implemented by dialects with full-text search.
 type FullTextDialect interface {
-	// TextSearchValue renders q as the search string bound to the match and
-	// rank expressions; ok is false when nothing searchable remains.
+	// TextSearchValue renders q as the search string of TextMatch; ok is
+	// false when nothing searchable remains.
 	TextSearchValue(idx *TextIndex, q TextQuery) (value string, ok bool)
-	// TextMatch renders the condition matching param against idx, whose
-	// columns are qualified by qualifier (an alias or table, may be empty).
-	TextMatch(idx *TextIndex, qualifier, param string) string
-	// TextRank renders the relevance of param in idx; higher is better.
-	TextRank(idx *TextIndex, qualifier, param string) string
-	// TextIndexDDL renders the statements creating and dropping idx; comment
-	// is stored on the index, where TextIndexLookup reads it back.
-	TextIndexDDL(idx *TextIndex, comment string) (up, down []string)
+	// TextMatch renders the condition matching q against idx, whose columns
+	// are qualified by qualifier (an alias or table, may be empty). bind
+	// binds a search string and returns its placeholder.
+	TextMatch(idx *TextIndex, qualifier string, q TextQuery, bind func(any) string) (expr string, ok bool)
+	// TextRank renders the relevance of q in idx; higher is better.
+	TextRank(idx *TextIndex, qualifier string, q TextQuery, bind func(any) string) (expr string, ok bool)
+	// TextIndexDDL renders the steps creating and dropping idx; comment is
+	// stored on the index, where TextIndexLookup reads it back.
+	TextIndexDDL(idx *TextIndex, comment string) ([]TextStep, error)
 	// TextIndexLookup selects the comment of idx, or no row when idx does
-	// not exist with the expected kind.
+	// not exist, usable, with the expected kind.
 	TextIndexLookup(idx *TextIndex) (query string, args []any)
-	// TextChecks lists the server requirements of idx beyond the index itself.
+	// TextChecks lists the requirements of idx beyond the index itself.
 	TextChecks(idx *TextIndex) []TextCheck
 }

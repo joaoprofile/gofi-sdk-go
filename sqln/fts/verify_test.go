@@ -1,6 +1,7 @@
 package fts_test
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -26,6 +27,8 @@ type catalog struct {
 	mu        sync.Mutex
 	comment   string
 	tokenSize string
+	// MySQL: the checked collation and the column count of a weight index.
+	collation, groupColumns string
 	execs     []string
 	lookups   atomic.Int32
 }
@@ -56,8 +59,8 @@ func (catalogDriver) Open(dsn string) (driver.Conn, error) {
 type catalogConn struct{ c *catalog }
 
 func (cc catalogConn) Prepare(q string) (driver.Stmt, error) { return catalogStmt{cc.c, q}, nil }
-func (catalogConn) Close() error                              { return nil }
-func (catalogConn) Begin() (driver.Tx, error)                 { return nil, driver.ErrSkip }
+func (catalogConn) Close() error                             { return nil }
+func (catalogConn) Begin() (driver.Tx, error)                { return nil, driver.ErrSkip }
 
 type catalogStmt struct {
 	c *catalog
@@ -80,8 +83,13 @@ func (s catalogStmt) Exec([]driver.Value) (driver.Result, error) {
 func (s catalogStmt) Query([]driver.Value) (driver.Rows, error) {
 	s.c.mu.Lock()
 	defer s.c.mu.Unlock()
-	if strings.Contains(s.q, "innodb_ft_min_token_size") {
+	switch {
+	case strings.Contains(s.q, "innodb_ft_min_token_size"):
 		return &catalogRows{values: []string{s.c.tokenSize}}, nil
+	case strings.Contains(s.q, "COLLATION_NAME"):
+		return &catalogRows{values: []string{cmp.Or(s.c.collation, "accent-insensitive")}}, nil
+	case strings.Contains(s.q, "COUNT(*)"):
+		return &catalogRows{values: []string{cmp.Or(s.c.groupColumns, "1")}}, nil
 	}
 	s.c.lookups.Add(1)
 	if s.c.comment == "" {
@@ -130,6 +138,14 @@ func TestCheckMySQLTokenSize(t *testing.T) {
 	err := fts.Check(ctx, openCatalog(t, &catalog{comment: want, tokenSize: "2"}), my, products)
 	assert.ErrorIs(t, err, fts.ErrServerConfig)
 	assert.ErrorContains(t, err, "innodb_ft_min_token_size is 2")
+
+	err = fts.Check(ctx, openCatalog(t, &catalog{comment: want, tokenSize: "3", collation: "utf8mb4_0900_as_cs"}), my, products)
+	assert.ErrorIs(t, err, fts.ErrServerConfig, "Unaccent needs an accent-insensitive collation")
+	assert.ErrorContains(t, err, "collation of name is utf8mb4_0900_as_cs")
+
+	err = fts.Check(ctx, openCatalog(t, &catalog{comment: want, tokenSize: "3", groupColumns: "0"}), my, products)
+	assert.ErrorIs(t, err, fts.ErrIndexMissing, "a missing weight index is a missing index")
+	assert.ErrorContains(t, err, "ftx_products_search_wa")
 }
 
 func TestCreate(t *testing.T) {
@@ -138,8 +154,8 @@ func TestCreate(t *testing.T) {
 
 	c := &catalog{tokenSize: "3"}
 	require.NoError(t, fts.Create(ctx, openCatalog(t, c), my, products))
-	require.Len(t, c.execs, 1)
-	assert.Contains(t, c.execs[0], "ADD FULLTEXT INDEX ftx_products_search")
+	require.Len(t, c.execs, 3, "the index and its two weight group indexes")
+	assert.Contains(t, c.execs[0], "ADD FULLTEXT INDEX ftx_products_search (")
 
 	// Existing and current: nothing to run.
 	c.execs = nil

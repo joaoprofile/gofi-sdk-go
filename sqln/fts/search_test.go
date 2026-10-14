@@ -110,3 +110,32 @@ func FuzzSearchValue(f *testing.F) {
 		}
 	})
 }
+
+func TestMySQLDropsLanguageStopwords(t *testing.T) {
+	my := mysql.MySQLDialect{}
+	english := mustNew(t, "products", fts.Spec{Name: "ftx_en", Columns: []fts.Column{{Name: "name"}}, Language: fts.English})
+	simple := mustNew(t, "products", fts.Spec{Name: "ftx_simple", Columns: []fts.Column{{Name: "name"}}})
+
+	// "para" and "não" are Portuguese stopwords, as PostgreSQL's list has them;
+	// "nao" is folded like an _ai_ collation compares it.
+	v, err := products.Search("cafe para viagem nao sem açúcar").Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, "+cafe +viagem +açúcar", v)
+
+	v, err = english.Search("cafe para viagem nao sem açúcar").Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, "+cafe +para +viagem +nao +sem +açúcar", v, "other languages keep them")
+
+	v, err = english.Search("coffee with milk without sugar").Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, "+coffee +milk +without +sugar", v, "exactly PostgreSQL's list: with is a stopword, without is not")
+
+	v, err = simple.Search("para what about").Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, "+para", v, "simple drops only InnoDB's own list")
+
+	// A stopword prefix is dropped as PostgreSQL drops it; others are kept.
+	v, err = products.Search("para cafe").Mode(fts.Prefix).Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, "+cafe*", v)
+}
