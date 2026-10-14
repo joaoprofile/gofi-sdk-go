@@ -46,6 +46,7 @@ SIZE_CHECK := \
 	examples/sqln/filter-api:$(GRPC_OTEL) \
 	examples/sqln/search:$(GRPC_OTEL),github.com/go-chi/chi \
 	examples/sqln/fulltext:$(GRPC_OTEL),github.com/go-chi/chi,github.com/go-sql-driver/mysql \
+	examples/sqln/realestate:$(GRPC_OTEL),github.com/go-sql-driver/mysql \
 	examples/msq/kafka/producer:$(GRPC_OTEL),github.com/jackc/pgx,github.com/golang-migrate/migrate,github.com/redis/go-redis,github.com/go-chi/chi
 
 size-check:

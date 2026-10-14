@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Busca de Imóveis</title>
+  <meta name="description" content="Encontre imóveis digitando tudo o que você procura em uma frase.">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body class="home">
+  <header class="masthead">
+    <a class="brand" href="/" id="brand" aria-label="Início">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M4 15.5 16 5l12 10.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M8 13.5V27h16V13.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>
+        <circle cx="16" cy="19" r="3.4" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="m18.5 21.5 3 3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-name">Achei<span class="brand-dot">.</span>imóveis</span>
+    </a>
+
+    <form id="search" class="search" role="search" action="/" method="get">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <input id="q" name="q" type="search" maxlength="200" autocomplete="off" spellcheck="false"
+             placeholder="casa nova 2 quartos, suíte, garagem 2 carros, Batel, Curitiba"
+             aria-label="Descreva o imóvel que você procura">
+      <button type="button" id="clear" class="clear" aria-label="Limpar busca" hidden>×</button>
+      <button type="submit" class="go">Buscar</button>
+    </form>
+  </header>
+
+  <section class="intro" id="intro">
+    <p class="tagline">Escreva do seu jeito: tipo, bairro, cidade, quartos, vagas, preço, características…</p>
+    <p class="examples-title">Experimente</p>
+    <ul class="examples" id="examples">
+      <li><button type="button" data-q="Casa nova de 2 qurtos, suite, garagem 2 carros, curitiba, pr, bairro batel">Casa nova de 2 qurtos, suite, garagem 2 carros, curitiba, pr, bairro batel</button></li>
+      <li><button type="button" data-q="apartamento para alugar em são paulo até 8 mil com academia">apartamento para alugar em são paulo até 8 mil com academia</button></li>
+      <li><button type="button" data-q="cobertura com vista para o mar">cobertura com vista para o mar</button></li>
+      <li><button type="button" data-q="kitnet mobiliada florianópolis">kitnet mobiliada florianópolis</button></li>
+      <li><button type="button" data-q="chácara com piscina e lareira">chácara com piscina e lareira</button></li>
+      <li><button type="button" data-q="leilão rio de janeiro">leilão rio de janeiro</button></li>
+      <li><button type="button" data-q="imóvel novo na planta direto com imobiliária">imóvel novo na planta direto com imobiliária</button></li>
+      <li><button type="button" data-q="perto do parque barigui">perto do parque barigui</button></li>
+    </ul>
+  </section>
+
+  <main id="results" class="results" hidden aria-live="polite">
+    <div class="progress" id="progress" hidden></div>
+    <p class="stats" id="stats"></p>
+    <p class="corrected" id="corrected" hidden></p>
+    <div class="understood" id="understood" hidden>
+      <span class="understood-label">Entendi:</span>
+      <ul id="chips"></ul>
+    </div>
+    <p class="notice" id="approximate" hidden></p>
+    <ol class="list" id="list"></ol>
+    <div class="empty" id="empty" hidden>
+      <h2>Nenhum imóvel encontrado</h2>
+      <p>Tente menos detalhes, outro bairro ou cidade, ou confira a grafia.</p>
+    </div>
+    <p class="error" id="error" hidden>Não foi possível buscar agora. Tente novamente.</p>
+    <nav class="pager" id="pager" aria-label="Páginas de resultados" hidden></nav>
+  </main>
+
+  <footer class="foot">
+    Exemplo do <strong>gofi-sdk</strong> · busca full-text do <code>sqln</code> sobre PostgreSQL
+  </footer>
+</body>
+</html>

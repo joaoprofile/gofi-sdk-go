@@ -20,6 +20,7 @@ updates:
       - "/examples/obs"
       - "/examples/sqln/filter-api"
       - "/examples/sqln/fulltext"
+      - "/examples/sqln/realestate"
       - "/examples/sqln/search"
       - "/gofi"
       - "/iam"

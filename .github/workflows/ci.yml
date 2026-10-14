@@ -44,6 +44,7 @@ jobs:
           - examples/netx/api
           - examples/sqln/search
           - examples/sqln/fulltext
+          - examples/sqln/realestate
           - examples/sqln/filter-api
           - examples/msq/rabbitmq/producer
           - examples/msq/rabbitmq/consumer

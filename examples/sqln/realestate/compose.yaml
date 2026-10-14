@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: imoveis
+      POSTGRES_USER: imoveis
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5435:5432"
