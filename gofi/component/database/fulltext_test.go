@@ -80,3 +80,11 @@ func TestWithFullTextReplacesRegistered(t *testing.T) {
 func TestNewUsesFtsRegistered(t *testing.T) {
 	assert.NotNil(t, New().registered)
 }
+
+func TestQueryLogRefusedInCloud(t *testing.T) {
+	for env, ok := range map[string]bool{"": true, "dev": true, "test": true, "stage": false, "prod": false} {
+		err := checkQueryLog(&environment.Environment{DatabaseLogQueries: true, AppEnvironment: env})
+		assert.Equal(t, ok, err == nil, env)
+	}
+	assert.NoError(t, checkQueryLog(&environment.Environment{AppEnvironment: "prod"}), "off is always fine")
+}

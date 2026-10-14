@@ -26,10 +26,11 @@ func TxFrom(ctx context.Context) (*sql.Tx, bool) {
 	return tx, ok && tx != nil
 }
 
-// QuerierFrom returns db's transaction carried by ctx, or db.
+// QuerierFrom returns db's transaction carried by ctx, or db; it logs its
+// statements while LogQueries is on.
 func QuerierFrom(ctx context.Context, db *sql.DB) Querier {
 	if tx, ok := TxFor(ctx, db); ok {
-		return tx
+		return Logged(tx)
 	}
-	return db
+	return Logged(db)
 }

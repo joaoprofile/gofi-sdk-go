@@ -30,5 +30,5 @@ func SuggestSearch(ctx context.Context, s FullTextSearch) (FullTextSearch, bool,
 	}
 	ctx, cancel := conn.WithQueryTimeout(ctx)
 	defer cancel()
-	return fts.Suggest(ctx, conn.ReadDB(), conn.Dialect(), s)
+	return fts.Suggest(ctx, connection.Logged(conn.ReadDB()), conn.Dialect(), s)
 }

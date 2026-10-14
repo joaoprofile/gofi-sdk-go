@@ -528,6 +528,7 @@ func TestEnvironmentSecurityFieldsBootstrap(t *testing.T) {
 	t.Setenv("DATABASE_STATEMENT_TIMEOUT", "5s")
 	t.Setenv("DATABASE_QUERY_TIMEOUT", "10s")
 	t.Setenv("DATABASE_FULLTEXT_POLICY", "trust")
+	t.Setenv("DATABASE_LOG_QUERIES", "true")
 	t.Setenv("MESSAGING_TLS_CA_FILE", "/mca.pem")
 	t.Setenv("MESSAGING_TLS_CERT_FILE", "/mc.pem")
 	t.Setenv("MESSAGING_TLS_KEY_FILE", "/mk.pem")
@@ -547,7 +548,7 @@ func TestEnvironmentSecurityFieldsBootstrap(t *testing.T) {
 	}
 	if env.DatabaseSSLRootCert != "/ca.pem" || env.DatabaseSSLCert != "/c.pem" || env.DatabaseSSLKey != "/k.pem" ||
 		env.DatabaseStatementTimeout != 5*time.Second || env.DatabaseQueryTimeout != 10*time.Second ||
-		env.DatabaseFullTextPolicy != "trust" {
+		env.DatabaseFullTextPolicy != "trust" || !env.DatabaseLogQueries {
 		t.Errorf("database vars not loaded")
 	}
 	if env.MessagingTLSCAFile != "/mca.pem" || env.MessagingTLSCertFile != "/mc.pem" || env.MessagingTLSKeyFile != "/mk.pem" ||

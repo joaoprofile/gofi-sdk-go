@@ -126,7 +126,7 @@ func (c *Connection) RequireTextIndexes(ctx context.Context, indexes ...*fts.Ind
 	defer cancel()
 	var errs []error
 	for _, idx := range pending {
-		if err := fts.Apply(ctx, c.textPolicy, c.db, c.Dialect(), idx); err != nil {
+		if err := fts.Apply(ctx, c.textPolicy, Logged(c.db), c.Dialect(), idx); err != nil {
 			errs = append(errs, err)
 			continue
 		}

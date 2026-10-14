@@ -99,6 +99,21 @@ listing. `go generate ./...` rewrites the index migration; the test fails when
 it is out of date. The service does not start without the index
 (`database.New()` checks it).
 
+## The SQL it runs
+
+`DATABASE_LOG_QUERIES=true` (on in `.env`; `false` turns it off) logs every
+statement sqln sends to the database — the lexicon lookup of the typo fix, the
+`COUNT` and the page of each attempt — with its arguments and duration:
+
+```
+level=INFO msg=sql op=query sql="SELECT COUNT(*) FROM (SELECT p.id, … WHERE p.active IS TRUE
+  AND p.property_type = ANY($4) AND p.ftx_properties_search_tsv @@ to_tsquery(…, $5)) tb"
+  duration=1.2ms args="$1=\"'parque' & 'barigui'\" … $4=[apartamento] …"
+```
+
+It is refused in `stage` and `prod`: the arguments may hold personal data. In
+code, `connection.LogQueries(logger)` turns it on and `connection.LogQueries(nil)` off.
+
 ## API
 
 | Route | |

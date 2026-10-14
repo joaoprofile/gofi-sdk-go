@@ -110,6 +110,9 @@ type Environment struct {
 	// DatabaseFullTextPolicy is verify (default), ensure or trust: what the
 	// connection does before searching a full-text index (sqln/fts.Policy).
 	DatabaseFullTextPolicy string `env:"DATABASE_FULLTEXT_POLICY"`
+	// DatabaseLogQueries logs every SQL statement sqln runs, with its
+	// arguments (development only: refused in stage and prod).
+	DatabaseLogQueries bool `env:"DATABASE_LOG_QUERIES"`
 	// Read replica; user, password and database are shared with the primary.
 	DatabaseReadHost string `env:"DATABASE_READ_HOST"`
 	DatabaseReadPort int    `env:"DATABASE_READ_PORT"`

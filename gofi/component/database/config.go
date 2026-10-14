@@ -48,6 +48,9 @@ func ConfigFromEnv(env *environment.Environment) (connection.Config, error) {
 	if err != nil {
 		return connection.Config{}, err
 	}
+	if err := checkQueryLog(env); err != nil {
+		return connection.Config{}, err
+	}
 	cfg := connection.Config{
 		Driver: name, DSN: dsn, Pool: pool, QueryTimeout: env.DatabaseQueryTimeout,
 		FullText: connection.FullTextConfig{Policy: policy},
@@ -76,6 +79,15 @@ func fullTextPolicy(env *environment.Environment) (fts.Policy, error) {
 	default:
 		return 0, fmt.Errorf("DATABASE_FULLTEXT_POLICY=%q, want verify, ensure or trust", p)
 	}
+}
+
+// checkQueryLog refuses DATABASE_LOG_QUERIES in stage and prod: the logged
+// arguments may hold personal data.
+func checkQueryLog(env *environment.Environment) error {
+	if t := env.GetEnvironmentType(); env.DatabaseLogQueries && (t == environment.ENV_PROD || t == environment.ENV_STAGE) {
+		return fmt.Errorf("DATABASE_LOG_QUERIES is not allowed in %s: it logs query arguments", t)
+	}
+	return nil
 }
 
 // driverName is DATABASE_DRIVER, postgres when empty.
