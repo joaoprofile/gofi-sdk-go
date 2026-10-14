@@ -14,7 +14,9 @@ type Mode uint8
 
 const (
 	// Websearch (default): words must all match; "quoted text" is a phrase,
-	// -word or -"phrase" excludes, and OR separates alternatives.
+	// "two words"~N finds them at most N positions apart in either order
+	// (N up to MaxNear), -word or -"phrase" excludes, and OR separates
+	// alternatives. Words of a Spec.Synonyms group match each other.
 	Websearch Mode = iota
 	// AllTerms: every word must match; no operators.
 	AllTerms
@@ -30,6 +32,7 @@ const (
 const (
 	MaxTermLength = 256 // characters
 	MaxTerms      = 16  // words and phrases
+	MaxNear       = 10  // positions of a "two words"~N proximity search
 )
 
 // Search is a search string on an Index. Build it with Index.Search and pass
@@ -87,6 +90,7 @@ func (s Search) Query() (driver.TextQuery, error) {
 	if len(q) == 0 {
 		return nil, ErrEmptySearch
 	}
+	s.index.expand(q)
 	return q, nil
 }
 
@@ -133,8 +137,9 @@ func parse(term string, mode Mode) driver.TextQuery {
 	}
 }
 
-// parseWebsearch reads words, "phrases", -exclusions and OR. A '-' only
-// negates at the start of a token: in "e-mail" it separates two words.
+// parseWebsearch reads words, "phrases", "two words"~N, -exclusions and OR.
+// A '-' only negates at the start of a token: in "e-mail" it separates two
+// words.
 func parseWebsearch(term string) driver.TextQuery {
 	var q driver.TextQuery
 	var g driver.TextGroup
@@ -153,10 +158,24 @@ func parseWebsearch(term string) driver.TextQuery {
 			for end < len(rs) && rs[end] != '"' {
 				end++
 			}
-			if words := splitWords(string(rs[i+1 : end])); len(words) > 0 {
-				g = append(g, driver.TextTerm{Words: words, Negate: negate})
-			}
+			words := splitWords(string(rs[i+1 : end]))
 			i = end + 1
+			near := 0
+			if i < len(rs) && rs[i] == '~' {
+				j := i + 1
+				for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' && j-i <= 3 {
+					near = near*10 + int(rs[j]-'0')
+					j++
+				}
+				i = j
+			}
+			if len(words) > 0 {
+				t := driver.TextTerm{Words: words, Negate: negate}
+				if len(words) == 2 && near > 0 {
+					t.Near = min(near, MaxNear)
+				}
+				g = append(g, t)
+			}
 		case isWordRune(r):
 			end := i
 			for end < len(rs) && isWordRune(rs[end]) {

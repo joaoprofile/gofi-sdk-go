@@ -76,7 +76,7 @@ databases).
 | Index definition (weights, language, accent folding), checked at startup | `fts.MustIndex`, `fts.Spec` |
 | Migration from the definition | `fts.WriteMigration` / `fts.Migration` |
 | Match, rank, page by relevance | `criteria.Match`, `Query.SelectRelevance`, `pagination.NewSort("relevance", DESC)` |
-| `cafe eletrica`, `"phrase"`, `-word`, `a OR b` | `fts.Websearch` (default) |
+| `cafe eletrica`, `"phrase"`, `"two words"~3`, `-word`, `a OR b` | `fts.Websearch` (default) |
 | Search as you type | `.Mode(fts.Prefix)` |
 | Only stopwords or punctuation | `fts.ErrEmptySearch` → empty page |
 
@@ -91,6 +91,8 @@ only changes what is rendered.
 | Weights A–D | `setweight` labels, `ts_rank_cd` | one `FULLTEXT` index per weight group, relevance summed with the same factors (1.0, 0.4, 0.2, 0.1) |
 | Accents | `unaccent` text search configuration | accent-insensitive collation, required by the check |
 | Stopwords | the language's list | the same list (PostgreSQL's), plus InnoDB's own |
+| Synonyms (`Spec.Synonyms`) | `( 'notebook' \| 'laptop' )` | `+(notebook laptop)` |
+| Proximity `"cafe coado"~3` | `<1>`…`<3>`, both orders | `"cafe coado"@4` |
 | Stemming | yes | no: `cafés` does not find `café` |
 | Build without blocking writes | `Concurrently: true` (with `ExpressionIndex`) | not possible: the migration refuses it |
 

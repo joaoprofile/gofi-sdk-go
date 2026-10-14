@@ -51,6 +51,7 @@ var itIndex = fts.MustIndex("it_fts_products", fts.Spec{
 	Columns:  []fts.Column{{Name: "name", Weight: fts.A}, {Name: "description", Weight: fts.B}},
 	Language: fts.Portuguese,
 	Unaccent: true,
+	Synonyms: [][]string{{"notebook", "laptop"}},
 })
 
 func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTable string) {
@@ -109,6 +110,12 @@ func fullTextScenario(t *testing.T, driver connection.DriverName, dsn, createTab
 		{"prefix", itIndex.Search("note gam").Mode(fts.Prefix), []int64{2}},
 		{"any term", itIndex.Search("torrado dedicada").Mode(fts.AnyTerm), []int64{2, 3}},
 		{"short words dropped on MySQL, ignored on PostgreSQL", itIndex.Search("de notebook e"), []int64{2, 4}},
+		{"synonym", itIndex.Search("laptop"), []int64{2, 4}},
+		{"excluded synonym", itIndex.Search("gamer -laptop"), []int64{}},
+		// máquina(1) de(2) café(3) expresso(4): 3 positions apart, in any order.
+		{"near enough", itIndex.Search(`"expresso maquina"~3`), []int64{1}},
+		{"too far", itIndex.Search(`"maquina expresso"~2`), []int64{}},
+		{"adjacent", itIndex.Search(`"cafe expresso"~1`), []int64{1}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ids, err := search(tt.s)

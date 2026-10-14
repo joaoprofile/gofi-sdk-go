@@ -135,24 +135,50 @@ func (MySQLDialect) TextSearchValue(idx *driver.TextIndex, q driver.TextQuery) (
 // booleanTerm renders t without its operator, or false when InnoDB would not
 // match it. A phrase keeps its stopwords (InnoDB matches them in phrases)
 // unless it has no other word; a prefix is kept, since it matches longer
-// indexed words, unless it is a stopword of the language (PostgreSQL drops it).
+// indexed words, unless it is a stopword of the language (PostgreSQL drops
+// it). Synonyms become (word alternative "alternative phrase"): inside the
+// parentheses, without operators, any one matches.
 func booleanTerm(idx *driver.TextIndex, t driver.TextTerm) (string, bool) {
-	if len(t.Words) > 1 {
-		for _, w := range t.Words {
-			if indexable(idx, w) {
-				return `"` + strings.Join(t.Words, " ") + `"`, true
-			}
+	switch {
+	case len(t.Words) == 0:
+		return "", false
+	case t.Near > 0 && len(t.Words) == 2:
+		// @N spans N words: N-1 positions apart, in either order.
+		if indexable(idx, t.Words[0]) && indexable(idx, t.Words[1]) {
+			return `"` + t.Words[0] + " " + t.Words[1] + `"@` + strconv.Itoa(t.Near+1), true
 		}
+		return phrase(idx, t.Words)
+	case len(t.Words) > 1:
+		return phrase(idx, t.Words)
+	case t.Prefix:
+		return t.Words[0] + "*", !stopword(idx, t.Words[0])
+	}
+	var alts []string
+	for _, words := range append([][]string{t.Words}, t.Synonyms...) {
+		if s, ok := phrase(idx, words); ok {
+			alts = append(alts, s)
+		}
+	}
+	switch len(alts) {
+	case 0:
 		return "", false
+	case 1:
+		return alts[0], true
 	}
-	if len(t.Words) == 0 {
-		return "", false
+	return "(" + strings.Join(alts, " ") + ")", true
+}
+
+// phrase renders a word, or words as a "phrase", when InnoDB indexes one of them.
+func phrase(idx *driver.TextIndex, words []string) (string, bool) {
+	if len(words) == 1 {
+		return words[0], indexable(idx, words[0])
 	}
-	w := t.Words[0]
-	if t.Prefix {
-		return w + "*", !stopword(idx, w)
+	for _, w := range words {
+		if indexable(idx, w) {
+			return `"` + strings.Join(words, " ") + `"`, true
+		}
 	}
-	return w, indexable(idx, w)
+	return "", false
 }
 
 // rankValue lists the positive terms of q without operators: a weight group
@@ -281,7 +307,7 @@ func (MySQLDialect) TextChecks(idx *driver.TextIndex) []driver.TextCheck {
 		checks = append(checks, driver.TextCheck{
 			Query: `SELECT CAST(COUNT(*) AS CHAR) FROM information_schema.STATISTICS
 WHERE TABLE_SCHEMA = ` + schema + ` AND TABLE_NAME = ? AND INDEX_NAME = ? AND INDEX_TYPE = 'FULLTEXT'`,
-			Args: append(append([]any{}, args...), name),
+			Args:  append(append([]any{}, args...), name),
 			Want:  strconv.Itoa(len(cols)),
 			What:  "columns of weight index " + name,
 			Index: true,

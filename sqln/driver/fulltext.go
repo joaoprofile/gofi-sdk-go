@@ -94,6 +94,12 @@ type TextTerm struct {
 	Words  []string // lower-case letters and digits only
 	Prefix bool     // matches words starting with the (single) word
 	Negate bool     // excludes rows containing the term
+	// Near, for two words, matches them at most Near positions apart, in
+	// either order, instead of as an exact phrase.
+	Near int
+	// Synonyms are alternatives to the (single) word, each a word or a
+	// phrase: the term matches when any of them does.
+	Synonyms [][]string
 }
 
 // TextGroup is a conjunction: every positive term must match, no negated term may.

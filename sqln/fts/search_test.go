@@ -85,21 +85,37 @@ func TestSearchEmptyAndBounds(t *testing.T) {
 // Each rendered value must be the grammar the dialect renderer writes, with
 // words of letters, digits and marks only: no input reaches the syntax.
 var (
-	word   = `[\pL\pN\pM]+`
-	pgTerm = `!?(?:'` + word + `'(?::\*)?|\(?'` + word + `'(?: <-> '` + word + `')+\)?)`
+	word   = `'[\pL\pN\pM]+'`
+	phr    = word + `(?: <-> ` + word + `)*`
+	alt    = `(?:` + phr + `|` + word + ` <\d+> ` + word + `)`
+	pgTerm = `!?(?:` + word + `(?::\*)?|\(?` + phr + `\)?|\( ` + alt + `(?: \| ` + alt + `)+ \))`
 	pgAnd  = pgTerm + `(?: & ` + pgTerm + `)*`
 	pgRe   = regexp.MustCompile(`^(?:` + pgAnd + `|\( ` + pgAnd + ` \)(?: \| \( ` + pgAnd + ` \))+)$`)
-	myTerm = `[+-](?:` + word + `\*?|"` + word + `(?: ` + word + `)+")`
+	myWord = `[\pL\pN\pM]+`
+	myItem = `(?:` + myWord + `\*?|"` + myWord + `(?: ` + myWord + `)+"(?:@\d+)?)`
+	myTerm = `[+-](?:` + myItem + `|\(` + myItem + `(?: ` + myItem + `)+\))`
 	myAnd  = myTerm + `(?: ` + myTerm + `)*`
 	myRe   = regexp.MustCompile(`^(?:` + myAnd + `|\(` + myAnd + `\)(?: \(` + myAnd + `\))+)$`)
 )
+
+var synonymSearch = fts.MustIndex("products", fts.Spec{
+	Name:     "ftx_products_synonyms",
+	Columns:  []fts.Column{{Name: "name"}},
+	Language: fts.Portuguese,
+	Synonyms: [][]string{{"notebook", "laptop", "computador portatil"}, {"celular", "smartphone"}, {"tv", "televisao", "televisor"}},
+})
 
 func FuzzSearchValue(f *testing.F) {
 	for _, s := range []string{"cafe", `"a b" -c OR d`, `x' & !y:* | (z)`, "-\"\" OR OR -", "ação ñ 中文", "a\x00b", "''''"} {
 		f.Add(s, uint8(0))
 	}
+	f.Add(`"cafe coado"~3 notebook -celular`, uint8(0))
 	f.Fuzz(func(t *testing.T, term string, mode uint8) {
-		s := products.Search(term).Mode(fts.Mode(mode % 5))
+		idx := products
+		if mode&8 != 0 {
+			idx = synonymSearch
+		}
+		s := idx.Search(term).Mode(fts.Mode(mode % 5))
 		if v, err := s.Value(postgres.PostgresDialect{}); err == nil && !pgRe.MatchString(v) {
 			t.Fatalf("postgres value %q for %q escapes the grammar", v, term)
 		} else if err != nil && !errors.Is(err, fts.ErrEmptySearch) && !errors.Is(err, fts.ErrInvalidSearch) {
@@ -138,4 +154,54 @@ func TestMySQLDropsLanguageStopwords(t *testing.T) {
 	v, err = products.Search("para cafe").Mode(fts.Prefix).Value(my)
 	require.NoError(t, err)
 	assert.Equal(t, "+cafe*", v)
+}
+
+func TestSynonyms(t *testing.T) {
+	pg, my := postgres.PostgresDialect{}, mysql.MySQLDialect{}
+	tests := []struct{ term, pg, my string }{
+		{"notebook gamer", "( 'notebook' | 'laptop' | 'computador' <-> 'portatil' ) & 'gamer'",
+			`+(notebook laptop "computador portatil") +gamer`},
+		{"laptop", "( 'laptop' | 'notebook' | 'computador' <-> 'portatil' )", `+(laptop notebook "computador portatil")`},
+		{"capa -celular", "'capa' & !( 'celular' | 'smartphone' )", "+capa -(celular smartphone)"},
+		// MySQL drops the short alternative but keeps the others.
+		{"tv", "( 'tv' | 'televisao' | 'televisor' )", "+(televisao televisor)"},
+		// A phrase member does not trigger; a phrase is searched as written.
+		{`"computador portatil"`, "'computador' <-> 'portatil'", `+"computador portatil"`},
+	}
+	for _, tt := range tests {
+		v, err := synonymSearch.Search(tt.term).Value(pg)
+		require.NoError(t, err, tt.term)
+		assert.Equal(t, tt.pg, v, tt.term)
+		v, err = synonymSearch.Search(tt.term).Value(my)
+		require.NoError(t, err, tt.term)
+		assert.Equal(t, tt.my, v, tt.term)
+	}
+	// Prefixes are not expanded: "note" is half a word.
+	v, _ := synonymSearch.Search("notebook").Mode(fts.Prefix).Value(pg)
+	assert.Equal(t, "'notebook':*", v)
+
+	for _, bad := range [][][]string{{{"solo"}}, {{"a", "!!!"}}} {
+		_, err := fts.NewIndex("products", fts.Spec{Name: "ftx_s", Columns: []fts.Column{{Name: "name"}}, Synonyms: bad})
+		assert.ErrorIs(t, err, fts.ErrInvalidIndex, "%q", bad)
+	}
+}
+
+func TestNear(t *testing.T) {
+	pg, my := postgres.PostgresDialect{}, mysql.MySQLDialect{}
+	v, err := products.Search(`"cafe coado"~2 moido`).Value(pg)
+	require.NoError(t, err)
+	assert.Equal(t, "( 'cafe' <1> 'coado' | 'coado' <1> 'cafe' | 'cafe' <2> 'coado' | 'coado' <2> 'cafe' ) & 'moido'", v)
+	v, err = products.Search(`"cafe coado"~2 moido`).Value(my)
+	require.NoError(t, err)
+	assert.Equal(t, `+"cafe coado"@3 +moido`, v, "@N spans N words: N-1 positions apart")
+
+	v, _ = products.Search(`-"cafe coado"~1` + " xicara").Value(pg)
+	assert.Equal(t, "!( 'cafe' <1> 'coado' | 'coado' <1> 'cafe' ) & 'xicara'", v)
+
+	v, _ = products.Search(`"cafe coado"~99`).Value(my)
+	assert.Equal(t, `+"cafe coado"@11`, v, "capped at MaxNear")
+	v, _ = products.Search(`"cafe bem coado"~3`).Value(pg)
+	assert.Equal(t, "'cafe' <-> 'bem' <-> 'coado'", v, "proximity takes two words; more is a phrase")
+	v, _ = products.Search(`"cafe de"~3`).Value(my)
+	assert.Equal(t, `+"cafe de"`, v, "MySQL cannot measure distance to an unindexed word")
 }

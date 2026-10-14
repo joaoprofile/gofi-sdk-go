@@ -29,8 +29,8 @@ type catalog struct {
 	tokenSize string
 	// MySQL: the checked collation and the column count of a weight index.
 	collation, groupColumns string
-	execs     []string
-	lookups   atomic.Int32
+	execs                   []string
+	lookups                 atomic.Int32
 }
 
 var (

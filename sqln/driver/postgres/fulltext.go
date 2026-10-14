@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/joaoprofile/gofi-sdk-go/sqln/driver"
@@ -85,22 +86,48 @@ func (PostgresDialect) TextSearchValue(_ *driver.TextIndex, q driver.TextQuery) 
 	return "( " + strings.Join(groups, " ) | ( ") + " )", true
 }
 
+// tsTerm renders a word, a word:* prefix, a 'phrase' <-> 'of words', a
+// proximity (either order, 1 to Near positions apart) or the alternatives of
+// a word and its synonyms.
 func tsTerm(t driver.TextTerm) string {
-	words := make([]string, len(t.Words))
-	for i, w := range t.Words {
-		words[i] = "'" + w + "'"
-	}
-	s := strings.Join(words, " <-> ")
-	if t.Prefix && len(words) == 1 {
-		s += ":*"
-	}
-	if t.Negate {
-		if len(words) > 1 {
-			return "!(" + s + ")"
+	var s string
+	grouped := false
+	switch {
+	case t.Near > 0 && len(t.Words) == 2:
+		a, b := "'"+t.Words[0]+"'", "'"+t.Words[1]+"'"
+		alts := make([]string, 0, 2*t.Near)
+		for k := 1; k <= t.Near; k++ {
+			d := " <" + strconv.Itoa(k) + "> "
+			alts = append(alts, a+d+b, b+d+a)
 		}
-		return "!" + s
+		s, grouped = "( "+strings.Join(alts, " | ")+" )", true
+	case len(t.Synonyms) > 0 && len(t.Words) == 1:
+		alts := []string{tsPhrase(t.Words)}
+		for _, syn := range t.Synonyms {
+			alts = append(alts, tsPhrase(syn))
+		}
+		s, grouped = "( "+strings.Join(alts, " | ")+" )", true
+	default:
+		s = tsPhrase(t.Words)
+		if t.Prefix && len(t.Words) == 1 {
+			s += ":*"
+		}
 	}
-	return s
+	if !t.Negate {
+		return s
+	}
+	if len(t.Words) > 1 && !grouped {
+		return "!(" + s + ")"
+	}
+	return "!" + s
+}
+
+func tsPhrase(words []string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = "'" + w + "'"
+	}
+	return strings.Join(quoted, " <-> ")
 }
 
 func (d PostgresDialect) TextMatch(idx *driver.TextIndex, qualifier string, q driver.TextQuery, bind func(any) string) (string, bool) {

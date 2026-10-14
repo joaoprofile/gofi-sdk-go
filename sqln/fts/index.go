@@ -91,6 +91,11 @@ type Spec struct {
 	// DefaultMinTokenSize when zero. Shorter words are dropped from searches:
 	// MySQL would otherwise require a word it never indexed and match nothing.
 	MinTokenSize int
+	// Synonyms lists groups of equivalent words or phrases, e.g.
+	// {"notebook", "laptop"}: a searched word also matches the other members
+	// of its group, on both databases. They apply to queries only, so
+	// changing them needs no migration.
+	Synonyms [][]string
 	// Concurrently builds the index without blocking writes (PostgreSQL
 	// CREATE INDEX CONCURRENTLY, in a migration file of its own). It needs
 	// ExpressionIndex, since StoredVector rewrites the table anyway. MySQL
@@ -103,7 +108,8 @@ type Spec struct {
 // searches it, for instance), and share it between the migration and the
 // queries.
 type Index struct {
-	def driver.TextIndex
+	def      driver.TextIndex
+	synonyms map[string][][]string // word → alternatives, from Spec.Synonyms
 }
 
 var (
@@ -169,7 +175,11 @@ func NewIndex(table string, spec Spec) (*Index, error) {
 	if minToken < 1 || minToken > 16 {
 		return nil, fmt.Errorf("%w: %s: MinTokenSize %d outside 1-16", ErrInvalidIndex, spec.Name, minToken)
 	}
-	return &Index{def: driver.TextIndex{
+	synonyms, err := synonymMap(spec.Name, spec.Synonyms)
+	if err != nil {
+		return nil, err
+	}
+	return &Index{synonyms: synonyms, def: driver.TextIndex{
 		Name:         spec.Name,
 		Table:        table,
 		Columns:      cols,

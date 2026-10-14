@@ -23,7 +23,7 @@ func register(idx *Index) error {
 	defer registry.Unlock()
 	key := idx.def.Table + "\x00" + idx.def.Name
 	if have, ok := registry.byKey[key]; ok {
-		if !reflect.DeepEqual(have.def, idx.def) {
+		if !reflect.DeepEqual(have, idx) {
 			return fmt.Errorf("%w: %s on %s is declared twice with different definitions", ErrInvalidIndex, idx.def.Name, idx.def.Table)
 		}
 		return nil
