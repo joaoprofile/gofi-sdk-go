@@ -8,7 +8,7 @@ require (
 	github.com/joaoprofile/gofi-sdk-go/gofi v0.2.5
 	github.com/joaoprofile/gofi-sdk-go/netx v0.2.5
 	github.com/joaoprofile/gofi-sdk-go/netx/grpcx v0.2.5
-	google.golang.org/grpc v1.83.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
 
@@ -36,7 +36,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
