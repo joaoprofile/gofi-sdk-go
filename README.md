@@ -114,7 +114,6 @@ Each example is a standalone Go module with its own `README.md`: `cd` into it, s
 | [examples/grpc](examples/grpc) | gRPC with `grpcx`: a `Person` entity and photos through unary, server, client and bidirectional streams; a gRPC-only server, an HTTP + gRPC server in one gofi service, and a client |
 | [examples/sqln/search](examples/sqln/search) | Job (no HTTP) on PostgreSQL: migrations, `criteria` filters, join, pagination, single row and streaming |
 | [examples/sqln/fulltext](examples/sqln/fulltext) | Job on PostgreSQL: a full-text index, its generated migration (checked by a test), ranked and paged searches with phrases, exclusions, alternatives and prefixes |
-| [examples/sqln/realestate](examples/sqln/realestate) | Property catalog searched from one text box: a sentence becomes filters, a typo fix and a full-text search, with relaxation and highlights; HTML page included |
 | [examples/sqln/filter-api](examples/sqln/filter-api) | HTTP API with client-driven dynamic filters, allowlisted by `sqln.FilterMapping` |
 | [examples/msq/rabbitmq](examples/msq/rabbitmq) | Producer and consumer as separate services on RabbitMQ, with retries and dead-letter queue |
 | [examples/msq/kafka](examples/msq/kafka) | Same pair on Kafka: message keys, consumer groups |
