@@ -31,6 +31,7 @@ var clientAuthModes = map[string]tls.ClientAuthType{
 //   - HTTP_TRUSTED_PROXIES                  → TrustedProxies (CSV of CIDRs, or "private")
 //   - HTTP_MAX_CONCURRENT                   → StressControl.DefaultMaxConcurrent
 //   - HTTP_ALLOWED_ORIGINS (ALLOWED_ORIGINS as fallback) → AllowedOrigins (CSV)
+//   - HTTP_ALLOWED_HEADERS                  → AllowedHeaders (CSV, added to the defaults)
 //
 // HTTP_RATE_LIMIT_FAIL_CLOSED needs a rate limiter backend, which only code
 // can provide, so it is applied by New to the WSConfig.RateLimiter given there.
@@ -44,6 +45,7 @@ func ConfigFromEnv(env *environment.Environment) (httpx.WSConfig, error) {
 		TLS:            tlsCfg,
 		TrustedProxies: splitCSV(env.HTTPTrustedProxies),
 		AllowedOrigins: splitCSV(cmp.Or(env.HTTPAllowedOrigins, env.AllowedOrigins)),
+		AllowedHeaders: splitCSV(env.HTTPAllowedHeaders),
 	}
 	switch {
 	case env.HTTPMaxConcurrent < 0:
@@ -111,6 +113,9 @@ func merge(code, env httpx.WSConfig, failClosed bool) httpx.WSConfig {
 	}
 	if len(out.AllowedOrigins) == 0 && out.CORS == nil {
 		out.AllowedOrigins = env.AllowedOrigins
+	}
+	if len(out.AllowedHeaders) == 0 && out.CORS == nil {
+		out.AllowedHeaders = env.AllowedHeaders
 	}
 	if env.StressControl != nil {
 		sc := httpx.StressControlConfig{}

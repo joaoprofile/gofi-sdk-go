@@ -362,6 +362,33 @@ func TestNewServer_WithAllowedOrigins_CORSApplied(t *testing.T) {
 	assert.Equal(t, "https://myapp.com", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
+func TestNewServer_WithAllowedHeaders_AddedToDefaults(t *testing.T) {
+	srv := NewServer(&WSConfig{
+		ServerPort:     ":0",
+		AllowedOrigins: []string{"https://myapp.com"},
+		AllowedHeaders: []string{"sentry-trace"},
+	})
+	ws := srv.(*httpServer)
+	ws.router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	req.Header.Set("Origin", "https://myapp.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "content-type, sentry-trace, baggage")
+	rec := httptest.NewRecorder()
+	ws.router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "Content-Type, sentry-trace, baggage", rec.Header().Get("Access-Control-Allow-Headers"))
+}
+
+func TestWSConfig_AllowedHeadersIgnoredWithCORS(t *testing.T) {
+	cfg := &WSConfig{CORS: &CorsConfig{AllowedHeaders: []string{"X-Only"}}, AllowedHeaders: []string{"sentry-trace"}}
+	assert.Equal(t, []string{"X-Only"}, cfg.corsConfig().AllowedHeaders)
+}
+
 func TestNewServer_WithRateLimiter_MiddlewareChainedCorrectly(t *testing.T) {
 	backend := &stubBackend{fn: func(_ context.Context, _ string, _ redis_rate.Limit) (*redis_rate.Result, error) {
 		return allowedResult(9), nil

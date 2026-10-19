@@ -56,6 +56,11 @@ func DefaultCORSAllowedHeaders() []string {
 		RequestIDHeader,
 		"accepted-language",
 		"Timezone",
+		// W3C Trace Context and Baggage, sent by instrumented clients so the
+		// server span joins their trace.
+		"traceparent",
+		"tracestate",
+		"baggage",
 	}
 }
 

@@ -62,6 +62,11 @@ type WSConfig struct {
 	// otherwise DefaultCORSConfig. Ignored when CORS is set.
 	AllowedOrigins []string
 
+	// AllowedHeaders adds request headers to the global CORS policy's
+	// DefaultCORSAllowedHeaders, e.g. a vendor trace header. Ignored when
+	// CORS is set.
+	AllowedHeaders []string
+
 	// CORS replaces the global CORS policy, e.g. AnyOrigin without credentials.
 	CORS *CorsConfig
 
@@ -161,6 +166,7 @@ func (c *WSConfig) corsConfig() CorsConfig {
 	if len(c.AllowedOrigins) > 0 {
 		cfg.AllowedOrigins = c.AllowedOrigins
 	}
+	cfg.AllowedHeaders = append(cfg.AllowedHeaders, c.AllowedHeaders...)
 	return cfg
 }
 

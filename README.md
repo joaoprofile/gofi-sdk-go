@@ -820,6 +820,7 @@ warning, unless `HTTP_REQUIRE_TLS=true` / `GRPC_REQUIRE_TLS=true`. See [SECURITY
 | `GRPC_REQUIRE_TLS` | in `prod`/`stage`, a gRPC server without TLS fails `Build` |
 | `HTTP_TRUSTED_PROXIES` | CSV of CIDRs (`private` = private networks); no proxy is trusted by default |
 | `HTTP_ALLOWED_ORIGINS` | CORS origins, also trusted by the CSRF check (falls back to `ALLOWED_ORIGINS`) |
+| `HTTP_ALLOWED_HEADERS` | CSV of request headers added to the CORS defaults (which already allow `traceparent`, `tracestate` and `baggage`), e.g. `sentry-trace` |
 | `HTTP_MAX_CONCURRENT` / `HTTP_RATE_LIMIT_FAIL_CLOSED` | concurrency limiter slots; answer 503 when the rate-limit backend fails |
 | `JWT_AUDIENCE` | `aud` issued and required |
 | `IAM_LOGIN_MAX_ATTEMPTS` / `IAM_LOGIN_LOCKOUT` | failed logins per e-mail before lockout (default 5, negative disables) and its duration (default 15m) |

@@ -27,12 +27,14 @@ func TestConfigFromEnv_Full(t *testing.T) {
 		HTTPMaxConcurrent:   512,
 		HTTPAllowedOrigins:  "https://app.example.com, https://admin.example.com",
 		AllowedOrigins:      "https://ignored.example.com",
+		HTTPAllowedHeaders:  "sentry-trace, X-Tenant,",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, &netx.TLSConfig{CertFile: "/tls/tls.crt", KeyFile: "/tls/tls.key", ClientCAFile: "/tls/ca.crt", ClientAuth: tls.VerifyClientCertIfGiven}, cfg.TLS)
 	assert.Equal(t, []string{"private", "203.0.113.0/24"}, cfg.TrustedProxies)
 	assert.Equal(t, 512, cfg.StressControl.DefaultMaxConcurrent)
 	assert.Equal(t, []string{"https://app.example.com", "https://admin.example.com"}, cfg.AllowedOrigins)
+	assert.Equal(t, []string{"sentry-trace", "X-Tenant"}, cfg.AllowedHeaders)
 }
 
 func TestConfigFromEnv_AllowedOriginsFallback(t *testing.T) {
@@ -82,10 +84,12 @@ func TestMergePrecedence(t *testing.T) {
 		TLS:            &netx.TLSConfig{CertFile: "env.crt"},
 		TrustedProxies: []string{"private"},
 		AllowedOrigins: []string{"https://env.example.com"},
+		AllowedHeaders: []string{"sentry-trace"},
 		StressControl:  &httpx.StressControlConfig{DefaultMaxConcurrent: 99},
 	}
 
 	got := merge(httpx.WSConfig{}, env, false)
+	assert.Equal(t, env.AllowedHeaders, got.AllowedHeaders)
 	assert.Equal(t, env.TLS, got.TLS)
 	assert.Equal(t, env.TrustedProxies, got.TrustedProxies)
 	assert.Equal(t, env.AllowedOrigins, got.AllowedOrigins)
@@ -96,9 +100,11 @@ func TestMergePrecedence(t *testing.T) {
 		TLS:            &netx.TLSConfig{CertFile: "code.crt"},
 		TrustedProxies: []string{"10.0.0.0/8"},
 		AllowedOrigins: []string{"https://code.example.com"},
+		AllowedHeaders: []string{"X-Code"},
 		StressControl:  codeStress,
 	}
 	got = merge(code, env, false)
+	assert.Equal(t, []string{"X-Code"}, got.AllowedHeaders)
 	assert.Equal(t, "code.crt", got.TLS.CertFile)
 	assert.Equal(t, []string{"10.0.0.0/8"}, got.TrustedProxies)
 	assert.Equal(t, []string{"https://code.example.com"}, got.AllowedOrigins)
@@ -114,6 +120,7 @@ func TestMergePrecedence(t *testing.T) {
 	// A code CORS policy is not mixed with env origins.
 	got = merge(httpx.WSConfig{CORS: &httpx.CorsConfig{}}, env, false)
 	assert.Empty(t, got.AllowedOrigins)
+	assert.Empty(t, got.AllowedHeaders)
 }
 
 func TestMergeRateLimitFailClosed(t *testing.T) {

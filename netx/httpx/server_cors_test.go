@@ -165,6 +165,18 @@ func TestCORSMiddleware_Preflight_CustomAllowedHeaders(t *testing.T) {
 	assert.Equal(t, "X-Tenant", rec.Header().Get(headerACAH))
 }
 
+// Regression: the default policy dropped the W3C trace headers, so the
+// preflight of an instrumented browser client failed.
+func TestCORSMiddleware_Preflight_DefaultAllowsTraceHeaders(t *testing.T) {
+	cfg := DefaultCORSConfig()
+	cfg.AllowedOrigins = []string{"https://gofi.com"}
+	h := CORSMiddleware(cfg)(okHandler())
+
+	rec := preflight(t, h, "/", "https://gofi.com", "GET", "authorization, traceparent, tracestate, baggage")
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "Authorization, traceparent, tracestate, baggage", rec.Header().Get(headerACAH))
+}
+
 func TestCORSMiddleware_PlainOptionsReachesNext(t *testing.T) {
 	called := false
 	h := CORSMiddleware(DefaultCORSConfig())(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
