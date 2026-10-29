@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"time"
 
@@ -86,8 +87,14 @@ func (p *producer) send(ctx context.Context, topic string, msgs []*types.Message
 	set := metric.WithAttributeSet(attribute.NewSet(attrs...))
 	inst.opDuration.Record(ctx, time.Since(start).Seconds(), set)
 	inst.sent.Add(ctx, int64(len(msgs)), set)
-	for _, m := range msgs {
-		p.emit(ctx, types.BrokerEvent{Type: evType, Topic: m.Topic, MessageID: m.Id.String(), Error: err, Timestamp: time.Now()})
+	var partial *types.BatchSendError
+	isPartial := errors.As(err, &partial)
+	for i, m := range msgs {
+		ev := types.BrokerEvent{Type: evType, Topic: m.Topic, MessageID: m.Id.String(), Error: err, Timestamp: time.Now()}
+		if isPartial && !partial.FailedIndex(i) {
+			ev.Type, ev.Error = types.EventMessageSent, nil
+		}
+		p.emit(ctx, ev)
 	}
 	return err
 }

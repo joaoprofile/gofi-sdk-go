@@ -24,6 +24,7 @@ type captureBroker struct {
 	handlers chan port.MessageHandler
 	mu       sync.Mutex
 	sent     []*types.Message
+	batchErr error
 }
 
 func newCaptureBroker() *captureBroker {
@@ -53,7 +54,7 @@ func (p *captureProducer) SendMessagesBatch(ctx context.Context, ms []*types.Mes
 	for _, m := range ms {
 		_ = p.SendMessage(ctx, m)
 	}
-	return nil
+	return p.b.batchErr
 }
 func (p *captureProducer) Close() error { return nil }
 

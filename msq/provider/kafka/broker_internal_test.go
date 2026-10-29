@@ -626,12 +626,14 @@ func TestGroupHandlerConsumeClaimCountsDeliveriesAndSettlesReject(t *testing.T) 
 // sarama's SyncProducer reports a partial batch failure.
 type partialFailProducer struct {
 	mockSyncProducer
-	fail []int
+	fail      []int
+	partition int32
 }
 
 func (p *partialFailProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
 	var errs sarama.ProducerErrors
 	for _, i := range p.fail {
+		msgs[i].Partition = p.partition
 		errs = append(errs, &sarama.ProducerError{Msg: msgs[i], Err: sarama.ErrNotLeaderForPartition})
 	}
 	if len(errs) == 0 {
@@ -668,4 +670,22 @@ func TestKafkaProducerSendMessagesBatch_NonPerMessageErrorStaysPlain(t *testing.
 	var batchErr *types.BatchSendError
 	assert.Error(t, err)
 	assert.False(t, errors.As(err, &batchErr), "without per-message detail the whole batch is failed")
+}
+
+// sarama's ProducerErrors prints only the count ("Failed to deliver 4
+// messages"), so the broker's reason for each rejection was lost.
+func TestKafkaProducerSendMessagesBatch_ErrorNamesTheCauseAndPartition(t *testing.T) {
+	msgs := []*types.Message{
+		testMessageWithTopic("topic", "a"),
+		testMessageWithTopic("topic", "b"),
+		testMessageWithTopic("topic", "c"),
+	}
+	p := &kafkaProducer{producer: &partialFailProducer{fail: []int{0, 2}, partition: 7}}
+
+	err := p.SendMessagesBatch(context.Background(), msgs)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), sarama.ErrNotLeaderForPartition.Error()+" (partition 7) x2")
+	var perMessage sarama.ProducerErrors
+	assert.True(t, errors.As(err, &perMessage), "sarama's errors stay reachable")
 }

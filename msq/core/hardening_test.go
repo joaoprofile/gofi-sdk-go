@@ -360,3 +360,24 @@ func TestPipeline_HandlerRejectIsReported(t *testing.T) {
 	assert.Empty(t, e.b.messages())
 	assert.Contains(t, events.types(), types.EventMessageRejected)
 }
+
+// A partial batch failure used to report producer_error for every message of
+// the batch, delivered ones included, overstating the failure in the logs.
+func TestProducer_PartialBatchFailureReportsOnlyTheFailedMessages(t *testing.T) {
+	events := &eventLog{}
+	e := newService(t, events)
+	e.b.batchErr = &types.BatchSendError{Failed: []int{1}, Err: errors.New("rejected")}
+	p, err := e.svc.NewProducer()
+	require.NoError(t, err)
+	batch := []*types.Message{msg(t), msg(t), msg(t)}
+
+	require.Error(t, p.SendMessagesBatch(context.Background(), batch))
+
+	byID := map[string]types.BrokerEventType{}
+	for _, ev := range events.events {
+		byID[ev.MessageID] = ev.Type
+	}
+	assert.Equal(t, types.EventMessageSent, byID[batch[0].Id.String()])
+	assert.Equal(t, types.EventProducerError, byID[batch[1].Id.String()])
+	assert.Equal(t, types.EventMessageSent, byID[batch[2].Id.String()])
+}

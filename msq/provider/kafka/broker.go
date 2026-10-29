@@ -363,7 +363,33 @@ func batchSendError(batch []*sarama.ProducerMessage, err error) error {
 		}
 	}
 	slices.Sort(failed)
-	return &types.BatchSendError{Failed: failed, Err: err}
+	return &types.BatchSendError{Failed: failed, Err: fmt.Errorf("%w: %s", err, causes(perMessage))}
+}
+
+// causes summarizes why the broker rejected each message, grouped by reason
+// and partition, since sarama's ProducerErrors prints only the count.
+func causes(perMessage sarama.ProducerErrors) string {
+	type cause struct {
+		reason    string
+		partition int32
+	}
+	counts := map[cause]int{}
+	var order []cause
+	for _, pe := range perMessage {
+		c := cause{reason: fmt.Sprint(pe.Err), partition: -1}
+		if pe.Msg != nil {
+			c.partition = pe.Msg.Partition
+		}
+		if counts[c] == 0 {
+			order = append(order, c)
+		}
+		counts[c]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, c := range order {
+		parts = append(parts, fmt.Sprintf("%s (partition %d) x%d", c.reason, c.partition, counts[c]))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // encode writes CloudEvents binary mode: the value is the payload and the
