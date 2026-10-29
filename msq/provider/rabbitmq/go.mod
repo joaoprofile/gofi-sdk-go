@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joaoprofile/gofi-sdk-go/msq v0.2.8
 	github.com/joaoprofile/gofi-sdk-go/obs v0.2.8
-	github.com/rabbitmq/amqp091-go v1.13.0
+	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/stretchr/testify v1.12.1
 )
 
