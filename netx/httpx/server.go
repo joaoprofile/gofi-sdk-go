@@ -149,21 +149,14 @@ func (ws *httpServer) Use(middlewares ...Middleware) {
 
 func (ws *httpServer) UseAuth(authMiddleware Middleware) { ws.auth = authMiddleware }
 
+// AddHandlers registers every route on the root router under its full pattern.
+// Groups whose prefixes nest ("/orders" and "/orders/{id}") stay independent:
+// a sub-router per prefix would let the deeper one shadow the other's routes.
 func (ws *httpServer) AddHandlers(handlers ...RouterHandler) {
-	grouped := make(map[string][]*Route)
-
 	for _, handlerGroup := range handlers {
 		for _, route := range handlerGroup.Handlers() {
-			grouped[route.prefix] = append(grouped[route.prefix], route)
+			ws.registerRoute(route)
 		}
-	}
-
-	for prefix, routes := range grouped {
-		ws.router.Route(prefix, func(r chi.Router) {
-			for _, route := range routes {
-				ws.registerRoute(r, route)
-			}
-		})
 	}
 }
 
@@ -206,7 +199,7 @@ func routeDeadlines(read, write time.Duration) Middleware {
 	}
 }
 
-func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
+func (ws *httpServer) registerRoute(route *Route) {
 	var h http.Handler = http.HandlerFunc(route.handler)
 
 	// A root prefix ("/") would strip the leading slash chi requires.
@@ -242,7 +235,10 @@ func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
 	// Outermost, so requests rejected by auth or deadlines are labeled too.
 	h = routeTelemetry(route.method, pattern)(h)
 
-	r.Method(route.method, path, h)
+	ws.router.Method(route.method, pattern, h)
+	if path == "/" && pattern != "/" {
+		ws.router.Method(route.method, pattern+"/", h) // a group root answers with and without the trailing slash
+	}
 }
 
 // routeWriteTimeout is the route's write deadline override. A route whose

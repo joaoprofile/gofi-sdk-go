@@ -288,15 +288,48 @@ func TestRegisterRoute_PathNormalizationRootPath(t *testing.T) {
 		handler: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) },
 	}
 
-	ws.router.Route("/api", func(r chi.Router) {
-		ws.registerRoute(r, route)
-	})
+	ws.registerRoute(route)
 
-	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	for _, path := range []string{"/api", "/api/"} {
+		rec := httptest.NewRecorder()
+		ws.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusOK, rec.Code, path)
+	}
+}
+
+// Regression: one sub-router per prefix let "/api/items/{id}" shadow the
+// "/api/items" group's "/{id}" and "/{id}/rename" routes (404).
+func TestAddHandlers_NestedPrefixesDoNotShadow(t *testing.T) {
+	ws := newTestHTTPServer()
+	ok := func(name string) func(http.ResponseWriter, *http.Request) {
+		return func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(name + ":" + chi.URLParam(r, "id")))
+		}
+	}
+	ws.AddHandlers(
+		&mockRouterHandler{routes: PublicRoutes("/api/items",
+			GET("/").To(ok("list")),
+			GET("/{id}").To(ok("get")),
+			PUT("/{id}/rename").To(ok("rename")),
+		)},
+		&mockRouterHandler{routes: PublicRoutes("/api/items/{id}",
+			GET("/tags").To(ok("tags")),
+		)},
+	)
+
+	for path, want := range map[string]string{
+		"/api/items":        "list:",
+		"/api/items/7":      "get:7",
+		"/api/items/7/tags": "tags:7",
+	} {
+		rec := httptest.NewRecorder()
+		ws.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusOK, rec.Code, path)
+		assert.Equal(t, want, rec.Body.String(), path)
+	}
 	rec := httptest.NewRecorder()
-	ws.router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
+	ws.router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/items/7/rename", nil))
+	assert.Equal(t, "rename:7", rec.Body.String())
 }
 
 func TestListenAndServe_StopsGracefullyOnShutdown(t *testing.T) {
