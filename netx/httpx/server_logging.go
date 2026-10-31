@@ -111,7 +111,7 @@ func LoggingMiddleware() Middleware {
 // LogRateLimit logs a rate-limit event at Warn level with trace context.
 func LogRateLimit(r *http.Request) {
 	logging.FromContext(r.Context()).Warn("rate limit exceeded",
-		slog.String("ip", clientIP(r)),
+		slog.String("ip", ClientIP(r)),
 		apiKeyAttr(r),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
@@ -121,7 +121,7 @@ func LogRateLimit(r *http.Request) {
 // LogInvalidAPIKey logs an invalid API key attempt at Warn level.
 func LogInvalidAPIKey(r *http.Request) {
 	logging.FromContext(r.Context()).Warn("invalid api key",
-		slog.String("ip", clientIP(r)),
+		slog.String("ip", ClientIP(r)),
 		apiKeyAttr(r),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
@@ -131,7 +131,7 @@ func LogInvalidAPIKey(r *http.Request) {
 // LogIPBlocked logs a blocked IP attempt at Warn level.
 func LogIPBlocked(r *http.Request, clientName string) {
 	logging.FromContext(r.Context()).Warn("ip not allowed",
-		slog.String("ip", clientIP(r)),
+		slog.String("ip", ClientIP(r)),
 		slog.String("client", clientName),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
@@ -141,7 +141,7 @@ func LogIPBlocked(r *http.Request, clientName string) {
 // LogServerError logs an application error at Error level with trace context.
 func LogServerError(r *http.Request, err error) {
 	logging.FromContext(r.Context()).Error("server error",
-		slog.String("ip", clientIP(r)),
+		slog.String("ip", ClientIP(r)),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Any("error", err),
@@ -154,7 +154,7 @@ func requestAttrs(reqID string, r *http.Request, status int, latency time.Durati
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Int("status", status),
-		slog.String("ip", clientIP(r)),
+		slog.String("ip", ClientIP(r)),
 		slog.Duration("latency", latency),
 	}
 }

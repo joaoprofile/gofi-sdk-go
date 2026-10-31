@@ -125,18 +125,19 @@ func clientAddr(r *http.Request) netip.Addr {
 	return peerIP(r)
 }
 
-// clientIP returns clientAddr as a string, or RemoteAddr when it is unparsable.
-func clientIP(r *http.Request) string {
+// ClientIP returns the IP resolved by ClientIPMiddleware (the TCP peer without
+// it) as a string, or RemoteAddr when it is unparsable.
+func ClientIP(r *http.Request) string {
 	if ip := clientAddr(r); ip.IsValid() {
 		return ip.String()
 	}
 	return r.RemoteAddr
 }
 
-// rateLimitSubject is the client identity used as a rate-limit bucket: the IPv4
+// RateLimitSubject is the client identity used as a rate-limit bucket: the IPv4
 // address, or the /64 of an IPv6 address, since one host usually owns a whole
 // /64 and could otherwise rotate addresses to dodge the limit.
-func rateLimitSubject(r *http.Request) string {
+func RateLimitSubject(r *http.Request) string {
 	ip := clientAddr(r)
 	if !ip.IsValid() {
 		return r.RemoteAddr

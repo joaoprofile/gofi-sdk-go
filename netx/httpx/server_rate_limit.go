@@ -155,7 +155,7 @@ func (cfg RedisRateLimiterConfig) bucket(r *http.Request, keyPrefix string) (Rat
 		known = cfg.IsKnownAPIKey != nil && cfg.IsKnownAPIKey(apiKey)
 	}
 	if apiKey == "" || !known {
-		return cfg.Default, keyPrefix + ":" + rateLimitSubject(r)
+		return cfg.Default, keyPrefix + ":" + RateLimitSubject(r)
 	}
 	return plan, keyPrefix + ":key:" + apiKeyFingerprint(apiKey)
 }

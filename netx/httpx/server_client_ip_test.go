@@ -12,7 +12,7 @@ func resolvedIP(t *testing.T, trusted []string, remoteAddr string, xff ...string
 	t.Helper()
 	var got string
 	h := ClientIPMiddleware(trusted)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		got = clientIP(r)
+		got = ClientIP(r)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = remoteAddr
@@ -59,11 +59,11 @@ func TestClientIP_WithoutMiddlewareUsesPeer(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.7:5000"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
-	assert.Equal(t, "203.0.113.7", clientIP(req))
+	assert.Equal(t, "203.0.113.7", ClientIP(req))
 
 	// A private peer must not be able to spoof the client IP by default.
 	req.RemoteAddr = "192.168.0.1:5000"
-	assert.Equal(t, "192.168.0.1", clientIP(req))
+	assert.Equal(t, "192.168.0.1", ClientIP(req))
 }
 
 func TestPrivateNetworks_ReturnsCopy(t *testing.T) {
@@ -82,7 +82,7 @@ func TestRateLimitSubject(t *testing.T) {
 	for _, tt := range tests {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = tt.remote
-		assert.Equal(t, tt.want, rateLimitSubject(req), tt.remote)
+		assert.Equal(t, tt.want, RateLimitSubject(req), tt.remote)
 	}
 }
 
