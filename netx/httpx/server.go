@@ -125,9 +125,6 @@ func NewServer(config *WSConfig) HttpServer {
 	// Structured JSON request logging
 	mux.Use(LoggingMiddleware())
 
-	// Global request timeout.
-	mux.Use(middleware.Timeout(orDefault(config.RequestTimeout, DefaultRequestTimeout)))
-
 	// Method blocking and body limit.
 	mux.Use(BlockUnsafeMethods)
 	mux.Use(LimitBodyWithMax(config.MaxBodyBytes))
@@ -232,16 +229,35 @@ func (ws *httpServer) registerRoute(r chi.Router, route *Route) {
 		h = ws.stress(h)
 	}
 
+	// The handler budget is per route (RouteBuilder.RequestTimeout, else
+	// WSConfig.RequestTimeout) and covers the wait for a slot, auth and the handler.
+	h = middleware.Timeout(orDefault(route.requestTimeout, orDefault(ws.config.RequestTimeout, DefaultRequestTimeout)))(h)
+
 	// Per-route deadlines wrap outermost, so the extended budget is in place
 	// before the stress limiter buffers, or auth or the handler reads, the body.
-	if route.readTimeout > 0 || route.writeTimeout > 0 {
-		h = routeDeadlines(route.readTimeout, route.writeTimeout)(h)
+	if read, write := route.readTimeout, ws.routeWriteTimeout(route); read > 0 || write > 0 {
+		h = routeDeadlines(read, write)(h)
 	}
 
 	// Outermost, so requests rejected by auth or deadlines are labeled too.
 	h = routeTelemetry(route.method, pattern)(h)
 
 	r.Method(route.method, path, h)
+}
+
+// routeWriteTimeout is the route's write deadline override. A route whose
+// RequestTimeout outgrows the server-wide WriteTimeout gets a write deadline
+// that keeps the default margin, so a handler using its whole budget can still
+// write the response; an explicit Timeouts write value is kept when larger.
+func (ws *httpServer) routeWriteTimeout(route *Route) time.Duration {
+	if route.requestTimeout <= 0 {
+		return route.writeTimeout
+	}
+	needed := route.requestTimeout + (DefaultWriteTimeout - DefaultRequestTimeout)
+	if needed <= orDefault(ws.config.WriteTimeout, DefaultWriteTimeout) || needed <= route.writeTimeout {
+		return route.writeTimeout
+	}
+	return needed
 }
 
 // crossOrigin wraps h with the CSRF check and, when the route has its own

@@ -38,6 +38,7 @@ type Route struct {
 	prefix         string
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
+	requestTimeout time.Duration
 }
 
 type RouteBuilder struct {
@@ -49,6 +50,7 @@ type RouteBuilder struct {
 	corsConfig     *CorsConfig
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
+	requestTimeout time.Duration
 }
 
 type RouterHandler interface {
@@ -107,7 +109,8 @@ type WSConfig struct {
 	IdleTimeout time.Duration
 
 	// RequestTimeout bounds the per-request context passed to handlers. A
-	// value <= 0 falls back to DefaultRequestTimeout.
+	// value <= 0 falls back to DefaultRequestTimeout. A route can override it
+	// with RouteBuilder.RequestTimeout.
 	RequestTimeout time.Duration
 
 	// ShutdownTimeout bounds graceful shutdown. A value <= 0 falls back to
@@ -188,6 +191,7 @@ func (rb *RouteBuilder) Build() *Route {
 		prefix:         rb.prefix,
 		readTimeout:    rb.readTimeout,
 		writeTimeout:   rb.writeTimeout,
+		requestTimeout: rb.requestTimeout,
 	}
 }
 
@@ -201,13 +205,21 @@ func (rb *RouteBuilder) To(function handlerFunc) *RouteBuilder {
 // for every other route. Either argument may be zero to keep the server-wide
 // value for that direction.
 //
-// Only the connection deadlines can be extended this way. WSConfig.RequestTimeout
-// is a context deadline: downstream code can shorten it, never lengthen it, so a
-// route that needs a long handler budget still requires a matching server-wide
+// The handler budget (the request context deadline) is set apart, with
 // RequestTimeout.
 func (rb *RouteBuilder) Timeouts(read, write time.Duration) *RouteBuilder {
 	rb.readTimeout = read
 	rb.writeTimeout = write
+	return rb
+}
+
+// RequestTimeout overrides WSConfig.RequestTimeout for this route alone: the
+// deadline of the request context passed to the handler. A route that streams
+// a long answer or calls slow upstreams raises it without relaxing every other
+// route. When it outgrows the server-wide WriteTimeout, the route's write
+// deadline is extended to keep the same margin. Zero keeps the server value.
+func (rb *RouteBuilder) RequestTimeout(d time.Duration) *RouteBuilder {
+	rb.requestTimeout = d
 	return rb
 }
 

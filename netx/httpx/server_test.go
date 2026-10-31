@@ -3,10 +3,12 @@ package httpx
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -625,6 +627,62 @@ func TestRouteTimeouts_NotAppliedWhenUnset(t *testing.T) {
 
 	assert.Zero(t, route.readTimeout)
 	assert.Zero(t, route.writeTimeout)
+}
+
+// ── Per-route request timeout ─────────────────────────────────────────────────
+
+// deadlineHandler writes how long the request context had left, in ms.
+func deadlineHandler(w http.ResponseWriter, r *http.Request) {
+	deadline, ok := r.Context().Deadline()
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	_, _ = fmt.Fprint(w, time.Until(deadline).Milliseconds())
+}
+
+func remainingBudget(t *testing.T, ws *httpServer, path string) time.Duration {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	ws.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	ms, err := strconv.Atoi(rec.Body.String())
+	require.NoError(t, err)
+	return time.Duration(ms) * time.Millisecond
+}
+
+func TestRouteRequestTimeout_OverridesServerBudgetForThatRouteOnly(t *testing.T) {
+	ws := NewServer(&WSConfig{ServerPort: ":0", RequestTimeout: time.Second}).(*httpServer)
+	ws.AddHandlers(&mockRouterHandler{routes: PublicRoutes("/api",
+		GET("/stream").To(deadlineHandler).RequestTimeout(2*time.Minute),
+		GET("/plain").To(deadlineHandler),
+	)})
+
+	assert.Greater(t, remainingBudget(t, ws, "/api/stream"), time.Minute, "the route budget must replace the server one")
+	assert.LessOrEqual(t, remainingBudget(t, ws, "/api/plain"), time.Second, "other routes keep the server budget")
+}
+
+func TestRouteRequestTimeout_ServerDefaultWhenNothingConfigured(t *testing.T) {
+	ws := NewServer(&WSConfig{ServerPort: ":0"}).(*httpServer)
+	ws.AddHandlers(&mockRouterHandler{routes: PublicRoutes("/api", GET("/plain").To(deadlineHandler))})
+
+	got := remainingBudget(t, ws, "/api/plain")
+	assert.LessOrEqual(t, got, DefaultRequestTimeout)
+	assert.Greater(t, got, DefaultRequestTimeout-time.Second)
+}
+
+func TestRouteWriteTimeout_KeepsMarginOverALongRequestTimeout(t *testing.T) {
+	ws := NewServer(&WSConfig{ServerPort: ":0"}).(*httpServer)
+	margin := DefaultWriteTimeout - DefaultRequestTimeout
+
+	long := POST("/x").To(readBodyHandler).RequestTimeout(2 * time.Minute).Build()
+	assert.Equal(t, 2*time.Minute+margin, ws.routeWriteTimeout(long))
+
+	short := POST("/x").To(readBodyHandler).RequestTimeout(10 * time.Second).Build()
+	assert.Zero(t, ws.routeWriteTimeout(short), "a budget within the server write timeout needs no override")
+
+	explicit := POST("/x").To(readBodyHandler).RequestTimeout(2*time.Minute).Timeouts(0, 5*time.Minute).Build()
+	assert.Equal(t, 5*time.Minute, ws.routeWriteTimeout(explicit), "a larger explicit write timeout is kept")
 }
 
 // --- helpers  ---
