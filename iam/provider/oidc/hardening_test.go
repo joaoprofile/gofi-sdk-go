@@ -15,6 +15,7 @@ import (
 	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/joaoprofile/gofi-sdk-go/iam/core"
 	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/jwks"
 )
 
 // jwksServer serves jwks at /jwks; status and body can be switched at runtime.
@@ -81,87 +82,6 @@ func TestValidateIDToken_TimeClaims(t *testing.T) {
 	}
 }
 
-// Attack/outage: a 5xx (or empty set) used to replace good keys with an empty list.
-func TestJWKSCache_FailedRefreshKeepsPreviousKeys(t *testing.T) {
-	_, jwks := generateRSAKey(t)
-	srv := newJWKSServer(t, jwks)
-	c := &jwksCache{ttl: time.Hour}
-	ctx := context.Background()
-	if _, err := c.GetKey(ctx, srv.Client(), srv.URL, "key1"); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, bad := range []struct {
-		status int
-		body   string
-	}{{http.StatusInternalServerError, `{"keys":[]}`}, {http.StatusOK, `{"keys":[]}`}} {
-		srv.status.Store(int32(bad.status))
-		srv.body.Store(bad.body)
-		c.mu.Lock()
-		c.fetchedAt = time.Now().Add(-2 * time.Hour) // expired: forces a refetch
-		c.mu.Unlock()
-		if _, err := c.GetKey(ctx, srv.Client(), srv.URL, "key1"); err != nil {
-			t.Fatalf("status %d: previous key must stay usable: %v", bad.status, err)
-		}
-	}
-	if err := c.fetch(ctx, srv.Client(), srv.URL); err == nil {
-		t.Fatal("fetch must report the failure")
-	}
-}
-
-func TestJWKSCache_Non200IsError(t *testing.T) {
-	_, jwks := generateRSAKey(t)
-	srv := newJWKSServer(t, jwks)
-	srv.status.Store(http.StatusBadGateway)
-	c := &jwksCache{ttl: time.Hour}
-	if _, err := c.GetKey(context.Background(), srv.Client(), srv.URL, "key1"); err == nil {
-		t.Fatal("a 502 must not be parsed as keys")
-	}
-}
-
-func TestJWKSCache_BodyIsCapped(t *testing.T) {
-	_, jwks := generateRSAKey(t)
-	huge := strings.Replace(jwks, `"keys":[`, `"pad":"`+strings.Repeat("a", maxBody)+`","keys":[`, 1)
-	srv := newJWKSServer(t, huge)
-	c := &jwksCache{ttl: time.Hour}
-	if _, err := c.GetKey(context.Background(), srv.Client(), srv.URL, "key1"); err == nil {
-		t.Fatal("a body over 1 MiB must be rejected")
-	}
-}
-
-// Attack: tokens with random kids must not turn every login into a JWKS fetch.
-func TestJWKSCache_UnknownKidRefetchIsRateLimited(t *testing.T) {
-	_, jwks := generateRSAKey(t)
-	srv := newJWKSServer(t, jwks)
-	c := &jwksCache{ttl: time.Hour}
-	ctx := context.Background()
-	for i := range 5 {
-		_, _ = c.GetKey(ctx, srv.Client(), srv.URL, fmt.Sprint("random-", i))
-	}
-	if n := srv.hits.Load(); n != 1 {
-		t.Fatalf("JWKS fetches=%d, want 1", n)
-	}
-}
-
-func TestJWKSCache_ConcurrentFetchesShareOneRequest(t *testing.T) {
-	_, jwks := generateRSAKey(t)
-	srv := newJWKSServer(t, jwks)
-	srv.delay = 50 * time.Millisecond
-	c := &jwksCache{ttl: time.Hour}
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Go(func() {
-			if _, err := c.GetKey(context.Background(), srv.Client(), srv.URL, "key1"); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	wg.Wait()
-	if n := srv.hits.Load(); n != 1 {
-		t.Fatalf("JWKS fetches=%d, want 1", n)
-	}
-}
-
 func TestGetDiscovery_ConcurrentRefetchSharesOneRequestAndHonorsCtx(t *testing.T) {
 	var hits atomic.Int32
 	release := make(chan struct{})
@@ -197,21 +117,6 @@ func TestGetDiscovery_ConcurrentRefetchSharesOneRequestAndHonorsCtx(t *testing.T
 	}
 }
 
-func TestRequireHTTPS(t *testing.T) {
-	ok := []string{"https://idp.example/token", "http://127.0.0.1:8080/jwks", "http://localhost/x", "http://[::1]:9/x"}
-	bad := []string{"http://idp.example/token", "t", "ftp://idp.example", "https://", "://bad"}
-	for _, u := range ok {
-		if err := requireHTTPS(u); err != nil {
-			t.Errorf("%s: %v", u, err)
-		}
-	}
-	for _, u := range bad {
-		if err := requireHTTPS(u); err == nil {
-			t.Errorf("%s must be rejected", u)
-		}
-	}
-}
-
 // The client secret and code must never travel over plain http.
 func TestExchangeCode_RejectsPlainHTTP(t *testing.T) {
 	p := buildProvider(t, "https://example.com", nil)
@@ -219,7 +124,7 @@ func TestExchangeCode_RejectsPlainHTTP(t *testing.T) {
 	if !errors.Is(err, ErrInsecureEndpoint) {
 		t.Fatalf("err=%v, want ErrInsecureEndpoint", err)
 	}
-	c := &jwksCache{ttl: time.Hour}
+	c := jwks.NewCache(time.Hour)
 	if _, err := c.GetKey(context.Background(), http.DefaultClient, "http://idp.example/jwks", "k"); !errors.Is(err, ErrInsecureEndpoint) {
 		t.Fatalf("err=%v, want ErrInsecureEndpoint", err)
 	}

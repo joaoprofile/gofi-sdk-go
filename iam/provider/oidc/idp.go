@@ -4,18 +4,13 @@ package oidc
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +19,9 @@ import (
 
 	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/joaoprofile/gofi-sdk-go/iam/core"
+	"github.com/joaoprofile/gofi-sdk-go/iam/internal/flight"
 	"github.com/joaoprofile/gofi-sdk-go/iam/port"
+	"github.com/joaoprofile/gofi-sdk-go/iam/provider/jwks"
 	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
 
@@ -73,8 +70,8 @@ type Provider struct {
 	discMu        sync.RWMutex
 	discovery     *discoveryDoc
 	discFetchedAt time.Time
-	discFlight    flight
-	jwks          *jwksCache
+	discFlight    flight.Group
+	jwks          *jwks.Cache
 }
 
 // New creates a generic OIDC provider with the given identifier name.
@@ -93,7 +90,7 @@ func New(name string, cfg Config) *Provider {
 		cfg:    cfg,
 		name:   name,
 		client: cfg.HTTPClient,
-		jwks:   &jwksCache{ttl: cfg.JWKSCacheTTL},
+		jwks:   jwks.NewCache(cfg.JWKSCacheTTL),
 	}
 }
 
@@ -219,7 +216,7 @@ func (p *Provider) getDiscovery(ctx context.Context) (*discoveryDoc, error) {
 	if doc != nil && fresh {
 		return doc, nil
 	}
-	err := p.discFlight.do(ctx, func(fctx context.Context) error {
+	err := p.discFlight.Do(ctx, func(fctx context.Context) error {
 		d, err := p.fetchDiscovery(fctx)
 		if err != nil {
 			return err
@@ -273,7 +270,7 @@ type tokenResponse struct {
 
 func (p *Provider) exchangeCode(ctx context.Context, tokenEndpoint string, input port.IDPCallbackInput) (*tokenResponse, error) {
 	// The request carries the client secret and the code.
-	if err := requireHTTPS(tokenEndpoint); err != nil {
+	if err := jwks.RequireHTTPS(tokenEndpoint); err != nil {
 		return nil, err
 	}
 	body := url.Values{}
@@ -406,197 +403,6 @@ func mapClaims(mc gojwt.MapClaims, provider string) *types.IDPUser {
 		PictureURL:    get("picture"),
 		RawClaims:     raw,
 	}
-}
-
-type jwksKey struct {
-	Kid string
-	Key any // *rsa.PublicKey or *ecdsa.PublicKey
-}
-
-type jwksCache struct {
-	mu        sync.RWMutex
-	keys      []jwksKey
-	fetchedAt time.Time
-	ttl       time.Duration
-	flight    flight
-}
-
-// jwksMinRefresh bounds refetches for unknown kids, so tokens with random
-// kids cannot turn every login into a JWKS request.
-const jwksMinRefresh = 30 * time.Second
-
-func (c *jwksCache) GetKey(ctx context.Context, client *http.Client, jwksURI, kid string) (any, error) {
-	key, age := c.lookup(kid)
-	fresh := age < c.ttl
-	if key != nil && fresh {
-		return key, nil
-	}
-	if fresh && age < jwksMinRefresh {
-		return nil, fmt.Errorf("iam/oidc: key %q not found in JWKS", kid)
-	}
-
-	// Refetch; on failure the previous keys stay in use.
-	err := c.flight.do(ctx, func(fctx context.Context) error { return c.fetch(fctx, client, jwksURI) })
-	if key, _ = c.lookup(kid); key != nil {
-		return key, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return nil, fmt.Errorf("iam/oidc: key %q not found in JWKS", kid)
-}
-
-// lookup returns the key for kid and the age of the cached set.
-func (c *jwksCache) lookup(kid string) (any, time.Duration) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.findKey(kid), time.Since(c.fetchedAt)
-}
-
-func (c *jwksCache) findKey(kid string) any {
-	for _, k := range c.keys {
-		if kid == "" || k.Kid == kid {
-			return k.Key
-		}
-	}
-	return nil
-}
-
-// fetch replaces the cached keys only with a 200 response that yields at
-// least one usable key; any failure keeps the previous keys.
-func (c *jwksCache) fetch(ctx context.Context, client *http.Client, jwksURI string) error {
-	if err := requireHTTPS(jwksURI); err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
-	if err != nil {
-		return err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("iam/oidc: JWKS fetch failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("iam/oidc: JWKS returned status %d", resp.StatusCode)
-	}
-	var doc struct {
-		Keys []jwkKey `json:"keys"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&doc); err != nil {
-		return fmt.Errorf("iam/oidc: JWKS decode failed: %w", err)
-	}
-
-	var parsed []jwksKey
-	for _, k := range doc.Keys {
-		pub, err := k.PublicKey()
-		if err != nil {
-			continue // skip malformed keys
-		}
-		parsed = append(parsed, jwksKey{Kid: k.Kid, Key: pub})
-	}
-	if len(parsed) == 0 {
-		return errors.New("iam/oidc: JWKS has no usable keys")
-	}
-
-	c.mu.Lock()
-	c.keys = parsed
-	c.fetchedAt = time.Now()
-	c.mu.Unlock()
-
-	return nil
-}
-
-// jwkKey represents a key in JWK (JSON Web Key) format.
-type jwkKey struct {
-	Kty string `json:"kty"`
-	Kid string `json:"kid"`
-	Alg string `json:"alg"`
-	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
-}
-
-func (k *jwkKey) PublicKey() (any, error) {
-	switch k.Kty {
-	case "RSA":
-		return k.rsaPublicKey()
-	case "EC":
-		return k.ecPublicKey()
-	default:
-		return nil, fmt.Errorf("unsupported key type: %s", k.Kty)
-	}
-}
-
-func (k *jwkKey) rsaPublicKey() (*rsa.PublicKey, error) {
-	nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
-	if err != nil {
-		return nil, err
-	}
-	eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
-	if err != nil {
-		return nil, err
-	}
-
-	n := new(big.Int).SetBytes(nBytes)
-	if n.BitLen() < minRSABits {
-		return nil, fmt.Errorf("RSA key too small: %d bits", n.BitLen())
-	}
-	// Bounded before accumulating so a long exponent cannot overflow int.
-	if len(eBytes) == 0 || len(eBytes) > 4 {
-		return nil, errors.New("invalid RSA exponent")
-	}
-	var eInt int
-	for _, b := range eBytes {
-		eInt = eInt*256 + int(b)
-	}
-	if eInt < 3 || eInt%2 == 0 {
-		return nil, errors.New("invalid RSA exponent")
-	}
-
-	return &rsa.PublicKey{N: n, E: eInt}, nil
-}
-
-// minRSABits rejects JWKS keys below the NIST minimum for signatures.
-const minRSABits = 2048
-
-func (k *jwkKey) ecPublicKey() (*ecdsa.PublicKey, error) {
-	xBytes, err := base64.RawURLEncoding.DecodeString(k.X)
-	if err != nil {
-		return nil, err
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(k.Y)
-	if err != nil {
-		return nil, err
-	}
-
-	var curve elliptic.Curve
-	switch k.Crv {
-	case "P-256":
-		curve = ellipticP256()
-	case "P-384":
-		curve = ellipticP384()
-	case "P-521":
-		curve = ellipticP521()
-	default:
-		return nil, fmt.Errorf("unsupported EC curve: %s", k.Crv)
-	}
-
-	size := (curve.Params().BitSize + 7) / 8
-	if len(xBytes) > size || len(yBytes) > size {
-		return nil, errors.New("invalid EC coordinates")
-	}
-	// Uncompressed SEC 1 point; parsing rejects coordinates that are not on the curve.
-	point := make([]byte, 1+2*size)
-	point[0] = 4
-	copy(point[1+size-len(xBytes):1+size], xBytes)
-	copy(point[1+2*size-len(yBytes):], yBytes)
-	return ecdsa.ParseUncompressedPublicKey(curve, point)
 }
 
 func generatePKCE() (verifier, challenge string, err error) {
