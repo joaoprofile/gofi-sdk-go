@@ -26,6 +26,8 @@ func CodeOf(kind errs.ErrorKind) codes.Code {
 	switch kind {
 	case errs.KindValidation:
 		return codes.InvalidArgument
+	case errs.KindUnprocessable:
+		return codes.FailedPrecondition
 	case errs.KindNotFound:
 		return codes.NotFound
 	case errs.KindConflict:

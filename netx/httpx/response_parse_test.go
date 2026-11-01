@@ -206,6 +206,7 @@ func TestRespondError_KindMapsToHTTPStatus(t *testing.T) {
 		{"unknown", errs.Register("rsp-unknown", "unknown error"), http.StatusInternalServerError},
 		{"external", errs.RegisterExternalError("rsp-external", "external service failed"), http.StatusBadGateway},
 		{"unauthorized", errs.RegisterUnauthorized("rsp-unauthorized", "access denied"), http.StatusUnauthorized},
+		{"unprocessable", errs.RegisterUnprocessable("rsp-unprocessable", "refused on its merits"), http.StatusUnprocessableEntity},
 	}
 
 	for _, tc := range tests {

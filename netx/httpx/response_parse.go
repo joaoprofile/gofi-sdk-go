@@ -57,6 +57,8 @@ func RespondError(w http.ResponseWriter, r *http.Request, appErr errs.AppError) 
 		status = http.StatusConflict
 	case appErr.IsValidation():
 		status = http.StatusBadRequest
+	case appErr.IsUnprocessable():
+		status = http.StatusUnprocessableEntity
 	case appErr.IsUnauthorized():
 		status = http.StatusUnauthorized
 	case appErr.IsForbidden():

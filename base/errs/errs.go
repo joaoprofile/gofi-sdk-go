@@ -21,6 +21,9 @@ const (
 	KindExternalError ErrorKind = "EXTERNAL_ERROR"
 	KindUnauthorized  ErrorKind = "UNAUTHORIZED"
 	KindForbidden     ErrorKind = "FORBIDDEN"
+	// KindUnprocessable is a request that is well formed but that the service refuses on its
+	// merits (an external check rejected it): HTTP 422, unlike KindValidation (400, the shape is wrong).
+	KindUnprocessable ErrorKind = "UNPROCESSABLE"
 )
 
 type AppError struct {
@@ -97,6 +100,8 @@ func (e AppError) IsExternalError() bool { return e.Kind == KindExternalError }
 func (e AppError) IsUnauthorized() bool { return e.Kind == KindUnauthorized }
 
 func (e AppError) IsForbidden() bool { return e.Kind == KindForbidden }
+
+func (e AppError) IsUnprocessable() bool { return e.Kind == KindUnprocessable }
 
 func (e AppError) Exists() bool {
 	return e.Code != "" || e.Err != nil
@@ -186,6 +191,10 @@ func RegisterForbidden(code, message string) AppError {
 
 func RegisterUnauthorized(code, message string) AppError {
 	return register(AppError{Kind: KindUnauthorized, Code: code, Message: message})
+}
+
+func RegisterUnprocessable(code, message string) AppError {
+	return register(AppError{Kind: KindUnprocessable, Code: code, Message: message})
 }
 
 func GetErrorByCode(code string) *AppError {

@@ -20,6 +20,7 @@ func TestErrorKind_StringValues(t *testing.T) {
 	assert.Equal(t, errs.ErrorKind("OPERATION"), errs.KindOperation)
 	assert.Equal(t, errs.ErrorKind("EXTERNAL_ERROR"), errs.KindExternalError)
 	assert.Equal(t, errs.ErrorKind("UNAUTHORIZED"), errs.KindUnauthorized)
+	assert.Equal(t, errs.ErrorKind("UNPROCESSABLE"), errs.KindUnprocessable)
 }
 
 //  Register*
@@ -60,6 +61,13 @@ func TestRegisterExternalError_SetsKind(t *testing.T) {
 func TestRegisterUnauthorized_SetsKind(t *testing.T) {
 	e := errs.RegisterUnauthorized("reg-unauthorized", "access denied")
 	assert.Equal(t, errs.KindUnauthorized, e.Kind)
+}
+
+func TestRegisterUnprocessable_SetsKind(t *testing.T) {
+	e := errs.RegisterUnprocessable("reg-unprocessable", "refused on its merits")
+	assert.Equal(t, errs.KindUnprocessable, e.Kind)
+	assert.True(t, e.IsUnprocessable())
+	assert.False(t, e.IsValidation(), "a 422 is not the 400 of a malformed request")
 }
 
 //  GetErrorByCode──

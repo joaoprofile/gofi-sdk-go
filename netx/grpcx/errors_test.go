@@ -106,3 +106,14 @@ func TestDefaultsHelpers(t *testing.T) {
 	assert.Equal(t, "y", cmpOr(" ", "y"))
 	assert.Equal(t, "0.1s", seconds(100*time.Millisecond))
 }
+
+func TestUnprocessable_MapsToFailedPreconditionAndKeepsItsKindOverTheWire(t *testing.T) {
+	registered := errs.RegisterUnprocessable("grpc-unprocessable", "refused on its merits")
+	assert.Equal(t, codes.FailedPrecondition, CodeOf(errs.KindUnprocessable))
+
+	st := Status(registered.New())
+	assert.Equal(t, codes.FailedPrecondition, status.Code(st))
+	back, ok := FromError(st)
+	require.True(t, ok)
+	assert.Equal(t, errs.KindUnprocessable, back.Kind, "FailedPrecondition alone reads as a conflict; the ErrorInfo restores the kind")
+}
