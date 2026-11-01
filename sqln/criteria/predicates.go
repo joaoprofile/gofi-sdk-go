@@ -89,6 +89,18 @@ func NotIn(field string, values any) Predicate {
 	return Predicate{field: field, operator: driver.NotIn, value: values}
 }
 
+// Overlaps produces field && values for an array column: true when the column
+// shares at least one element with values, which must be a typed slice
+// ([]int64, []string…). An empty list matches nothing. Dialects without array
+// columns fail Build with ErrInvalidValue.
+func Overlaps(field string, values any) Predicate {
+	p := Predicate{field: field, operator: driver.Overlaps, value: values}
+	if !isTypedSlice(values) {
+		p.err = fmt.Errorf("%w: Overlaps on %q requires a typed slice", ErrInvalidValue, field)
+	}
+	return p
+}
+
 // Text Search
 
 // Contains performs a case-insensitive substring match via the active dialect:

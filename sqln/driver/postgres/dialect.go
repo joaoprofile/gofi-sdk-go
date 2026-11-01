@@ -28,6 +28,11 @@ func (PostgresDialect) ArrayMembership(field, param string, negate bool) string 
 	return field + " = ANY(" + param + ")"
 }
 
+// ArrayOverlap is the && operator: it is served by a GIN index on the column.
+func (PostgresDialect) ArrayOverlap(field, param string) string {
+	return field + " && " + param
+}
+
 func (PostgresDialect) BuildPagination(query string, order string, limit uint16, offset uint64) string {
 	if order == "" {
 		return fmt.Sprintf("%s LIMIT %d OFFSET %d", query, limit, offset)

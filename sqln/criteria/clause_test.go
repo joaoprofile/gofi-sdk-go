@@ -1,6 +1,7 @@
 package criteria_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -216,5 +217,12 @@ func built(t testing.TB) func(string, []any, error) (string, []any) {
 			t.Fatalf("build: %v", err)
 		}
 		return sql, params
+	}
+}
+
+func TestBuildClause_OverlapsNeedsAnArrayDialect(t *testing.T) {
+	_, _, err := criteria.BuildClause([]criteria.Predicate{criteria.Overlaps("tags", []int64{1})}, myDialect{})
+	if !errors.Is(err, criteria.ErrInvalidValue) {
+		t.Fatalf("a dialect without array columns must refuse Overlaps: %v", err)
 	}
 }

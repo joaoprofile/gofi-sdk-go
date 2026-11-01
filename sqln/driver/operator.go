@@ -18,6 +18,10 @@ const (
 	NotIn = "NOT IN"
 )
 
+// Overlaps tests whether an array column shares at least one element with a
+// list. Only dialects with array columns (ArrayDialect) render it.
+const Overlaps = "&&"
+
 // Text Search Operators
 
 const (

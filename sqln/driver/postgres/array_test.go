@@ -37,3 +37,23 @@ func built(t testing.TB) func(string, []any, error) (string, []any) {
 		return sql, params
 	}
 }
+
+func TestOverlapsBindsTypedSliceAsArray(t *testing.T) {
+	sql, params := built(t)(criteria.BuildClause([]criteria.Predicate{
+		criteria.Eq("version_id", 7),
+		criteria.Overlaps("context_ids", []int64{1, 2}),
+	}, PostgresDialect{}))
+	assert.Equal(t, "version_id = $1 AND context_ids && $2", sql)
+	assert.Equal(t, []any{7, []int64{1, 2}}, params)
+}
+
+func TestOverlapsEmptyListMatchesNothing(t *testing.T) {
+	sql, params := built(t)(criteria.BuildClause([]criteria.Predicate{criteria.Overlaps("context_ids", []int64{})}, PostgresDialect{}))
+	assert.Equal(t, "1 = 0", sql)
+	assert.Empty(t, params)
+}
+
+func TestOverlapsRejectsAScalar(t *testing.T) {
+	_, _, err := criteria.BuildClause([]criteria.Predicate{criteria.Overlaps("context_ids", int64(1))}, PostgresDialect{})
+	assert.ErrorIs(t, err, criteria.ErrInvalidValue)
+}

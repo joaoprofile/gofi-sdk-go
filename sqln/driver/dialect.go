@@ -21,4 +21,8 @@ type Dialect interface {
 type ArrayDialect interface {
 	// ArrayMembership renders field IN / NOT IN for an array placeholder.
 	ArrayMembership(field, param string, negate bool) string
+
+	// ArrayOverlap renders field && param: the array column shares an element
+	// with the array placeholder.
+	ArrayOverlap(field, param string) string
 }

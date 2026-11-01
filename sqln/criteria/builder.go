@@ -84,6 +84,10 @@ func (b *builder) writePredicate(p Predicate) {
 	case driver.Search:
 		b.write(b.textExpr(p.search, textMatch, ""))
 
+	// Array overlap — the whole slice binds as one array parameter.
+	case driver.Overlaps:
+		b.writeOverlap(p)
+
 	// Membership — a typed slice binds as one array where the dialect allows.
 	case driver.In, driver.NotIn:
 		b.writeMembership(p)
@@ -138,6 +142,19 @@ func (b *builder) writeEscape(p Predicate) {
 	if p.literal {
 		b.write(driver.LikeEscapeClause)
 	}
+}
+
+func (b *builder) writeOverlap(p Predicate) {
+	ad, ok := b.dialect.(driver.ArrayDialect)
+	if !ok {
+		b.fail(fmt.Errorf("%w: Overlaps on %q needs a dialect with array columns", ErrInvalidValue, p.field))
+		return
+	}
+	if rv := reflect.ValueOf(p.value); rv.Len() == 0 {
+		b.write("1 = 0")
+		return
+	}
+	b.write(ad.ArrayOverlap(p.field, b.nextParam(p.value)))
 }
 
 func (b *builder) writeMembership(p Predicate) {
