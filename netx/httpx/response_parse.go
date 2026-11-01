@@ -59,6 +59,8 @@ func RespondError(w http.ResponseWriter, r *http.Request, appErr errs.AppError) 
 		status = http.StatusBadRequest
 	case appErr.IsUnprocessable():
 		status = http.StatusUnprocessableEntity
+	case appErr.IsTooManyRequests():
+		status = http.StatusTooManyRequests
 	case appErr.IsUnauthorized():
 		status = http.StatusUnauthorized
 	case appErr.IsForbidden():

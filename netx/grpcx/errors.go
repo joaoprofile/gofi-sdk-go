@@ -28,6 +28,8 @@ func CodeOf(kind errs.ErrorKind) codes.Code {
 		return codes.InvalidArgument
 	case errs.KindUnprocessable:
 		return codes.FailedPrecondition
+	case errs.KindTooManyRequests:
+		return codes.ResourceExhausted
 	case errs.KindNotFound:
 		return codes.NotFound
 	case errs.KindConflict:

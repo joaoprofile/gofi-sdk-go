@@ -24,6 +24,9 @@ const (
 	// KindUnprocessable is a request that is well formed but that the service refuses on its
 	// merits (an external check rejected it): HTTP 422, unlike KindValidation (400, the shape is wrong).
 	KindUnprocessable ErrorKind = "UNPROCESSABLE"
+	// KindTooManyRequests is a request refused because the caller exceeded a rate or attempt limit:
+	// HTTP 429.
+	KindTooManyRequests ErrorKind = "TOO_MANY_REQUESTS"
 )
 
 type AppError struct {
@@ -102,6 +105,8 @@ func (e AppError) IsUnauthorized() bool { return e.Kind == KindUnauthorized }
 func (e AppError) IsForbidden() bool { return e.Kind == KindForbidden }
 
 func (e AppError) IsUnprocessable() bool { return e.Kind == KindUnprocessable }
+
+func (e AppError) IsTooManyRequests() bool { return e.Kind == KindTooManyRequests }
 
 func (e AppError) Exists() bool {
 	return e.Code != "" || e.Err != nil
@@ -195,6 +200,10 @@ func RegisterUnauthorized(code, message string) AppError {
 
 func RegisterUnprocessable(code, message string) AppError {
 	return register(AppError{Kind: KindUnprocessable, Code: code, Message: message})
+}
+
+func RegisterTooManyRequests(code, message string) AppError {
+	return register(AppError{Kind: KindTooManyRequests, Code: code, Message: message})
 }
 
 func GetErrorByCode(code string) *AppError {

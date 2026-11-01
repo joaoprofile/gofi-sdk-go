@@ -117,3 +117,14 @@ func TestUnprocessable_MapsToFailedPreconditionAndKeepsItsKindOverTheWire(t *tes
 	require.True(t, ok)
 	assert.Equal(t, errs.KindUnprocessable, back.Kind, "FailedPrecondition alone reads as a conflict; the ErrorInfo restores the kind")
 }
+
+func TestTooManyRequests_MapsToResourceExhaustedAndKeepsItsKindOverTheWire(t *testing.T) {
+	registered := errs.RegisterTooManyRequests("grpc-too-many", "slow down")
+	assert.Equal(t, codes.ResourceExhausted, CodeOf(errs.KindTooManyRequests))
+
+	st := Status(registered.New())
+	assert.Equal(t, codes.ResourceExhausted, status.Code(st))
+	back, ok := FromError(st)
+	require.True(t, ok)
+	assert.Equal(t, errs.KindTooManyRequests, back.Kind, "ResourceExhausted alone reads as an external failure; the ErrorInfo restores the kind")
+}

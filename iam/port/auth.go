@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/joaoprofile/gofi-sdk-go/iam/types"
 )
@@ -70,6 +71,13 @@ type SelectTenantInput struct {
 	// Ticket from AuthResult/IDPCallbackResult, bound to UserID and the login
 	// flow; required unless SecurityConfig.InsecureSkipTenantTicket is set.
 	Ticket string
+
+	// AuthTime, when set, is the original login time the new session counts its absolute lifetime
+	// from (SecurityConfig.SessionMaxLifetime): pass the AuthTime of the session being replaced when
+	// switching tenant, so a switch does not restart the clock. Zero starts it now. A time in the
+	// future is treated as now, so a caller can shorten a session this way, never lengthen it; a
+	// time already past the absolute lifetime fails with ErrSessionExpired.
+	AuthTime time.Time
 
 	// Audit and security context.
 	IPAddress string

@@ -513,3 +513,47 @@ func TestLocalAuth_EmitNilFallback(t *testing.T) {
 	_, err := auth.Authenticate(context.Background(), port.AuthInput{Email: "x", Password: "y"})
 	assert.ErrorIs(t, err, ErrInvalidCredentials)
 }
+
+func selectTenantWith(t *testing.T, authTime time.Time, maxLife time.Duration) (*types.Session, error) {
+	t.Helper()
+	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
+	tenant := &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}, Roles: []string{"viewer"}}}}
+	sess := newMemSession()
+	auth := NewLocalAuth(LocalAuthConfig{
+		User: user, Tenant: tenant, Token: &stubTokenPort{accessToken: "access-token"}, Session: sess,
+		Cfg: AuthConfig{
+			accessTokenTTL: 15 * time.Minute, refreshTokenTTL: 7 * 24 * time.Hour, sessionMaxLifetime: maxLife,
+			issuer: "test-issuer", ticketKey: ticketKey,
+		},
+	})
+	return auth.SelectTenant(context.Background(), port.SelectTenantInput{
+		UserID: "u1", Ticket: testTicket("u1"), TenantID: "t1", Module: "mod", AuthTime: authTime,
+	})
+}
+
+// A tenant switch keeps counting the absolute session lifetime from the original login.
+func TestLocalAuth_SelectTenant_CarriesTheOriginalAuthTime(t *testing.T) {
+	original := time.Now().Add(-28 * 24 * time.Hour)
+	s, err := selectTenantWith(t, original, 30*24*time.Hour)
+	require.NoError(t, err)
+	assert.WithinDuration(t, original, s.AuthTime, time.Second)
+	assert.WithinDuration(t, original.Add(30*24*time.Hour), s.ExpiresAt, time.Second, "two days left from the first login, not seven from the switch")
+}
+
+func TestLocalAuth_SelectTenant_WithoutAuthTimeStartsNow(t *testing.T) {
+	s, err := selectTenantWith(t, time.Time{}, 30*24*time.Hour)
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), s.AuthTime, 2*time.Second)
+}
+
+// A caller can only shorten a session by carrying an older login time, never lengthen it.
+func TestLocalAuth_SelectTenant_FutureAuthTimeIsClampedToNow(t *testing.T) {
+	s, err := selectTenantWith(t, time.Now().Add(48*time.Hour), 30*24*time.Hour)
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), s.AuthTime, 2*time.Second)
+}
+
+func TestLocalAuth_SelectTenant_AuthTimeBeyondTheAbsoluteLifetimeIsRefused(t *testing.T) {
+	_, err := selectTenantWith(t, time.Now().Add(-31*24*time.Hour), 30*24*time.Hour)
+	assert.ErrorIs(t, err, ErrSessionExpired)
+}

@@ -58,12 +58,19 @@ func (s sessionIssuer) selectTenant(ctx context.Context, provider string, input 
 	}
 
 	now := time.Now()
+	authTime := now
+	if !input.AuthTime.IsZero() && input.AuthTime.Before(now) {
+		authTime = input.AuthTime
+		if !s.cfg.sessionExpiry(now, authTime).After(now) {
+			return nil, ErrSessionExpired
+		}
+	}
 	seed := &types.Session{
 		UserID:       input.UserID,
 		TenantID:     input.TenantID,
 		Module:       input.Module,
 		AuthProvider: provider,
-		AuthTime:     now,
+		AuthTime:     authTime,
 		IPAddress:    input.IPAddress,
 		UserAgent:    input.UserAgent,
 		DeviceID:     input.DeviceID,

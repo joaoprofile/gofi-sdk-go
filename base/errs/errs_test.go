@@ -21,6 +21,7 @@ func TestErrorKind_StringValues(t *testing.T) {
 	assert.Equal(t, errs.ErrorKind("EXTERNAL_ERROR"), errs.KindExternalError)
 	assert.Equal(t, errs.ErrorKind("UNAUTHORIZED"), errs.KindUnauthorized)
 	assert.Equal(t, errs.ErrorKind("UNPROCESSABLE"), errs.KindUnprocessable)
+	assert.Equal(t, errs.ErrorKind("TOO_MANY_REQUESTS"), errs.KindTooManyRequests)
 }
 
 //  Register*
@@ -68,6 +69,12 @@ func TestRegisterUnprocessable_SetsKind(t *testing.T) {
 	assert.Equal(t, errs.KindUnprocessable, e.Kind)
 	assert.True(t, e.IsUnprocessable())
 	assert.False(t, e.IsValidation(), "a 422 is not the 400 of a malformed request")
+}
+
+func TestRegisterTooManyRequests_SetsKind(t *testing.T) {
+	e := errs.RegisterTooManyRequests("reg-too-many", "slow down")
+	assert.Equal(t, errs.KindTooManyRequests, e.Kind)
+	assert.True(t, e.IsTooManyRequests())
 }
 
 //  GetErrorByCode──
