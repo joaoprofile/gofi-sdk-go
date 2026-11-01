@@ -130,7 +130,7 @@ func TestRefresh_UserLookupErrorKeepsSession(t *testing.T) {
 func TestRefresh_LostTenantAccessIsRejected(t *testing.T) {
 	f := newSecurityFixture(AuthConfig{})
 	s := f.login(t)
-	f.tenant.accessErr = errors.New("removed from tenant")
+	f.tenant.accessErr = ErrTenantAccessDenied
 
 	_, err := f.auth.RefreshToken(context.Background(), s.RefreshToken)
 	assert.ErrorIs(t, err, ErrTenantAccessDenied)
@@ -230,4 +230,96 @@ func TestIDPService_SessionHasAuthTimeAndCappedExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, s.AuthTime.IsZero())
 	assert.WithinDuration(t, s.AuthTime.Add(time.Hour), s.ExpiresAt, time.Second)
+}
+
+var errStoreDown = errors.New("store down")
+
+// Regression: any failure reading the session store came back as ErrSessionNotFound, so an outage looked
+// like a session that no longer exists and callers dropped good sessions.
+func TestRefreshToken_StoreFailureIsNotSessionNotFound(t *testing.T) {
+	f := newSecurityFixture(AuthConfig{})
+	s := f.login(t)
+	f.sess.getErr = errStoreDown
+	_, err := f.auth.RefreshToken(context.Background(), s.RefreshToken)
+	assert.ErrorIs(t, err, errStoreDown)
+	assert.NotErrorIs(t, err, ErrSessionNotFound)
+}
+
+func TestRefreshToken_MissingSessionIsStillSessionNotFound(t *testing.T) {
+	f := newSecurityFixture(AuthConfig{})
+	s := f.login(t)
+	require.NoError(t, f.sess.Revoke(context.Background(), s.ID))
+	delete(f.sess.sessions, s.ID)
+	_, err := f.auth.RefreshToken(context.Background(), s.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+// Regression: any error of TenantPort.AssertAccess came back as ErrTenantAccessDenied, so a database
+// failure in the application looked like the user losing access to the tenant.
+func TestRefreshToken_TenantCheckFailureIsNotADenial(t *testing.T) {
+	f := newSecurityFixture(AuthConfig{})
+	s := f.login(t)
+	f.tenant.accessErr = errStoreDown
+	_, err := f.auth.RefreshToken(context.Background(), s.RefreshToken)
+	assert.ErrorIs(t, err, errStoreDown)
+	assert.NotErrorIs(t, err, ErrTenantAccessDenied)
+
+	f.tenant.accessErr = ErrTenantAccessDenied
+	_, err = f.auth.RefreshToken(context.Background(), s.RefreshToken)
+	assert.ErrorIs(t, err, ErrTenantAccessDenied, "a denial is still a denial")
+}
+
+func TestSelectTenant_TenantCheckFailureIsNotADenial(t *testing.T) {
+	f := newSecurityFixture(AuthConfig{})
+	f.tenant.accessErr = errStoreDown
+	_, err := f.auth.SelectTenant(context.Background(), port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1")})
+	assert.ErrorIs(t, err, errStoreDown)
+	assert.NotErrorIs(t, err, ErrTenantAccessDenied)
+
+	f.tenant.accessErr = ErrTenantAccessDenied
+	_, err = f.auth.SelectTenant(context.Background(), port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1")})
+	assert.ErrorIs(t, err, ErrTenantAccessDenied)
+}
+
+// A session opened by a tenant switch carries the original login time, so a LogoutAll that happened
+// after that login reaches it: the cut-off is compared with AuthTime on every validation.
+func TestSelectTenant_CarriedAuthTimeIsCoveredByAnEarlierLogoutAll(t *testing.T) {
+	store := &cutoffSession{memSession: newMemSession()}
+	auth := NewLocalAuth(LocalAuthConfig{
+		User: &stubUserPort{user: &types.User{ID: "u1", Active: true}}, Tenant: &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}}}},
+		Token: &stubTokenPort{accessToken: "at"}, Session: store,
+		Cfg: AuthConfig{accessTokenTTL: time.Minute, refreshTokenTTL: time.Hour, ticketKey: ticketKey},
+	})
+	ctx := context.Background()
+	first, err := auth.SelectTenant(ctx, port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1")})
+	require.NoError(t, err)
+	require.NoError(t, store.RevokeAllForUser(ctx, "u1"))
+
+	switched, err := auth.SelectTenant(ctx, port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1"), AuthTime: first.AuthTime})
+	require.NoError(t, err)
+	_, err = auth.RefreshToken(ctx, switched.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessionRevoked, "the switch must not escape a revocation of the login it came from")
+
+	fresh, err := auth.SelectTenant(ctx, port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1")})
+	require.NoError(t, err)
+	_, err = auth.RefreshToken(ctx, fresh.RefreshToken)
+	assert.NoError(t, err, "a new login after the revocation is valid")
+}
+
+func TestValidateToken_StoreFailureIsNotSessionNotFound(t *testing.T) {
+	sess := newMemSession()
+	tokenPort := &captureSessionIDTokenPort{accessToken: "at"}
+	auth := NewLocalAuth(LocalAuthConfig{
+		User: &stubUserPort{user: &types.User{ID: "u1", Active: true}}, Tenant: &stubTenantPort{tenants: []types.TenantAccess{{Tenant: types.Tenant{ID: "t1"}}}},
+		Token: tokenPort, Session: sess,
+		Cfg: AuthConfig{accessTokenTTL: time.Minute, refreshTokenTTL: time.Hour, ticketKey: ticketKey},
+	})
+	s, err := auth.SelectTenant(context.Background(), port.SelectTenantInput{UserID: "u1", TenantID: "t1", Ticket: testTicket("u1")})
+	require.NoError(t, err)
+	tokenPort.parseClaims = &types.Claims{UserID: "u1", TenantID: "t1", SessionID: s.ID, ExpiresAt: time.Now().Add(time.Minute)}
+
+	sess.getErr = errStoreDown
+	_, err = auth.ValidateToken(context.Background(), "at")
+	assert.ErrorIs(t, err, errStoreDown)
+	assert.NotErrorIs(t, err, ErrSessionNotFound)
 }

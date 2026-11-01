@@ -13,6 +13,8 @@ import (
 type memSession struct {
 	mu       sync.RWMutex
 	sessions map[string]*types.Session
+	// getErr makes Get fail as a store outage would.
+	getErr error
 }
 
 func newMemSession() *memSession {
@@ -29,6 +31,9 @@ func (m *memSession) Save(_ context.Context, s *types.Session) error {
 }
 
 func (m *memSession) Get(_ context.Context, id string) (*types.Session, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
 	m.mu.RLock()
 	s, ok := m.sessions[id]
 	m.mu.RUnlock()

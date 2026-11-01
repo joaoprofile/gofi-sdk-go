@@ -265,14 +265,14 @@ func (a *localAuth) refreshable(ctx context.Context, refreshToken string) (*type
 	}
 
 	existing, err := a.session.Get(ctx, sessionID)
-	if err != nil {
+	if err != nil || existing == nil {
 		a.emit(ctx, types.IAMEvent{
 			Type:      types.EventTokenRefreshFailed,
 			SessionID: sessionID,
 			Timestamp: time.Now(),
 			Error:     err,
 		})
-		return nil, ErrSessionNotFound
+		return nil, sessionLookupError(err)
 	}
 
 	// The sid is public (JWT claim): without the secret part nothing may change.
@@ -337,8 +337,8 @@ func (a *localAuth) ValidateToken(ctx context.Context, accessToken string) (*typ
 // checkSession verifies that the session behind claims is live and belongs to them.
 func (a *localAuth) checkSession(ctx context.Context, claims *types.Claims) error {
 	session, err := a.session.Get(ctx, claims.SessionID)
-	if err != nil {
-		return ErrSessionNotFound
+	if err != nil || session == nil {
+		return sessionLookupError(err)
 	}
 	// Defense in depth: a token must not ride on another user's or tenant's session.
 	if session.UserID != claims.UserID || session.TenantID != claims.TenantID {
@@ -376,6 +376,9 @@ func (a *localAuth) revalidate(ctx context.Context, s *types.Session) error {
 		return err
 	}
 	if err := a.tenant.AssertAccess(ctx, s.UserID, s.TenantID, s.Module); err != nil {
+		if !errors.Is(err, ErrTenantAccessDenied) {
+			return fmt.Errorf("iam: tenant access check: %w", err)
+		}
 		a.emit(ctx, types.IAMEvent{
 			Type:      types.EventTenantAccessDenied,
 			UserID:    s.UserID,
@@ -388,6 +391,15 @@ func (a *localAuth) revalidate(ctx context.Context, s *types.Session) error {
 		return ErrTenantAccessDenied
 	}
 	return nil
+}
+
+// sessionLookupError keeps "the session does not exist" apart from "the store could not be read": only
+// the first is ErrSessionNotFound, so callers do not drop a good session during an outage.
+func sessionLookupError(err error) error {
+	if err == nil || errors.Is(err, ErrSessionNotFound) {
+		return ErrSessionNotFound
+	}
+	return fmt.Errorf("iam: session store: %w", err)
 }
 
 // sessionAuthTime returns the original login time; sessions stored before

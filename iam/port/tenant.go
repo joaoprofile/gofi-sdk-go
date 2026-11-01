@@ -14,5 +14,10 @@ type TenantPort interface {
 	// AssertAccess validates whether the user may access the given tenant and module.
 	// Called in SelectTenant and by TenantMiddleware on every request.
 	// Token claims must never be the sole source of truth for access decisions.
+	//
+	// Deny with core.ErrTenantAccessDenied (or an error wrapping it). Any other error means the
+	// check itself failed (a database down): access is still refused, but SelectTenant and
+	// RefreshToken return that error instead of ErrTenantAccessDenied, so callers can tell an
+	// outage from a user losing access.
 	AssertAccess(ctx context.Context, userID, tenantID, module string) error
 }

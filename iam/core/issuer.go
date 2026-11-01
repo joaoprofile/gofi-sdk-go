@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +46,9 @@ func (s sessionIssuer) selectTenant(ctx context.Context, provider string, input 
 		return nil, err
 	}
 	if err := s.tenant.AssertAccess(ctx, input.UserID, input.TenantID, input.Module); err != nil {
+		if !errors.Is(err, ErrTenantAccessDenied) {
+			return nil, fmt.Errorf("iam: tenant access check: %w", err)
+		}
 		s.denied(ctx, provider, input, ErrTenantAccessDenied)
 		return nil, ErrTenantAccessDenied
 	}

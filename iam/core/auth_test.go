@@ -207,7 +207,7 @@ func TestLocalAuth_SelectTenant_PropagatesExtra(t *testing.T) {
 
 func TestLocalAuth_SelectTenant_AccessDenied(t *testing.T) {
 	user := &stubUserPort{user: &types.User{ID: "u1", Active: true}}
-	tenant := &stubTenantPort{accessErr: errors.New("denied")}
+	tenant := &stubTenantPort{accessErr: ErrTenantAccessDenied}
 	token := &stubTokenPort{}
 	auth, _ := buildLocalAuth(user, tenant, token)
 

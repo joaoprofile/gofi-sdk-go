@@ -180,7 +180,7 @@ func TestIDPService_SelectTenant_Success(t *testing.T) {
 
 func TestIDPService_SelectTenant_AccessDenied(t *testing.T) {
 	idp := &stubIDPAuthPort{name: "google"}
-	tenant := &stubTenantPort{accessErr: errors.New("no access")}
+	tenant := &stubTenantPort{accessErr: ErrTenantAccessDenied}
 	svc := buildIDPService(idp, &stubUserPort{}, tenant, &stubTokenPort{})
 
 	_, err := svc.SelectTenant(context.Background(), port.SelectTenantInput{
