@@ -258,7 +258,8 @@ func (ws *httpServer) routeWriteTimeout(route *Route) time.Duration {
 
 // crossOrigin wraps h with the CSRF check and, when the route has its own
 // CORS policy, with that policy, which replaces the global one (preflights
-// included) and alone sets the origins trusted by the CSRF check.
+// included) and alone sets the origins trusted by the CSRF check. A route
+// policy with AnyOrigin skips the CSRF check.
 func (ws *httpServer) crossOrigin(route *Route, path, pattern string, h http.Handler) http.Handler {
 	if route.corsConfig == nil {
 		if ws.csrf != nil {
@@ -271,7 +272,10 @@ func (ws *httpServer) crossOrigin(route *Route, path, pattern string, h http.Han
 	if path == "/" && pattern != "/" {
 		ws.preflights.add(pattern+"/", route.method, policy) // chi serves both
 	}
-	if ws.csrf != nil {
+	// A route open to any origin carries no credentials (CorsConfig.Validate forbids
+	// both), so a cross-site request has no ambient authority to abuse: it is the
+	// route's purpose (an embedded widget, a public API) and needs no CSRF check.
+	if ws.csrf != nil && !policy.anyOrigin {
 		h = crossOriginProtection(policy.trusted).Handler(h)
 	}
 	return routeCORS(policy)(h)

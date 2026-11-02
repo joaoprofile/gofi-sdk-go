@@ -16,6 +16,7 @@ func csrfServer(cfg *WSConfig) *httpServer {
 	ws.AddHandlers(&plainRouterHandler{routes: PublicRoutes("/",
 		POST("/pay").To(noContent),
 		POST("/partner").To(noContent).Cors(&CorsConfig{AllowedOrigins: []string{"https://partner.test"}}),
+		POST("/open").To(noContent).Cors(&CorsConfig{AllowedOrigins: []string{AnyOrigin}}),
 	)})
 	return ws
 }
@@ -49,6 +50,11 @@ func TestCrossOriginProtection(t *testing.T) {
 		{"route origin trusted on its route", "/partner", "https://partner.test", "cross-site", http.StatusNoContent},
 		{"route origin not trusted elsewhere", "/pay", "https://partner.test", "cross-site", http.StatusForbidden},
 		{"global origin not trusted on a route policy", "/partner", "https://app.example.com", "cross-site", http.StatusForbidden},
+		// A route open to any origin carries no credentials (Validate forbids it), so there is no
+		// ambient authority to protect: an embedded widget on any site must reach it.
+		{"any-origin route from any site", "/open", "https://tenant-shop.test", "cross-site", http.StatusNoContent},
+		{"any-origin route by Origin only", "/open", "https://tenant-shop.test", "", http.StatusNoContent},
+		{"any-origin route does not open the others", "/pay", "https://tenant-shop.test", "cross-site", http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		if got := csrfSend(ws, tc.path, tc.origin, tc.fetchSite); got != tc.want {

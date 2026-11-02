@@ -136,6 +136,8 @@ type WSConfig struct {
 	// route rejects cross-origin unsafe requests (http.CrossOriginProtection,
 	// by Sec-Fetch-Site/Origin) except from the origins its CORS policy
 	// allows; same-origin requests and clients sending neither header pass.
+	// A route whose own policy allows AnyOrigin (never with credentials) is
+	// not checked.
 	DisableCrossOriginProtection bool
 
 	// HSTS configures Strict-Transport-Security; it is only sent over TLS or
