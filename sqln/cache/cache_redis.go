@@ -85,7 +85,9 @@ func Close() error {
 }
 
 func redisOptions(c Config) *redis.UniversalOptions {
-	opts := &redis.UniversalOptions{Addrs: []string{c.URI}, Password: c.Password}
+	// Without ContextTimeoutEnabled go-redis drops the caller's deadline on the
+	// wire and waits for its own ReadTimeout instead.
+	opts := &redis.UniversalOptions{Addrs: []string{c.URI}, Password: c.Password, ContextTimeoutEnabled: true}
 	if c.TLS {
 		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
