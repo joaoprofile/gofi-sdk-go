@@ -35,6 +35,7 @@ type manager[T any] struct {
 	cacheScope    string          // mixed into the cache key; see WithCacheScope
 	err           error           // criteria build failure, returned by the execution methods
 	textIndexes   []*fts.Index    // full-text indexes searched; required before running
+	fromPrimary   bool            // read from the primary and skip the cache; see FromPrimary
 }
 
 //  Constructors
@@ -62,6 +63,16 @@ func FindFromCriteria[T any](ctx context.Context, q *criteria.Query) *manager[T]
 // Cached results are keyed by the connection's ID, so databases never share entries.
 func (q *manager[T]) WithConnection(conn *connection.Connection) *manager[T] {
 	q.conn = conn
+	return q
+}
+
+// FromPrimary reads from the primary instead of the replica, outside any
+// transaction. Use it to confirm a decision against fresh data — a replica
+// that lags can still show a row a committed write has already changed.
+// The result is never cached: the cache key is the same for the primary and the
+// replica, so a cached entry could be exactly the stale answer being checked.
+func (q *manager[T]) FromPrimary() *manager[T] {
+	q.fromPrimary = true
 	return q
 }
 
@@ -138,9 +149,12 @@ func (q *manager[T]) PagedList() (*Page[T], error) {
 	return q.ExecutePagedQuery(q.readDB(conn))
 }
 
-// readDB is the replica unless ctx carries a transaction (which the query
-// helpers pick up from ctx anyway).
+// readDB is the replica unless FromPrimary was asked or ctx carries a
+// transaction (which the query helpers pick up from ctx anyway).
 func (q *manager[T]) readDB(conn *connection.Connection) *sql.DB {
+	if q.fromPrimary {
+		return conn.DB()
+	}
 	if _, ok := connection.TxFor(q.ctx, conn.DB()); ok {
 		return conn.DB()
 	}

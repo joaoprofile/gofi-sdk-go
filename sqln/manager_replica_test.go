@@ -52,3 +52,29 @@ func TestReplica_ReadDBFallsBackToPrimary(t *testing.T) {
 	conn, _ := connection.Global()
 	assert.Same(t, db, conn.ReadDB())
 }
+
+func TestReplica_FromPrimaryReadsPrimary(t *testing.T) {
+	replicaConn(t)
+
+	list, err := Find[mappedItem](context.Background(), "SELECT id, name FROM t").FromPrimary().List()
+	require.NoError(t, err)
+	assert.Empty(t, list, "FromPrimary must bypass the replica (primary has no rows, replica has three)")
+
+	unique, err := Find[mappedItem](context.Background(), "SELECT id, name FROM t").FromPrimary().UniqueResult()
+	require.NoError(t, err)
+	assert.Nil(t, unique)
+}
+
+// FromPrimary exists to confirm a verdict against fresh data; a cache entry
+// shared with replica reads (same database ID) would defeat it.
+func TestReplica_FromPrimaryBypassesCache(t *testing.T) {
+	conn := replicaConn(t)
+	c := withMiniredisCache[mappedItem](t, "from-primary")
+
+	q := Find[mappedItem](context.Background(), "SELECT id, name FROM t").WithCache(c)
+	_, ok := q.cacheKey(conn.ReadDB(), "list")
+	assert.True(t, ok, "a replica read is cacheable")
+
+	_, ok = q.FromPrimary().cacheKey(conn.DB(), "list")
+	assert.False(t, ok, "a primary read must not touch the cache")
+}

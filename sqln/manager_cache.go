@@ -101,10 +101,11 @@ func (q *manager[T]) storeInCache(key string, data any) {
 
 // cacheKey scopes a cached result to the database, cache scope, result type,
 // kind, query, arguments and page. ok is false when the result must not be
-// cached: no cache, a transaction in ctx (uncommitted or session-bound rows),
-// or an argument without a deterministic encoding.
+// cached: no cache, a primary read (FromPrimary), a transaction in ctx
+// (uncommitted or session-bound rows), or an argument without a deterministic
+// encoding.
 func (q *manager[T]) cacheKey(instance *sql.DB, kind string) (key string, ok bool) {
-	if q.cache == nil || instance == nil {
+	if q.cache == nil || instance == nil || q.fromPrimary {
 		return "", false
 	}
 	if _, inTx := connection.TxFor(q.ctx, instance); inTx {
